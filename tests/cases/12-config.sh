@@ -12,6 +12,15 @@ chmod 644 "$TRUENAS_CREDENTIALS_FILE"
 check "refused" "err:credentials_permissions" "$(tn_resolve_key nas '' '')"
 teardown
 
+test_case "a credential assignment with no value yields no_key"
+setup
+printf 'TRUENAS_API_KEY=\n' >"$TRUENAS_CREDENTIALS_FILE"
+chmod 600 "$TRUENAS_CREDENTIALS_FILE"
+check "empty is not a key" "err:no_key" "$(tn_resolve_key nas '' '')"
+printf 'TRUENAS_API_KEY=   \n' >"$TRUENAS_CREDENTIALS_FILE"
+check "whitespace is not a key" "err:no_key" "$(tn_resolve_key nas '' '')"
+teardown
+
 test_case "a missing credentials file yields no_key"
 setup
 rm -f "$TRUENAS_CREDENTIALS_FILE"
