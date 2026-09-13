@@ -1,0 +1,3 @@
+# The work log is a symlink into a Syncthing folder, shared between machines.
+# It must never be committed; the validator would also reject the symlink.
+.agent

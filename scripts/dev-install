@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Copies the plugin into the Omarchy plugin directory and asks the running shell
+# to pick it up. A copy rather than a symlink because plugin validation rejects a
+# tree with symlinks in it.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ID=$(jq -r .id "$ROOT/manifest.json")
+DEST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$ID"
+
+mkdir -p "$DEST"
+# Every .js the QML imports has to be here: a missing one is not a build error,
+# it is a view that fails to load at runtime on someone else's machine.
+for path in manifest.json Model.js Search.js Links.js BarVariants.js BarWidget.qml Panel.qml \
+            Menu.qml Service.qml Views Ui bin share LICENSE README.md; do
+  [[ -e $ROOT/$path ]] || continue
+  rm -rf "$DEST/$path"
+  cp -r "$ROOT/$path" "$DEST/$path"
+done
+
+if command -v omarchy-plugin-validate >/dev/null 2>&1; then
+  omarchy-plugin-validate "$DEST"
+fi
+# The shell caches compiled QML per URL. A rescan re-reads the manifest and
+# reloads the widget, but a panel loaded through a Loader keeps running its old
+# compiled component, so a QML edit appears to do nothing. Restarting the shell
+# is the only reliable way to see a panel change.
+if [[ ${1:-} == --restart ]] && command -v omarchy-restart-shell >/dev/null 2>&1; then
+  omarchy-restart-shell >/dev/null 2>&1 || true
+  printf 'installed %s and restarted the shell\n' "$ID"
+  exit 0
+fi
+
+if command -v omarchy-shell >/dev/null 2>&1; then
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+fi
+printf 'installed %s to %s\n' "$ID" "$DEST"
+printf 'enable with: omarchy plugin enable %s\n' "$ID"
+printf 'QML edits to the panel need: ./scripts/dev-install --restart\n'
