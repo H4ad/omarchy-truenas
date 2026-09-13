@@ -255,9 +255,20 @@ The QML stubs must be loadable: `Model.js` starts with `.pragma library`; each
 QML file imports `QtQuick`/`Quickshell`. `scripts/dev-install` is the reference
 script with the file list and names changed.
 
-**Steps:** write the files → `omarchy plugin validate .` → expect no output and
-exit 0 → `./tests/run.sh` still green → commit `chore: scaffold plugin manifest
-and entry points`.
+**Steps:** write the files → validate a clean tree, because the dev repo's
+`.agent` symlink is itself a symlink and `omarchy plugin validate` refuses any
+symlink outside `.git`:
+
+```bash
+rm -rf /tmp/tn-validate && mkdir -p /tmp/tn-validate
+git archive HEAD | tar -x -C /tmp/tn-validate
+omarchy plugin validate /tmp/tn-validate    # no output, exit 0
+```
+
+(`git archive` also excludes untracked files, so the staged tree is exactly what
+ships. `scripts/dev-install` validates the installed copy at `$DEST`, which is
+the same idea.) → `./tests/run.sh` still green → commit `chore: scaffold plugin
+manifest and entry points`.
 
 ---
 
