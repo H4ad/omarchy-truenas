@@ -130,29 +130,35 @@ Changes from the reference:
    explicitly).
 5. Add `tn_dialect()`: cached from `meta.json`. Returns `rest-v2.0`.
 
+The helpers keep the reference signatures: `tn_resolve_key <id> <key_file>
+<key_cmd>` prints `ok:<key>` / `err:<reason>`. Add
+`source "$ROOT/bin/truenas-lib.sh"` at the top of this case file so it can call
+them directly; the reference tests normally go through the CLI, but these three
+behaviours are cheaper and more precise to assert at the function, and the CLI
+verbs that wrap them are tested in Task 7.
+
 **Step 1: Write the failing tests** — `tests/cases/12-config.sh`
 
 ```bash
 # shellcheck shell=bash
+source "$ROOT/bin/truenas-lib.sh"
+
 test_case "a key in the credentials file resolves"
 setup
-check "resolves" "ok:test-key" "$(tn_resolve_key)"
+check "resolves" "ok:test-key" "$(tn_resolve_key nas '' '')"
 
 test_case "a world-readable credentials file is refused"
 setup
 chmod 644 "$TRUENAS_CREDENTIALS_FILE"
-check "refused" "err:credentials_permissions" "$(tn_resolve_key)"
+check "refused" "err:credentials_permissions" "$(tn_resolve_key nas '' '')"
 
 test_case "apiKeyCommand wins and never touches a file"
 setup
 rm -f "$TRUENAS_CREDENTIALS_FILE"
-cat >"$TRUENAS_CONFIG_FILE" <<JSON
-{ "instances": [ { "id": "nas", "baseUrl": "https://nas.example",
-  "apiKeyCommand": "printf 'cmd-key\n'" } ] }
-JSON
-check "command key" "ok:cmd-key" "$(tn_resolve_key)"
+check "command key" "ok:cmd-key" "$(tn_resolve_key nas '' "printf 'cmd-key\n'")"
 
 test_case "insecureTLS controls -k"
+setup
 cat >"$TRUENAS_CONFIG_FILE" <<JSON
 { "insecureTLS": true, "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
 JSON
@@ -162,6 +168,9 @@ cat >"$TRUENAS_CONFIG_FILE" <<JSON
 JSON
 check "off" "" "$(tn_insecure_args)"
 ```
+
+`tn_insecure_args` reads `TN_CONFIG_FILE` itself (it is called before a config
+is loaded on some paths), and prints nothing for a missing or unparsable file.
 
 **Step 2: Run and watch it fail** — `./tests/run.sh` → `command not found`.
 
