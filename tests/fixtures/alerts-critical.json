@@ -1,0 +1,20 @@
+[
+  {
+    "uuid": "11111111-2222-3333-4444-555555555555",
+    "source": "ZFS",
+    "klass": "PoolStatus",
+    "args": { "pool": "storage", "status": "DEGRADED" },
+    "node": "Controller A",
+    "key": "PoolStatus:storage:DEGRADED",
+    "datetime": { "$date": 1787322480000 },
+    "last_occurrence": { "$date": 1787322600000 },
+    "dismissed": false,
+    "mail": null,
+    "text": "Pool storage state is DEGRADED: One or more devices is offline",
+    "id": "PoolStatus:storage:DEGRADED",
+    "level": "CRITICAL",
+    "formatted": "Pool storage state is DEGRADED",
+    "one_shot": false,
+    "dismissable": true
+  }
+]

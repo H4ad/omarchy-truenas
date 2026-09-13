@@ -1,0 +1,21 @@
+{
+  "version": "25.04.2",
+  "buildtime": { "$date": 1757200000000 },
+  "hostname": "nas",
+  "physmem": 68719476736,
+  "model": "Generic CPU @ 2.00GHz",
+  "cores": 16,
+  "physical_cores": 8,
+  "loadavg": [0.42, 0.55, 0.61],
+  "uptime": "42 days, 0:03:20",
+  "uptime_seconds": 3629000,
+  "system_serial": null,
+  "system_product": "Generic Server",
+  "system_product_version": "Not Specified",
+  "license": null,
+  "boottime": { "$date": 1753571000000 },
+  "datetime": { "$date": 1757200000000 },
+  "timezone": "UTC",
+  "system_manufacturer": "Generic Vendor",
+  "ecc_memory": true
+}

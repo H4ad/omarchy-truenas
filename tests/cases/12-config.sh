@@ -82,3 +82,20 @@ respond "/api/v2.0/system/info" 0 200 "$WORK/body"
 tn_http_request GET "https://nas.example" "/api/v2.0/system/info" 'abc"de\fg' 5 >/dev/null
 check "header intact" 'Authorization: Bearer abc"de\fg' "$(cat "$STUB_CURL_HEADER_LOG")"
 teardown
+
+test_case "tn_http_request turns insecureTLS into a curl -k"
+setup
+export STUB_INSECURE_LOG="$WORK/insecure.log"
+printf 'ok\n' >"$WORK/body"
+respond "/api/v2.0/system/info" 0 200 "$WORK/body"
+cat >"$TRUENAS_CONFIG_FILE" <<JSON
+{ "insecureTLS": true, "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+tn_http_request GET "https://nas.example" "/api/v2.0/system/info" test-key 5 >/dev/null
+check "curl was told to skip verification" 1 "$(grep -c '^k$' "$STUB_INSECURE_LOG")"
+cat >"$TRUENAS_CONFIG_FILE" <<JSON
+{ "insecureTLS": false, "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+tn_http_request GET "https://nas.example" "/api/v2.0/system/info" test-key 5 >/dev/null
+check "and only when the config asks" 1 "$(grep -c '^k$' "$STUB_INSECURE_LOG")"
+teardown

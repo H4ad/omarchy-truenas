@@ -17,6 +17,7 @@ setup() {
   export STUB_METHOD_LOG="$WORK/method.log"
   export STUB_PAYLOAD_LOG="$WORK/payload.log"
   unset STUB_CURL_HEADER_LOG # the one HTTP-quoting case opts in; others must not inherit it
+  unset STUB_INSECURE_LOG    # the -k case opts in the same way
   export PATH="$ROOT/tests/stubs:$PATH"
   : >"$STUB_MAP"; : >"$STUB_NOTIFY_LOG"; : >"$STUB_CURL_LOG"
   : >"$STUB_METHOD_LOG"; : >"$STUB_PAYLOAD_LOG"

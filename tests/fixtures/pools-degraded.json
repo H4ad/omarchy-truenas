@@ -1,0 +1,41 @@
+[
+  {
+    "id": 1,
+    "name": "storage",
+    "guid": "10000000000000000001",
+    "status": "DEGRADED",
+    "path": "/mnt/storage",
+    "scan": {
+      "function": "SCRUB",
+      "state": "FINISHED",
+      "start_time": { "$date": 1757000000000 },
+      "end_time": { "$date": 1757010000000 },
+      "percentage": 100.0,
+      "errors": 12,
+      "total_secs_left": null
+    },
+    "expand": null,
+    "healthy": false,
+    "warning": true,
+    "status_code": "DEGRADED",
+    "status_detail": "One or more devices is offline",
+    "size": 1000000000000,
+    "allocated": 710000000000,
+    "free": 290000000000,
+    "freeing": 0,
+    "fragmentation": "31",
+    "size_str": "1000 GiB",
+    "allocated_str": "710 GiB",
+    "free_str": "290 GiB",
+    "is_upgraded": true,
+    "topology": {
+      "data": [
+        {
+          "name": "mirror-0",
+          "type": "MIRROR",
+          "stats": { "read_errors": 3, "write_errors": 0, "checksum_errors": 9 }
+        }
+      ]
+    }
+  }
+]

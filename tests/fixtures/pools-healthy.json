@@ -1,0 +1,80 @@
+[
+  {
+    "id": 1,
+    "name": "storage",
+    "guid": "10000000000000000001",
+    "status": "ONLINE",
+    "path": "/mnt/storage",
+    "scan": {
+      "function": "SCRUB",
+      "state": "FINISHED",
+      "start_time": { "$date": 1757000000000 },
+      "end_time": { "$date": 1757010000000 },
+      "percentage": 100.0,
+      "errors": 0,
+      "total_secs_left": null
+    },
+    "expand": null,
+    "healthy": true,
+    "warning": false,
+    "status_code": "OK",
+    "status_detail": null,
+    "size": 1000000000000,
+    "allocated": 710000000000,
+    "free": 290000000000,
+    "freeing": 0,
+    "fragmentation": "31",
+    "size_str": "1000 GiB",
+    "allocated_str": "710 GiB",
+    "free_str": "290 GiB",
+    "is_upgraded": true,
+    "topology": {
+      "data": [
+        {
+          "name": "mirror-0",
+          "type": "MIRROR",
+          "stats": { "read_errors": 0, "write_errors": 0, "checksum_errors": 0 }
+        }
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "name": "boot-pool",
+    "guid": "10000000000000000002",
+    "status": "ONLINE",
+    "path": "/",
+    "scan": {
+      "function": "SCRUB",
+      "state": "FINISHED",
+      "start_time": { "$date": 1757000000000 },
+      "end_time": { "$date": 1757000600000 },
+      "percentage": 100.0,
+      "errors": 0,
+      "total_secs_left": null
+    },
+    "expand": null,
+    "healthy": true,
+    "warning": false,
+    "status_code": "OK",
+    "status_detail": null,
+    "size": 50000000000,
+    "allocated": 9500000000,
+    "free": 40500000000,
+    "freeing": 0,
+    "fragmentation": "12",
+    "size_str": "50 GiB",
+    "allocated_str": "9.5 GiB",
+    "free_str": "40.5 GiB",
+    "is_upgraded": true,
+    "topology": {
+      "data": [
+        {
+          "name": "sda3",
+          "type": "STRIPE",
+          "stats": { "read_errors": 0, "write_errors": 0, "checksum_errors": 0 }
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# Polls the one configured TrueNAS once: alerts, pools and system info, then
+# rewrites state.json. Safe to run by hand; it is the whole read path of the
+# plugin. `connection` describes the alert request, because alerts are the
+# thing the bar exists to report, and the other sections fail independently.
+set -uo pipefail
+
+TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=./truenas-lib.sh
+. "$TN_PLUGIN_DIR/bin/truenas-lib.sh"
+
+QUIET=0
+FORCE_META=0
+for arg in "$@"; do
+  case $arg in
+    --quiet)      QUIET=1 ;;
+    --force-meta) FORCE_META=1 ;; # the meta cadence lands in a later task
+    *)            tn_warn "unknown option: $arg" ;;
+  esac
+done
+
+config=$(tn_load_config)
+config_error=$(jq -r '.configError // ""' <<<"$config")
+poll_seconds=$(jq -r '.pollSeconds // 30' <<<"$config")
+timeout=$(jq -r '.timeoutSeconds // 8' <<<"$config")
+instance=$(jq -c '.instances[0] // empty' <<<"$config")
+
+now=$(tn_now)
+previous=$(tn_read_json "$TN_STATE_FILE" '{}')
+prev_failures=$(jq -r '.connection.consecutiveFailures // 0' <<<"$previous")
+prev_last_ok=$(jq -r '.connection.lastOkAt // ""' <<<"$previous")
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/truenas-poll.XXXXXX")
+# TN_BODY is its own mktemp under TMPDIR rather than one inside $WORK, so
+# removing the directory is not enough: a poll killed mid-request would leave
+# the last response body behind. Read with a default because the trap is
+# installed before the first request has set it and `set -u` is on.
+TN_BODY=""
+trap 'rm -rf "$WORK"; rm -f "${TN_BODY:-}"' EXIT
+
+warnings='[]'
+
+# The shape every failure path emits for the sections, so a failed request
+# contributes no rows and no fabricated zeroes.
+default_payload() {
+  printf '%s\n' '{"system":{"hostname":"","version":"","uptimeSeconds":0,"cores":0,"physmem":0,"loadavg":[]},"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[]}' >"$WORK/payload.json"
+}
+
+warn_section() {
+  warnings=$(jq -c --arg s "$1" --arg e "$2" --arg m "$3" \
+    '. + [{ section: $s, error: $e, message: $m }]' <<<"$warnings")
+}
+
+classify_message() {
+  local err=$1 rc=$2 msg=""
+  case $err in
+    timeout|unreachable) msg=$(tn_curl_rc_message "$rc") ;;
+    not_json)            msg="the response was not JSON" ;;
+    unauthenticated)     msg="the API key was rejected" ;;
+    forbidden)           msg="the API key lacks permission for that route" ;;
+    *)                   msg=$(tn_error_message) ;;
+  esac
+  [[ -n $msg ]] || msg=$err
+  printf '%s' "$msg"
+}
+
+# One endpoint into its own body file. On any failure the file is null and the
+# section is named in `warnings`; on success the validated body is copied,
+# because tn_http_get reuses the same TN_BODY path on every call.
+fetch() {
+  local section=$1 path=$2 out=$3 code rc
+  tn_http_get "$base" "$path" "$key" "$timeout"
+  code=$TN_CODE
+  rc=$TN_CURL_RC
+  S_ERR=$(tn_classify)
+  # An empty 200 from a route that is not really there is not success.
+  if [[ -z $S_ERR ]] && ! jq -e . "$TN_BODY" >/dev/null 2>&1; then
+    S_ERR=not_json
+  fi
+  if [[ -n $S_ERR ]]; then
+    S_MSG=$(classify_message "$S_ERR" "$rc")
+    printf 'null\n' >"$out"
+    warn_section "$section" "$S_ERR" "$S_MSG"
+  else
+    S_MSG=""
+    cp "$TN_BODY" "$out"
+  fi
+  S_CODE=$code
+  S_TIME=$TN_TIME_MS
+  rm -f "$TN_BODY"
+}
+
+error=""
+message=""
+code=0
+latency=0
+default_payload
+
+if [[ -n $config_error || -z $instance ]]; then
+  # No key to resolve and nothing to ask: the panel still needs a document.
+  error=${config_error:-unconfigured}
+else
+  id=$(jq -r '.id' <<<"$instance")
+  base=$(jq -r '.baseUrl' <<<"$instance")
+  key_file=$(jq -r '.apiKeyFile // ""' <<<"$instance")
+  key_cmd=$(jq -r '.apiKeyCommand // ""' <<<"$instance")
+
+  resolved=$(tn_resolve_key "$id" "$key_file" "$key_cmd")
+  if [[ $resolved != ok:* ]]; then
+    error=${resolved#err:}
+  else
+    key=${resolved#ok:}
+
+    fetch alert "/api/v2.0/alert/list" "$WORK/alerts.json"
+    # The alerts request is the connection: its code, latency and reason.
+    error=$S_ERR
+    message=$S_MSG
+    code=$S_CODE
+    latency=$S_TIME
+
+    fetch pool   "/api/v2.0/pool"        "$WORK/pools.json"
+    fetch system "/api/v2.0/system/info" "$WORK/system.json"
+
+    if ! jq -n -f "$TN_PLUGIN_DIR/share/normalize.jq" \
+           --slurpfile system "$WORK/system.json" \
+           --slurpfile alerts "$WORK/alerts.json" \
+           --slurpfile pools  "$WORK/pools.json" \
+           --arg now "$now" >"$WORK/payload.json" 2>/dev/null; then
+      default_payload
+      warn_section normalize not_json "could not normalize the response"
+    fi
+    unset key resolved
+  fi
+fi
+
+if [[ -z $error ]]; then
+  failures=0
+  last_ok=$now
+else
+  failures=$((prev_failures + 1))
+  last_ok=$prev_last_ok
+fi
+
+jq -n \
+  --slurpfile payload "$WORK/payload.json" \
+  --argjson warnings "$warnings" \
+  --arg now "$now" \
+  --argjson poll "${poll_seconds:-30}" \
+  --arg error "$error" --arg message "$message" \
+  --argjson code "${code:-0}" --argjson latency "${latency:-0}" \
+  --argjson failures "$failures" --arg lastOk "$last_ok" \
+  --arg dialect "$(tn_dialect)" '
+  ($payload[0]) as $p
+  | ($warnings // []) as $w
+  | {
+      schema: 1,
+      updatedAt: $now,
+      pollSeconds: $poll,
+      connection: {
+        ok: ($error == ""),
+        httpStatus: $code,
+        latencyMs: $latency,
+        error: (if $error == "" then null else $error end),
+        message: (if $message == "" then null else $message end),
+        consecutiveFailures: $failures,
+        lastOkAt: (if $lastOk == "" then null else $lastOk end),
+        version: (if ($p.system.version // "") == "" then null else $p.system.version end),
+        dialect: $dialect
+      },
+      system: $p.system,
+      counts: $p.counts,
+      alerts: $p.alerts,
+      pools: $p.pools,
+      warnings: $w
+    }' >"$WORK/state.json"
+
+tn_write_json "$TN_STATE_FILE" <"$WORK/state.json"
+((QUIET)) || cat "$TN_STATE_FILE"

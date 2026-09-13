@@ -60,6 +60,7 @@ while (($#)); do
       shift 2 ;;
     --max-time) shift 2 ;;
     -X) printf '%s ' "$2" >>"${STUB_METHOD_LOG:-/dev/null}"; shift 2 ;;
+    -k) printf 'k\n' >>"${STUB_INSECURE_LOG:-/dev/null}"; shift ;;
     -H) shift 2 ;;
     --data-binary) cat "${2#@}" >>"${STUB_PAYLOAD_LOG:-/dev/null}"; shift 2 ;;
     -sS|-fsS) shift ;;

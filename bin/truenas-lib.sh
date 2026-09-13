@@ -228,6 +228,11 @@ tn_http_request() {
   TN_BODY=$(mktemp "${TMPDIR:-/tmp}/truenas-body.XXXXXX")
   local args=(-sS --config - --max-time "$timeout" -X "$method"
               -o "$TN_BODY" -w '%{http_code} %{time_total}')
+  # tn_insecure_args is consulted here rather than by each caller, so no path
+  # can send a request without it and forget -k: the config decides once.
+  local insecure
+  insecure=$(tn_insecure_args)
+  [[ -n $insecure ]] && args+=("$insecure")
   if [[ -n $payload ]]; then
     args+=(-H "content-type: application/json" --data-binary "@$payload")
   fi
