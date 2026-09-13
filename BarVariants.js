@@ -21,8 +21,6 @@
 //                 are no pools to speak of.
 //   worstLevel    the severity word to tint the body with, e.g. "warning".
 //                 "" when everything is healthy or nothing is known.
-//   degraded      true when a pool or another state is degraded even though the
-//                 alert count is 0, so Default still speaks up.
 //
 // An unreachable or unconfigured NAS overrides every variant with one glyph and
 // no numbers: a value the plugin cannot vouch for is never printed as one.
@@ -35,20 +33,11 @@
 
 var VARIANTS = ["Default", "Icon", "Alerts", "Capacity", "Pool", "Full"];
 var DEFAULT_VARIANT = "Default";
-var SEVERITIES = ["critical", "error", "warning", "notice", "info"];
 var SEPARATOR = "·";
 
 // Modes that replace the whole variant with a glyph. They are the only place
 // this file says less than the caller passed, and it says less on purpose.
 var OVERRIDE_MODES = ["unconfigured", "offline"];
-
-function isVariant(name) {
-  var wanted = String(name == null ? "" : name).toLowerCase();
-  for (var i = 0; i < VARIANTS.length; i++) {
-    if (VARIANTS[i].toLowerCase() === wanted) return true;
-  }
-  return false;
-}
 
 // The pinned setting, case-normalized to the manifest spelling. An empty or
 // unknown setting falls back to the built-in Default ("the active alert count
@@ -131,15 +120,12 @@ function fullSegments(view) {
   return alerts.concat([segment(SEPARATOR, "")], capacity);
 }
 
-// "Anything is firing" is the alert count; the mode and the degraded flag let a
-// caller that already knows say so even before a count arrives. A degraded
-// state with no alerts still has something to say, so it falls through to the
-// capacity, tinted by the worst level.
+// "Anything is firing" is a positive alert count, or the firing mode the
+// poller reported. A degraded state with no alerts is not firing, so it falls
+// through to the capacity, tinted by the worst level.
 function defaultSegments(view) {
   var firing = countOf(view.alertCount) > 0
-    || String(view.mode || "") === "firing"
-    || String(view.mode || "") === "degraded"
-    || view.degraded === true;
+    || String(view.mode || "") === "firing";
   if (firing) {
     var alerts = alertSegments(view);
     if (alerts.length > 0) return alerts;

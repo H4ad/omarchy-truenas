@@ -161,6 +161,8 @@ check("an alert count carries the bar", "G 5",
   render("Default", view({ mode: "firing", alertCount: 5, capacityText: "71%", worstLevel: "critical" })));
 check("the count takes the worst level", ["", "critical"],
   severities("Default", view({ mode: "firing", alertCount: 5, worstLevel: "critical" })));
+check("a firing mode prints its count", "G 3",
+  render("Default", view({ mode: "firing", alertCount: 3, capacityText: "71%", worstLevel: "warning" })));
 check("a degraded mode shows the alerts too", "G 3",
   render("Default", view({ mode: "degraded", alertCount: 3, capacityText: "71%", worstLevel: "warning" })));
 
@@ -169,6 +171,10 @@ check("the fullest pool's capacity", "G 71%",
   render("Default", view({ mode: "quiet", capacityText: "71%", worstLevel: "" })));
 check("a degraded pool with no alerts still says capacity", "G 71%",
   render("Default", view({ mode: "quiet", degraded: true, capacityText: "71%", worstLevel: "warning" })));
+check("a degraded mode with no alerts says capacity", "G 71%",
+  render("Default", view({ mode: "degraded", alertCount: 0, capacityText: "71%", worstLevel: "warning" })));
+check("a degraded mode with no alerts prints no alert zero", "G",
+  render("Default", view({ mode: "degraded", alertCount: 0, capacityText: "" })));
 check("no capacity and no alerts is the glyph alone", "G",
   render("Default", view({ mode: "quiet" })));
 
