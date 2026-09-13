@@ -252,8 +252,10 @@ this and the stub tests it.
 ```
 
 The QML stubs must be loadable: `Model.js` starts with `.pragma library`; each
-QML file imports `QtQuick`/`Quickshell`. `scripts/dev-install` is the reference
-script with the file list and names changed.
+QML file imports `QtQuick`/`Quickshell`. `scripts/dev-install` copies every
+top-level entry except a deny-list (`.git .agent docs tests scripts preview.png
+.gitignore`), wipes `$DEST` first so a deleted file cannot linger, guards `jq`,
+and only claims a restart when the restart succeeded.
 
 **Steps:** write the files → validate a clean tree, because the dev repo's
 `.agent` symlink is itself a symlink and `omarchy plugin validate` refuses any
