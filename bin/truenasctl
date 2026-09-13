@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+# Terminal side of the plugin. Everything the panel can do to configuration,
+# plus the diagnostics the panel only summarizes. Single instance by design;
+# config.json keeps an instances array so a second NAS is a config change
+# rather than a second parser.
+set -uo pipefail
+
+TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=./truenas-lib.sh
+. "$TN_PLUGIN_DIR/bin/truenas-lib.sh"
+
+# The env overrides are read at call time on every path, so the tests that point
+# TRUENAS_CONFIG_FILE and TRUENAS_CREDENTIALS_FILE at a temp dir are honoured
+# without the library having to know about the harness.
+config_file() { printf '%s' "${TRUENAS_CONFIG_FILE:-$TN_CONFIG_FILE}"; }
+creds_file()  { printf '%s' "${TRUENAS_CREDENTIALS_FILE:-$TN_CREDENTIALS_FILE}"; }
+
+usage() {
+  cat <<'TXT'
+truenasctl <command>
+
+  login <url> [--insecure]   read the API key on stdin, write config and credentials
+  logout                     remove the stored key
+  test [-v]                  diagnose the connection, step by step
+  status                     what the bar is currently showing
+  alerts                     active alerts, one per line
+  pools                      each pool and its capacity
+  poll [--quiet]             run one poll now
+  config list                configuration as JSON, never the key value
+  config set <key> <value>   write one scalar setting
+  config set-key             read a new key on stdin and replace the stored one
+  open [health|pools|alerts] open the NAS UI in the browser
+  purge                      delete config, credentials and state
+
+The API key is read on stdin, stored in the credentials file at mode 600, and
+never passed as a command-line argument or printed.
+TXT
+}
+
+config_usage() {
+  cat <<'TXT'
+truenasctl config <command>
+
+  list              configuration as JSON, without the key
+  set <key> <value> insecureTLS, pollSeconds, timeoutSeconds or notify.<field>
+  set-key           read the key on stdin, store it at mode 600
+TXT
+}
+
+require_jq() { tn_have jq || { tn_warn "jq is required"; exit 1; }; }
+
+# The config with the defaults a fresh install starts from. `insecureTLS` is
+# written explicitly so `config list` can read a boolean rather than a missing
+# field, and notify is left empty because tn_load_config supplies its defaults.
+config_seed() {
+  printf '%s' '{"schema":1,"pollSeconds":30,"timeoutSeconds":8,"insecureTLS":false,"instances":[],"notify":{}}'
+}
+
+# A config that no longer parses is a file to fix, not one to replace: falling
+# back to the seed here would quietly drop the configured instance.
+config_read() {
+  local file text
+  file=$(config_file)
+  if [[ -s $file ]]; then
+    text=$(jq -ce 'if type == "object" then . else empty end' "$file" 2>/dev/null)
+    [[ -n $text ]] || { tn_warn "$file is not a JSON object, fix it before editing it here"; return 1; }
+    printf '%s' "$text"
+    return 0
+  fi
+  config_seed
+}
+
+write_config() { tn_write_json "$(config_file)"; }
+
+# Rewrites the credentials file with one bare TRUENAS_API_KEY line, atomically
+# and at mode 600. tn_write_atomic owns the temp file, the 600, the 700 on a
+# directory it creates, and the move.
+write_key() {
+  local key=$1
+  printf 'TRUENAS_API_KEY=%s\n' "$key" | tn_write_atomic "$(creds_file)"
+}
+
+# Whether a key resolves, without keeping or printing it. Bare and per-instance
+# lookup both live in tn_resolve_key; this only asks whether it answered ok.
+key_is_set() {
+  local resolved
+  resolved=$(tn_resolve_key nas "" "")
+  [[ $resolved == ok:* ]]
+}
+
+# The url with trailing slashes removed, because every caller concatenates a
+# path onto it. Weak on purpose: an http or https url with a host, no probe,
+# since a url that is down today is still the url the user meant.
+normalize_url() {
+  local url=$1 rest host
+  case $url in
+    http://*|https://*) ;;
+    *) tn_warn "url must start with http:// or https://"; return 1 ;;
+  esac
+  [[ $url != *[[:space:]]* ]] || { tn_warn "url contains whitespace"; return 1; }
+  rest=${url#*://}
+  host=${rest%%/*}; host=${host%%\?*}; host=${host%%#*}
+  [[ -n $host ]] || { tn_warn "url has no host: $url"; return 1; }
+  [[ $host != *[!A-Za-z0-9._~%:@\[\]-]* ]] || { tn_warn "url has no usable host: $url"; return 1; }
+  while [[ $url == */ ]]; do url=${url%/}; done
+  printf '%s' "$url"
+}
+
+# Reads one line of the key from stdin, hidden when it is a terminal. The key is
+# read here and nowhere else, and never echoed.
+read_key_stdin() {
+  local key
+  if [[ -t 0 ]]; then
+    printf 'TrueNAS API key (input hidden): ' >&2
+    IFS= read -rs key || true
+    printf '\n' >&2
+  else
+    IFS= read -r key || true
+  fi
+  printf '%s' "${key%$'\r'}"
+}
+
+# ------------------------------------------------------------------- verbs
+
+cmd_login() {
+  local url=${1:-} insecure=0 insecure_json=false key text
+  shift || true
+  while (($#)); do
+    case $1 in
+      --insecure) insecure=1; shift ;;
+      *) tn_warn "unknown option $1"; return 1 ;;
+    esac
+  done
+  [[ -n $url ]] || { usage; return 1; }
+  url=$(normalize_url "$url") || return 1
+  ((insecure)) && insecure_json=true
+
+  key=$(read_key_stdin)
+  [[ -n ${key//[[:space:]]/} ]] || { tn_warn "no key given on stdin"; return 1; }
+  if ! write_key "$key"; then
+    unset key
+    tn_warn "could not write $(creds_file)"
+    return 1
+  fi
+  unset key
+
+  text=$(config_read) || return 1
+  if ! text=$(jq --arg url "$url" --argjson insecure "$insecure_json" '
+        .schema = (.schema // 1)
+        | .insecureTLS = (if $insecure then true else (.insecureTLS // false) end)
+        | .instances = [ { id: "nas", label: "NAS", baseUrl: $url } ]
+      ' <<<"$text"); then
+    tn_warn "could not update $(config_file)"
+    return 1
+  fi
+  printf '%s' "$text" | write_config || return 1
+  printf 'logged in to %s\n' "$url"
+}
+
+cmd_logout() {
+  local file
+  file=$(creds_file)
+  if [[ -e $file ]]; then
+    rm -f "$file" || { tn_warn "could not remove $file"; return 1; }
+    printf 'credentials removed\n'
+  else
+    printf 'no credentials to remove\n'
+  fi
+}
+
+step() { printf '  %-10s %s\n' "$1" "$2"; }
+
+cmd_test() {
+  local verbose=0
+  while (($#)); do
+    case $1 in
+      -v|--verbose) verbose=1; shift ;;
+      *) tn_warn "unknown option $1"; return 1 ;;
+    esac
+  done
+
+  local config err instance base timeout dialect has_key=0 key="" resolved
+  config=$(tn_load_config)
+  err=$(jq -r '.configError // ""' <<<"$config")
+  [[ -z $err ]] || { tn_warn "$err"; return 1; }
+  instance=$(jq -c '.instances[0] // empty' <<<"$config")
+  [[ -n $instance ]] || { tn_warn "no instance configured"; return 1; }
+  base=$(jq -r '.baseUrl' <<<"$instance")
+  timeout=$(jq -r '.timeoutSeconds' <<<"$config")
+  dialect=$(tn_dialect)
+
+  printf '%s (%s)\n' "$base" "$dialect"
+
+  resolved=$(tn_resolve_key nas "" "")
+  if [[ $resolved == ok:* ]]; then key=${resolved#ok:}; has_key=1; fi
+  unset resolved
+
+  tn_http_get "$base" "/api/v2.0/system/info" "$key" "$timeout"
+  local rc=$TN_CURL_RC code=$TN_CODE class body=$TN_BODY reason=""
+  class=$(tn_classify)
+
+  # TLS comes first: curl fails before the request is sent, so there is no
+  # status code and the generic `unreachable` would bury the one fix that works.
+  if ((rc == 60 || rc == 77)); then
+    reason='the certificate is self-signed; set "insecureTLS": true in '"$(config_file)"', or trust the TrueNAS CA on this machine'
+  elif ((rc == 35)); then
+    reason="TLS handshake failed: $(tn_curl_rc_message "$rc")"
+  elif ((rc == 28)); then
+    reason="timed out after ${timeout}s"
+  elif ((rc != 0)); then
+    reason="unreachable: $(tn_curl_rc_message "$rc")"
+  elif [[ $class == not_json ]]; then
+    reason="not JSON: ${base} answered but not with the TrueNAS API"
+  elif [[ $class == unauthenticated && $has_key == 1 ]]; then
+    reason="key rejected (401): the API key is not accepted"
+  elif [[ $class == unauthenticated ]]; then
+    reason="no API key is set; run: truenasctl login <url> with the key on stdin"
+  elif [[ $class == forbidden ]]; then
+    reason="forbidden (403): the key lacks permission on this route"
+  elif [[ $class == not_found ]]; then
+    reason="not found (404): ${base} is not the TrueNAS API root"
+  elif [[ $class == server_error ]]; then
+    reason="server error ($code): $(tn_error_message)"
+  elif [[ -n $class ]]; then
+    reason="unexpected ${class}: $(tn_error_message)"
+  elif [[ ! -s $body ]]; then
+    reason="the API answered $code with an empty body; check the base URL"
+  fi
+
+  if [[ -n $reason ]]; then
+    step "reachable" "no"
+    tn_warn "$reason"
+    ((verbose)) && step "detail" "curl rc ${rc}, http ${code}, ${TN_TIME_MS}ms"
+    rm -f "$body"; unset key
+    return 1
+  fi
+
+  step "reachable" "yes"
+  step "version" "$(jq -r '.version // "?"' "$body") ($(jq -r '.hostname // "?"' "$body"))"
+  step "key" "$( ((has_key)) && printf 'set' || printf 'none' )"
+  ((verbose)) && step "detail" "curl rc ${rc}, http ${code}, ${TN_TIME_MS}ms, dialect ${dialect}"
+  rm -f "$body"; unset key
+  return 0
+}
+
+cmd_status() {
+  local file updated poll_s then_epoch now_epoch age stale=""
+  file="$TN_STATE_FILE"
+  if [[ ! -s $file ]]; then
+    printf 'no state yet; run: truenasctl poll\n'
+    return 1
+  fi
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  updated=$(jq -r '.updatedAt // ""' "$file")
+  poll_s=$(jq -r '.pollSeconds // 30' "$file")
+  if [[ -n $updated ]] && then_epoch=$(date -u -d "$updated" +%s 2>/dev/null); then
+    now_epoch=$(date -u +%s)
+    age=$((now_epoch - then_epoch))
+    (( age > poll_s * 2 )) && stale=" (stale, ${age}s old)"
+  fi
+
+  jq -r --arg stale "$stale" '
+    def human:
+      (. | floor) as $d
+      | ($d / 86400 | floor) as $days
+      | (($d % 86400) / 3600 | floor) as $hours
+      | (($d % 3600) / 60 | floor) as $mins
+      | if $days > 0 then "\($days)d \($hours)h \($mins)m"
+        else "\($hours)h \($mins)m" end;
+    def prank: {"ONLINE":0,"DEGRADED":1,"OFFLINE":2,"UNAVAIL":3,"FAULTED":4,"REMOVED":5}[.] // 9;
+    (.counts // {}) as $c
+    | "updated: \(.updatedAt // "never")\($stale)",
+      "connection: " + (if (.connection.ok == true) then "ok" else "down" end)
+        + (if (.connection.error // "") != "" then " (\(.connection.error): \(.connection.message // ""))" else "" end),
+      "dialect: \(.connection.dialect // "unknown")",
+      "version: \(.connection.version // .system.version // "unknown")",
+      "uptime: " + (if (.system.uptimeSeconds // null) == null then "unknown" else (.system.uptimeSeconds | human) end),
+      "pools: \(.pools | length) (worst \(.pools | map(.status) | sort_by(prank) | last // "none"))",
+      "alerts: \($c.total // 0) active (critical \($c.critical // 0), error \($c.error // 0), warning \($c.warning // 0), notice \($c.notice // 0), info \($c.info // 0), dismissed \($c.dismissed // 0))"
+  ' "$file"
+}
+
+cmd_alerts() {
+  local file rows
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  rows=$(jq -r '.alerts[]? | select(.dismissed != true)
+    | "\(.level | ascii_upcase)  \(.text // .formatted // "")"' "$file")
+  if [[ -z $rows ]]; then printf 'no active alerts\n'; else printf '%s\n' "$rows"; fi
+}
+
+cmd_pools() {
+  local file
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  jq -r '.pools[]? | "\(.name)  \(.status)  " +
+    (if .usedPct == null then "used unknown" else "\(.usedPct)% used" end)' "$file"
+}
+
+cmd_poll() { exec "$TN_PLUGIN_DIR/bin/truenas-poll" "$@"; }
+
+cmd_open() {
+  local what=${1:-} base path
+  base=$(tn_load_config | jq -r '.instances[0].baseUrl // ""')
+  [[ -n $base ]] || { tn_warn "no base URL configured; run truenasctl login"; return 1; }
+  case $what in
+    ""|dashboard)      path=/ui/dashboard ;;
+    health|system)     path=/ui/system ;;
+    pools|storage)     path=/ui/storage ;;
+    alerts)            path=/ui/alerts ;;
+    *) tn_warn "unknown page $what, expected health, pools or alerts"; return 1 ;;
+  esac
+  xdg-open "$base$path" >/dev/null 2>&1 &
+}
+
+cmd_purge() {
+  printf 'This deletes %s, %s and %s.\n' "$(config_file)" "$(creds_file)" "$TN_STATE_HOME"
+  printf 'Type yes to continue: '
+  local answer
+  IFS= read -r answer
+  [[ $answer == yes ]] || { printf 'left alone\n'; return 1; }
+  rm -f "$(config_file)" "$(creds_file)"
+  rm -rf "$TN_STATE_HOME"
+  printf 'removed\n'
+}
+
+# -------------------------------------------------------------- config CRUD
+# Bash is the only writer of config.json, so the panel's configuration view and
+# this CLI cannot disagree about the atomic write or the validation.
+
+# JSON, because the panel parses this. Whether a key is set, never what it is.
+cmd_config_list() {
+  local text key_set=false
+  text=$(config_read) || return 1
+  key_is_set && key_set=true
+  jq --argjson keySet "$key_set" '
+    (.instances[0] // null) as $i
+    | {
+        schema: (.schema // 1),
+        instance: (if $i == null then null
+                   else { id: ($i.id // "nas"), label: ($i.label // "NAS"), baseUrl: ($i.baseUrl // "") } end),
+        baseUrl: ($i.baseUrl // null),
+        insecureTLS: (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
+        pollSeconds: (.pollSeconds // 30),
+        timeoutSeconds: (.timeoutSeconds // 8),
+        notify: (.notify // {}),
+        keySet: $keySet
+      }
+  ' <<<"$text"
+}
+
+cmd_config_set() {
+  (($# == 2)) || { tn_warn "usage: truenasctl config set <key> <value>"; return 1; }
+  local key=$1 value=$2 text jv name
+  text=$(config_read) || return 1
+  case $key in
+    insecureTLS)
+      case $value in
+        true|false) ;;
+        *) tn_warn "insecureTLS takes true or false"; return 1 ;;
+      esac
+      text=$(jq --argjson v "$value" '.insecureTLS = $v' <<<"$text") ;;
+    pollSeconds)
+      [[ $value =~ ^[0-9]+$ ]] && ((value >= 15)) || {
+        tn_warn "pollSeconds wants a whole number of at least 15"; return 1; }
+      text=$(jq --argjson v "$value" '.pollSeconds = $v' <<<"$text") ;;
+    timeoutSeconds)
+      [[ $value =~ ^[0-9]+$ ]] && ((value >= 2)) || {
+        tn_warn "timeoutSeconds wants a whole number of at least 2"; return 1; }
+      text=$(jq --argjson v "$value" '.timeoutSeconds = $v' <<<"$text") ;;
+    notify.*)
+      name=${key#notify.}
+      [[ -n $name ]] || { tn_warn "notify key is empty"; return 1; }
+      case $value in
+        true|false)   jv=$value ;;
+        ''|*[!0-9]*)  jv=$(jq -n --arg s "$value" '$s') ;;
+        *)            jv=$value ;;
+      esac
+      text=$(jq --arg n "$name" --argjson v "$jv" \
+        '.notify = ((.notify // {}) | .[$n] = $v)' <<<"$text") ;;
+    *) tn_warn "unknown setting $key (try insecureTLS, pollSeconds, timeoutSeconds, notify.<field>)"; return 1 ;;
+  esac
+  printf '%s' "$text" | write_config || return 1
+  printf '%s is now %s\n' "$key" "$value"
+}
+
+cmd_config_set_key() {
+  # The key is read from stdin and nowhere else: in argv it would be visible in
+  # ps to every process of this user, so a positional key is refused outright.
+  (($# == 0)) || { tn_warn "the key is read on stdin, never from an argument"; return 1; }
+  local key
+  key=$(read_key_stdin)
+  [[ -n ${key//[[:space:]]/} ]] || { tn_warn "no key on stdin"; return 1; }
+  if ! write_key "$key"; then
+    unset key
+    tn_warn "could not write $(creds_file)"
+    return 1
+  fi
+  unset key
+  printf 'key set\n'
+}
+
+cmd_config() {
+  local sub=${1:-}
+  shift || true
+  case $sub in
+    list)    cmd_config_list ;;
+    set)     cmd_config_set "$@" ;;
+    set-key) cmd_config_set_key "$@" ;;
+    ""|-h|--help|help) config_usage ;;
+    *) tn_warn "unknown config command $sub"; config_usage; return 1 ;;
+  esac
+}
+
+require_jq
+case ${1:-} in
+  login)   shift; cmd_login "$@" ;;
+  logout)  cmd_logout ;;
+  test)    shift; cmd_test "$@" ;;
+  status)  cmd_status ;;
+  alerts)  cmd_alerts ;;
+  pools)   cmd_pools ;;
+  poll)    shift; cmd_poll "$@" ;;
+  config)  shift; cmd_config "$@" ;;
+  open)    shift; cmd_open "$@" ;;
+  purge)   cmd_purge ;;
+  ""|-h|--help|help) usage ;;
+  *) tn_warn "unknown command $1"; usage; exit 1 ;;
+esac
