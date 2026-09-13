@@ -1,8 +1,10 @@
 # shellcheck shell=bash
 # Task 4: the poll reads alerts, system and pools into state.json.
 
-# Every poll reads all three endpoints. Most cases vary one of them, so the
-# other two are canned here rather than repeated in each case.
+# alert/list and pool are read every poll; system/info is slow-moving and is
+# cached after the first poll (Task 6, tests/cases/13-meta.sh). Every case here
+# starts from an empty state dir, so the first poll still fetches all three. The
+# other endpoints are canned here rather than repeated in each case.
 all_healthy() {
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
   respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"

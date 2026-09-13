@@ -15,7 +15,7 @@ FORCE_META=0
 for arg in "$@"; do
   case $arg in
     --quiet)      QUIET=1 ;;
-    --force-meta) FORCE_META=1 ;; # the meta cadence lands in a later task
+    --force-meta) FORCE_META=1 ;;
     *)            tn_warn "unknown option: $arg" ;;
   esac
 done
@@ -27,6 +27,9 @@ timeout=$(jq -r '.timeoutSeconds // 8' <<<"$config")
 notify_json=$(jq -c '.notify // {}' <<<"$config")
 instance=$(jq -c '.instances[0] // empty' <<<"$config")
 STICKY_CRITICAL=$(jq -r 'if .stickyCritical == null then false else .stickyCritical end' <<<"$notify_json")
+# /system/info changes on the scale of a TrueNAS update, not a poll, so it has
+# its own slower cadence. 0 means every poll; the default is five minutes.
+META_MAX_AGE=$(jq -r '.metaMaxAgeSeconds // 300' <<<"$notify_json")
 
 # The Nerd Font glyphs the bar and the toasts share. Critical is the warning
 # triangle, not a red circle, so a pool status and an alert read the same way.
@@ -80,6 +83,23 @@ glyph_for() {
 now=$(tn_now)
 previous=$(tn_read_json "$TN_STATE_FILE" '{}')
 seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
+meta=$(tn_read_json "$TN_META_FILE" '{}')
+
+# A cache entry is reusable only when it names a fetch time and carries data.
+# A missing, empty, or unparsable meta.json reads as `{}` here and is always
+# stale, so the system is fetched rather than silently reported as null.
+# --force-meta short-circuits the age check on top of a normal poll.
+meta_is_stale() {
+  ((FORCE_META)) && return 0
+  jq -e '.system.data != null' <<<"$meta" >/dev/null 2>&1 || return 0
+  local fetched then_epoch now_epoch
+  fetched=$(jq -r '.system.fetchedAt // ""' <<<"$meta")
+  [[ -n $fetched ]] || return 0
+  then_epoch=$(date -u -d "$fetched" +%s 2>/dev/null) || return 0
+  now_epoch=$(date -u +%s)
+  (( now_epoch - then_epoch >= META_MAX_AGE ))
+}
+
 prev_failures=$(jq -r '.connection.consecutiveFailures // 0' <<<"$previous")
 prev_last_ok=$(jq -r '.connection.lastOkAt // ""' <<<"$previous")
 prev_outage=$(jq -r '.connection.outageNotified // false' <<<"$previous")
@@ -161,6 +181,8 @@ code=0
 latency=0
 attempted=0
 normalize_ok=1
+system_fetched=0
+system_ok=0
 default_payload
 
 if [[ -n $config_error || -z $instance ]]; then
@@ -190,7 +212,23 @@ else
     # A failed pool call is named in `warnings`, which `pools_ok` reads below,
     # so it cannot read as every pool having gone or come back.
 
-    fetch system "/api/v2.0/system/info" "$WORK/system.json"
+    # /system/info is slow-moving and rides the meta cache. On reuse the cached
+    # normalized object is mapped back to the raw shape normalize.jq reads, so
+    # exactly one normalizer still owns the shape. A forced or lapsed fetch goes
+    # through `fetch`, which on failure names the section and writes null.
+    if meta_is_stale; then
+      fetch system "/api/v2.0/system/info" "$WORK/system.json"
+      system_fetched=1
+      [[ -z $S_ERR ]] && system_ok=1
+    else
+      jq -c -n --argjson s "$(jq -c '.system.data // null' <<<"$meta")" '
+        { hostname:       ($s.hostname // ""),
+          version:        ($s.version // ""),
+          uptime_seconds: ($s.uptimeSeconds // 0),
+          cores:          ($s.cores // 0),
+          physmem:        ($s.physmem // 0),
+          loadavg:        ($s.loadavg // []) }' >"$WORK/system.json"
+    fi
 
     if ! jq -n -f "$TN_PLUGIN_DIR/share/normalize.jq" \
            --slurpfile system "$WORK/system.json" \
@@ -391,6 +429,19 @@ fi
 # create) it, which is what lets a recovery replay nothing.
 if [[ -z $error ]]; then
   printf '%s\n' "$seen" | tn_write_json "$TN_SEEN_FILE"
+fi
+
+# The meta cache advances only when this poll actually refetched the system and
+# normalized it. A reuse writes nothing, and a failed fetch leaves the previous
+# meta.json byte-for-byte intact, so state.system reports the failure while the
+# last good copy survives for the next poll.
+if ((system_fetched && system_ok && normalize_ok)); then
+  meta=$(jq -c -n --argjson meta "$meta" --arg now "$now" \
+    --slurpfile payload "$WORK/payload.json" '
+    ($payload[0].system) as $s
+    | if $s == null then $meta
+      else $meta + { system: { fetchedAt: $now, data: $s } } end')
+  printf '%s\n' "$meta" | tn_write_json "$TN_META_FILE"
 fi
 
 jq -n \
