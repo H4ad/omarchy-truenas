@@ -36,9 +36,10 @@ state and age, and vdev error counts when non-zero. A pool with no scrub data
 says "no scrub on record" rather than inventing a date.
 
 **Alerts view.** A row per alert: level glyph, text, node, age, and `dismiss` /
-`restore` where the alert allows it. Writes go through `bin/truenas-api`, behind
-a confirmation, and the panel re-polls with `--force-meta` before it believes
-them.
+`restore` where the alert allows it. The write verbs are planned, not yet
+implemented in this build (there is no `bin/truenas-api` yet): when they land,
+writes will go through it behind a confirmation, and the panel will re-poll with
+`--force-meta` before it believes them.
 
 **Config view.** The bar settings plus the credentials flow: `pollSeconds`,
 `timeoutSeconds`, `insecureTLS` and the API key, the key entered through a

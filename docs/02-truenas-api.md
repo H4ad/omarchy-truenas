@@ -78,17 +78,12 @@ the poller normalizes it:
 ```jsonc
 {
   "uuid": "11111111-2222-3333-4444-555555555555", // falls back to id
-  "source": "ZFS",
-  "klass": "PoolStatus",
-  "node": "Controller A",
-  "key": "PoolStatus:storage:DEGRADED",
-  "datetime": { "$date": 1787322480000 },         // or an ISO string
-  "dismissed": false,
-  "text": "Pool storage state is DEGRADED: One or more devices is offline",
-  "id": "PoolStatus:storage:DEGRADED",
-  "level": "CRITICAL",
+  "level": "critical",                            // bucketed, lower-case
+  "text": "Pool storage state is DEGRADED",
   "formatted": "Pool storage state is DEGRADED",
-  "one_shot": false,
+  "node": "Controller A",
+  "datetime": "2026-08-21T14:28:00Z",             // wire {$date} or ISO
+  "dismissed": false,
   "dismissable": true
 }
 ```
@@ -147,20 +142,22 @@ the datetime rule below; `percentage` and `errors` are coerced to numbers.
 `size` is `0` or absent -- a bar drawn at `0%` reads as "empty", which is a
 claim the poll cannot make.
 
-### POST `/api/v2.0/alert/dismiss` and `/api/v2.0/alert/restore`
+### POST `/api/v2.0/alert/dismiss` and `/api/v2.0/alert/restore` (planned)
 
-Milestone-1 alert actions. The body is one field:
+The milestone-1 alert actions. **Not implemented in this build**: the write path
+lands with the Alerts view, and there is no `bin/truenas-api` yet. The endpoints
+below are the spec. The body is one field:
 
 ```json
 { "uuid": "11111111-2222-3333-4444-555555555555" }
 ```
 
 The parameter tuple is documented as `uuid` alone; both methods return `null`
-(no body) on success and require `ALERT_LIST_WRITE`. Writes go through
-`bin/truenas-api` (one verb per call, JSON on stdout); the panel then re-polls
-with `--force-meta` and reads the state back rather than trusting the verb's
-stdout. Every write is one queued process behind a `ConfirmAction`; see the
-design doc.
+(no body) on success and require `ALERT_LIST_WRITE`. When shipped, writes will go
+through `bin/truenas-api` (one verb per call, JSON on stdout); the panel then
+re-polls with `--force-meta` and reads the state back rather than trusting the
+verb's stdout. Every write is one queued process behind a `ConfirmAction`; see
+the design doc.
 
 ## Cross-cutting rules
 

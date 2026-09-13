@@ -126,12 +126,20 @@ Persistence has two flavors:
 
 ## Notifications
 
-`omarchy-notification-send` (a bash wrapper over `notify-send`) is on `PATH`:
+`omarchy-notification-send` is on `PATH`. It is not a wrapper over
+`notify-send`: the installed binary calls `busctl --user call
+org.freedesktop.Notifications /org/freedesktop/Notifications
+org.freedesktop.Notifications Notify` directly, and its comments say "never
+notify-send", because `busctl` takes each value as one typed D-Bus parameter
+instead of reinterpreting a headline as an option or hint. Options come first,
+then the positionals, then `--exec` last, with the command as separate argv
+words rather than one quoted string:
 
 ```
-omarchy-notification-send [--exec <cmd>] [--app-name <name>] [-g <glyph>]
-                          [-u low|normal|critical] [--image <path>]
-                          <headline> [description]
+omarchy-notification-send [--app-name <name>] [-g <glyph>]
+                          [-u low|normal|critical] [-i <icon>] [-t <ms>]
+                          [-r <id>] [-p] [--image <path-or-uri>]
+                          <headline> [description] [--exec <program> [args...]]
 ```
 
 It tags the toast with `-a <app-name>` so it pops through do-not-disturb, and
