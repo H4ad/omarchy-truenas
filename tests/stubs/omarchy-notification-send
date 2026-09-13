@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Test stub. Records one line per toast so the notification matrix is assertable.
+printf '%s\n' "$*" >>"${STUB_NOTIFY_LOG:-/dev/null}"

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Test stub. Reads the same argv shape sz_http_get uses, resolves a canned
+# response from STUB_MAP (url<TAB>rc<TAB>http_code<TAB>body_file), and reports it
+# the way real curl would. Consumes stdin so the key never leaks into a log.
+#
+# STUB_CURL_HEADER_LOG opts one case out of that, because the header the key is
+# written into is the only place a quoting mistake shows: curl processes
+# backslash escapes inside a quoted config value, so a key holding a `"` used to
+# be truncated there and the request went out with a wrong key and came back 401.
+# It is left unset by lib.sh's setup and named by the one case that reads it, so
+# no other case can grow a log of its key by accident.
+#
+# What is logged is the header value curl would send, not the config text it was
+# handed: the escaping is what is under test, so a log of the escaped form would
+# pass whatever the escaping did. The unescaping below is curl's, for the two
+# sequences the writer produces.
+unescape() {
+  local v=$1
+  # Escaped backslashes are parked first so that the `\"` pass cannot read the
+  # quote out of a `\\"` that was meant to be a backslash then a quote.
+  v=${v//\\\\/$'\x01'}
+  v=${v//\\\"/\"}
+  printf '%s' "${v//$'\x01'/\\}"
+}
+
+log_config() {
+  local line value
+  while IFS= read -r line; do
+    [[ $line == header\ =\ * ]] || continue
+    value=${line#header = }
+    if [[ $value == \"*\" ]]; then
+      value=${value#\"}; value=${value%\"}
+      value=$(unescape "$value")
+    fi
+    printf '%s\n' "$value" >>"$STUB_CURL_HEADER_LOG"
+  done
+}
+out=""
+url=""
+write_fmt=""
+while (($#)); do
+  case $1 in
+    -o) out=$2; shift 2 ;;
+    -w) write_fmt=$2; shift 2 ;;
+    --config)
+      if [[ -n ${STUB_CURL_HEADER_LOG:-} ]]; then log_config
+      else cat >/dev/null; fi
+      shift 2 ;;
+    --max-time) shift 2 ;;
+    -X) printf '%s ' "$2" >>"${STUB_METHOD_LOG:-/dev/null}"; shift 2 ;;
+    -H) shift 2 ;;
+    --data-binary) cat "${2#@}" >>"${STUB_PAYLOAD_LOG:-/dev/null}"; shift 2 ;;
+    -sS|-fsS) shift ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+
+rc=0; code=200; body=/dev/null
+if [[ -n ${STUB_MAP:-} && -f $STUB_MAP ]]; then
+  while IFS=$'\t' read -r pattern prc pcode pbody; do
+    [[ -n $pattern ]] || continue
+    if [[ $url == *"$pattern"* ]]; then
+      rc=$prc; code=$pcode; body=$pbody
+      break
+    fi
+  done <"$STUB_MAP"
+fi
+
+printf '%s ' "$url" >>"${STUB_CURL_LOG:-/dev/null}"
+printf '\n' >>"${STUB_CURL_LOG:-/dev/null}"
+
+if [[ -n $out && $body != /dev/null ]]; then
+  cat "$body" >"$out"
+elif [[ -n $out ]]; then
+  : >"$out"
+fi
+
+if ((rc == 0)) && [[ -n $write_fmt ]]; then
+  printf '%s 0.123' "$code"
+fi
+exit "$rc"
