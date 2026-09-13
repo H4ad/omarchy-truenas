@@ -53,6 +53,20 @@ check "and its message is carried" "internal server error" "$(state '.connection
 check "still no invented count" 0 "$(state '.counts.total')"
 teardown
 
+test_case "a 200 with a non-array alert body is not a quiet NAS"
+setup; single_instance_config
+printf '{}\n' >"$WORK/alerts.json"
+respond     "/api/v2.0/alert/list"  0 200 "$WORK/alerts.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+poll
+check "not connected, the alert body was unusable" false "$(state '.connection.ok')"
+check "named as not_json" not_json "$(state '.connection.error')"
+check "a warning names the alert section" alert \
+  "$(state '.warnings[] | select(.section=="alert") | .section')"
+check "no counts are invented" 0 "$(state '.counts.total')"
+teardown
+
 test_case "a DEGRADED pool normalizes and keeps its scrub"
 setup; single_instance_config
 respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
@@ -84,6 +98,9 @@ check "dismissed is counted apart" 1 "$(state '.counts.dismissed')"
 check "every row is still listed, flagged" 4 "$(state '.alerts | length')"
 check "the datetime is an ISO string" string \
   "$(state '.alerts[] | select(.level=="critical") | .datetime | type')"
+check "formatted wins when both text and formatted exist" \
+  "Pool storage state is DEGRADED" \
+  "$(state '.alerts[] | select(.level=="critical") | .text')"
 teardown
 
 test_case "an unknown level falls to notice, ALERT to critical"
@@ -128,6 +145,21 @@ check "the pools are empty rather than wrong" 0 "$(state '.pools | length')"
 check "a warning names the pool section" pool \
   "$(state '.warnings[] | select(.section=="pool") | .section')"
 check "the alert answered, so the connection is up" true "$(state '.connection.ok')"
+teardown
+
+test_case "a failed system call is null, not a fabricated zero"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-critical.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 7 0 /dev/null
+poll
+check "the system is null, not an object of zeroes" null "$(state '.system')"
+check "a warning names the system section" system \
+  "$(state '.warnings[] | select(.section=="system") | .section')"
+check "the alerts answered, so the connection is up" true "$(state '.connection.ok')"
+check "no version is claimed" null "$(state '.connection.version')"
+check "the alerts still count" 1 "$(state '.counts.critical')"
+check "the pools are still present" 2 "$(state '.pools | length')"
 teardown
 
 test_case "no instance at all is unconfigured, and still writes state"

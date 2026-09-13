@@ -33,7 +33,7 @@ def alert_norm:
   {
     uuid:        (.uuid // .id // ""),
     level:       level_of,
-    text:        (.text // .formatted // ""),
+    text:        (.formatted // .text // ""),
     formatted:   (.formatted // .text // ""),
     node:        (.node // ""),
     datetime:    ((.datetime? // null) | to_iso),
@@ -118,7 +118,7 @@ def alert_rank:
 # `counts`, which is what the bar reads, and are counted as `dismissed` there.
 | ([ $alert_rows[] | select(.dismissed | not) ]) as $active
 | {
-    system: (($sys // {}) | system_norm),
+    system: (if $sys == null then null else ($sys | system_norm) end),
     counts: {
       critical:  ([ $active[] | select(.level == "critical") ] | length),
       error:     ([ $active[] | select(.level == "error")    ] | length),

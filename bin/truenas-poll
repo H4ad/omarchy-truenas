@@ -43,7 +43,7 @@ warnings='[]'
 # The shape every failure path emits for the sections, so a failed request
 # contributes no rows and no fabricated zeroes.
 default_payload() {
-  printf '%s\n' '{"system":{"hostname":"","version":"","uptimeSeconds":0,"cores":0,"physmem":0,"loadavg":[]},"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[]}' >"$WORK/payload.json"
+  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[]}' >"$WORK/payload.json"
 }
 
 warn_section() {
@@ -68,13 +68,17 @@ classify_message() {
 # section is named in `warnings`; on success the validated body is copied,
 # because tn_http_get reuses the same TN_BODY path on every call.
 fetch() {
-  local section=$1 path=$2 out=$3 code rc
+  local section=$1 path=$2 out=$3 rc
   tn_http_get "$base" "$path" "$key" "$timeout"
-  code=$TN_CODE
   rc=$TN_CURL_RC
   S_ERR=$(tn_classify)
-  # An empty 200 from a route that is not really there is not success.
+  # An empty 200 from a route that is not really there is not success, and a
+  # healthy alert/list is always a JSON array: a 200 carrying `{}` is a route
+  # that answered without data, not a quiet NAS.
   if [[ -z $S_ERR ]] && ! jq -e . "$TN_BODY" >/dev/null 2>&1; then
+    S_ERR=not_json
+  elif [[ -z $S_ERR && $section == alert ]] \
+       && ! jq -e 'type == "array"' "$TN_BODY" >/dev/null 2>&1; then
     S_ERR=not_json
   fi
   if [[ -n $S_ERR ]]; then
@@ -85,8 +89,6 @@ fetch() {
     S_MSG=""
     cp "$TN_BODY" "$out"
   fi
-  S_CODE=$code
-  S_TIME=$TN_TIME_MS
   rm -f "$TN_BODY"
 }
 
@@ -115,8 +117,8 @@ else
     # The alerts request is the connection: its code, latency and reason.
     error=$S_ERR
     message=$S_MSG
-    code=$S_CODE
-    latency=$S_TIME
+    code=$TN_CODE
+    latency=$TN_TIME_MS
 
     fetch pool   "/api/v2.0/pool"        "$WORK/pools.json"
     fetch system "/api/v2.0/system/info" "$WORK/system.json"
@@ -164,7 +166,7 @@ jq -n \
         message: (if $message == "" then null else $message end),
         consecutiveFailures: $failures,
         lastOkAt: (if $lastOk == "" then null else $lastOk end),
-        version: (if ($p.system.version // "") == "" then null else $p.system.version end),
+        version: (if (($p.system // {}).version // "") == "" then null else $p.system.version end),
         dialect: $dialect
       },
       system: $p.system,
