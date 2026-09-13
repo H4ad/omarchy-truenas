@@ -12,15 +12,27 @@
 #
 # What is logged is the header value curl would send, not the config text it was
 # handed: the escaping is what is under test, so a log of the escaped form would
-# pass whatever the escaping did. The unescaping below is curl's, for the two
-# sequences the writer produces.
-unescape() {
-  local v=$1
-  # Escaped backslashes are parked first so that the `\"` pass cannot read the
-  # quote out of a `\\"` that was meant to be a backslash then a quote.
-  v=${v//\\\\/$'\x01'}
-  v=${v//\\\"/\"}
-  printf '%s' "${v//$'\x01'/\\}"
+# pass whatever the escaping did. curl's own quoted-value parsing is emulated
+# below: a backslash escapes the next character, and the first unescaped `"`
+# ends the value, so an unescaped quote a broken writer leaves behind truncates
+# the header here instead of being recovered. That divergence from the
+# omarchy-signoz copy of this stub (which only strips the outer quotes) is
+# deliberate: this log has to be able to fail.
+curl_unquote() {
+  local v=$1 out="" i=0 n c
+  n=${#v}
+  while ((i < n)); do
+    c=${v:i:1}
+    if [[ $c == \\ ]]; then
+      ((i++)); ((i < n)) || break
+      out+="${v:i:1}"; ((i++))
+    elif [[ $c == \" ]]; then
+      break
+    else
+      out+=$c; ((i++))
+    fi
+  done
+  printf '%s\n' "$out"
 }
 
 log_config() {
@@ -28,11 +40,11 @@ log_config() {
   while IFS= read -r line; do
     [[ $line == header\ =\ * ]] || continue
     value=${line#header = }
-    if [[ $value == \"*\" ]]; then
-      value=${value#\"}; value=${value%\"}
-      value=$(unescape "$value")
+    if [[ $value == \"* ]]; then
+      curl_unquote "${value:1}" >>"$STUB_CURL_HEADER_LOG"
+    else
+      printf '%s\n' "$value" >>"$STUB_CURL_HEADER_LOG"
     fi
-    printf '%s\n' "$value" >>"$STUB_CURL_HEADER_LOG"
   done
 }
 out=""
