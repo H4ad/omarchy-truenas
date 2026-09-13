@@ -184,11 +184,14 @@ tn_resolve_key() {
     printf 'err:credentials_permissions'
     return 1
   fi
-  if key=$(tn_creds_lookup "$file" "TRUENAS_API_KEY_$upper"); then
+  # An assignment with nothing after the `=` (a hand-edited TRUENAS_API_KEY=)
+  # is not a key: treat it as absent and keep looking, so the poll never sends
+  # `Authorization: Bearer ` and mistakes the 401 for a rejected key.
+  if key=$(tn_creds_lookup "$file" "TRUENAS_API_KEY_$upper") && [[ -n ${key//[[:space:]]/} ]]; then
     printf 'ok:%s' "$key"
     return 0
   fi
-  if key=$(tn_creds_lookup "$file" "TRUENAS_API_KEY"); then
+  if key=$(tn_creds_lookup "$file" "TRUENAS_API_KEY") && [[ -n ${key//[[:space:]]/} ]]; then
     printf 'ok:%s' "$key"
     return 0
   fi

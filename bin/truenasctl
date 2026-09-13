@@ -137,23 +137,30 @@ cmd_login() {
 
   key=$(read_key_stdin)
   [[ -n ${key//[[:space:]]/} ]] || { tn_warn "no key given on stdin"; return 1; }
+
+  # The config is written before the key. A login that cannot write its config
+  # must fail without leaving a new key stored behind it.
+  text=$(config_read) || { unset key; return 1; }
+  if ! text=$(jq --arg url "$url" --argjson insecure "$insecure_json" '
+        .schema = (.schema // 1)
+        | .insecureTLS = (if $insecure then true else (.insecureTLS // false) end)
+        | .instances = [ { id: "nas", label: "NAS", baseUrl: $url } ]
+      ' <<<"$text"); then
+    unset key
+    tn_warn "could not update $(config_file)"
+    return 1
+  fi
+  if ! printf '%s' "$text" | write_config; then
+    unset key
+    tn_warn "could not write $(config_file)"
+    return 1
+  fi
   if ! write_key "$key"; then
     unset key
     tn_warn "could not write $(creds_file)"
     return 1
   fi
   unset key
-
-  text=$(config_read) || return 1
-  if ! text=$(jq --arg url "$url" --argjson insecure "$insecure_json" '
-        .schema = (.schema // 1)
-        | .insecureTLS = (if $insecure then true else (.insecureTLS // false) end)
-        | .instances = [ { id: "nas", label: "NAS", baseUrl: $url } ]
-      ' <<<"$text"); then
-    tn_warn "could not update $(config_file)"
-    return 1
-  fi
-  printf '%s' "$text" | write_config || return 1
   printf 'logged in to %s\n' "$url"
 }
 
@@ -179,7 +186,7 @@ cmd_test() {
     esac
   done
 
-  local config err instance base timeout dialect has_key=0 key="" resolved
+  local config err instance base timeout dialect has_key=0 key="" key_error="" resolved
   config=$(tn_load_config)
   err=$(jq -r '.configError // ""' <<<"$config")
   [[ -z $err ]] || { tn_warn "$err"; return 1; }
@@ -192,7 +199,11 @@ cmd_test() {
   printf '%s (%s)\n' "$base" "$dialect"
 
   resolved=$(tn_resolve_key nas "" "")
-  if [[ $resolved == ok:* ]]; then key=${resolved#ok:}; has_key=1; fi
+  if [[ $resolved == ok:* ]]; then
+    key=${resolved#ok:}; has_key=1
+  else
+    key_error=${resolved#err:}
+  fi
   unset resolved
 
   tn_http_get "$base" "/api/v2.0/system/info" "$key" "$timeout"
@@ -211,6 +222,8 @@ cmd_test() {
     reason="unreachable: $(tn_curl_rc_message "$rc")"
   elif [[ $class == not_json ]]; then
     reason="not JSON: ${base} answered but not with the TrueNAS API"
+  elif [[ $class == unauthenticated && $key_error == credentials_permissions ]]; then
+    reason="the credentials file $(creds_file) is readable by others; run: chmod 600 $(creds_file)"
   elif [[ $class == unauthenticated && $has_key == 1 ]]; then
     reason="key rejected (401): the API key is not accepted"
   elif [[ $class == unauthenticated ]]; then
@@ -313,6 +326,7 @@ cmd_open() {
     alerts)            path=/ui/alerts ;;
     *) tn_warn "unknown page $what, expected health, pools or alerts"; return 1 ;;
   esac
+  tn_have xdg-open || { tn_warn "xdg-open is not installed; open $base$path manually"; return 1; }
   xdg-open "$base$path" >/dev/null 2>&1 &
 }
 
@@ -342,7 +356,6 @@ cmd_config_list() {
         schema: (.schema // 1),
         instance: (if $i == null then null
                    else { id: ($i.id // "nas"), label: ($i.label // "NAS"), baseUrl: ($i.baseUrl // "") } end),
-        baseUrl: ($i.baseUrl // null),
         insecureTLS: (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
         pollSeconds: (.pollSeconds // 30),
         timeoutSeconds: (.timeoutSeconds // 8),

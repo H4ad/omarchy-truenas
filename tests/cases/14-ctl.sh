@@ -46,6 +46,20 @@ check "the new key replaced the old" 1 \
 check "the old key is gone" 0 "$(grep -c 'k1' "$TRUENAS_CREDENTIALS_FILE")"
 teardown
 
+test_case "login stores no key when the config cannot be written"
+setup
+printf 'TRUENAS_API_KEY=old-key\n' >"$TRUENAS_CREDENTIALS_FILE"
+chmod 600 "$TRUENAS_CREDENTIALS_FILE"
+printf 'x\n' >"$WORK/blocker"
+export TRUENAS_CONFIG_FILE="$WORK/blocker/config.json"
+login_rc=0
+printf 'new-key\n' | ctl login https://nas.example >/dev/null 2>&1 || login_rc=$?
+check "login fails" 1 "$login_rc"
+check "the old key is untouched" 1 \
+  "$(grep -cx 'TRUENAS_API_KEY=old-key' "$TRUENAS_CREDENTIALS_FILE")"
+check "the new key was never stored" 0 "$(grep -c 'new-key' "$TRUENAS_CREDENTIALS_FILE")"
+teardown
+
 test_case "login refuses a url without a scheme and --insecure is recorded"
 setup
 rm -f "$TRUENAS_CREDENTIALS_FILE"
@@ -77,6 +91,7 @@ check "insecureTLS true" true "$(jq -r '.insecureTLS' <<<"$out")"
 check "pollSeconds default" 30 "$(jq -r '.pollSeconds' <<<"$out")"
 check "notify is an object" object "$(jq -r '.notify | type' <<<"$out")"
 check "the instance base" https://nas.example "$(jq -r '.instance.baseUrl' <<<"$out")"
+check "the base url is not repeated at the top level" false "$(jq 'has("baseUrl")' <<<"$out")"
 check "the key is nowhere in the listing" 0 "$(grep -c 'topsecret-value' <<<"$out")"
 teardown
 
@@ -124,6 +139,19 @@ rm -f "$TRUENAS_CREDENTIALS_FILE"
 out=$(ctl test 2>&1)
 check "no key is its own message" 1 "$(grep -c 'no API key is set' <<<"$out")"
 check "and is not the rejection message" 0 "$(grep -c 'key rejected' <<<"$out")"
+teardown
+
+test_case "test names a credentials-permission problem rather than a missing key"
+setup
+plain_config
+respond "/api/v2.0/system/info" 0 401 "$ROOT/tests/fixtures/err-401.json"
+chmod 644 "$TRUENAS_CREDENTIALS_FILE"
+out=$(ctl test 2>&1)
+check "fails" 1 "$(ctl test >/dev/null 2>&1; echo $?)"
+check "names the credentials file" 1 "$(grep -c "$TRUENAS_CREDENTIALS_FILE" <<<"$out")"
+check "says it is readable by others" 1 "$(grep -c 'readable by others' <<<"$out")"
+check "suggests chmod 600" 1 "$(grep -c 'chmod 600' <<<"$out")"
+check "does not claim no key is set" 0 "$(grep -c 'no API key is set' <<<"$out")"
 teardown
 
 test_case "test names forbidden, not found and not JSON distinctly"
