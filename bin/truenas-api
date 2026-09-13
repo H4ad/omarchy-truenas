@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# The one write path the panel has for alerts. Every verb answers with a single
+# JSON object, so Panel.qml has one shape to parse whether the write landed or
+# not: {"ok":true} on any 2xx, and {error, message} otherwise.
+#
+# The key is resolved exactly the way the poller resolves it and handed to curl
+# as a config file on stdin, never in argv. The alert uuid is written into the
+# request body by jq, never interpolated into a shell string, so a value that
+# came off the wire can only ever be one JSON string and never a second field.
+set -uo pipefail
+
+TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=./truenas-lib.sh
+. "$TN_PLUGIN_DIR/bin/truenas-lib.sh"
+
+usage() {
+  cat <<'TXT'
+truenas-api <verb> <uuid>
+
+  dismiss <uuid>   dismiss one alert
+  restore <uuid>   restore a dismissed alert
+
+Answers with one JSON object: {"ok":true} on success, {error, message} otherwise.
+TXT
+}
+
+fail() {
+  jq -n --arg error "$1" --arg message "${2:-}" '{ error: $error, message: $message }'
+  exit 1
+}
+
+tn_have jq || { tn_warn "jq is required"; exit 1; }
+
+# Unknown verb first, so the usage text is the only thing on the way out and the
+# exit status (2) is a different class from a failed write (1).
+verb=${1:-}
+uuid=${2:-}
+case $verb in
+  dismiss|restore) ;;
+  *) usage >&2; exit 2 ;;
+esac
+[[ -n $uuid ]] || { tn_warn "a $verb needs an alert uuid"; usage >&2; exit 2; }
+
+config=$(tn_load_config)
+config_error=$(jq -r '.configError // ""' <<<"$config")
+[[ -z $config_error ]] || fail "$config_error"
+
+instance=$(jq -c '.instances[0] // empty' <<<"$config")
+[[ -n $instance ]] || fail "unconfigured"
+
+id=$(jq -r '.id' <<<"$instance")
+base=$(jq -r '.baseUrl' <<<"$instance")
+timeout=$(jq -r '.timeoutSeconds // 8' <<<"$config")
+
+resolved=$(tn_resolve_key "$id" \
+  "$(jq -r '.apiKeyFile // ""' <<<"$instance")" \
+  "$(jq -r '.apiKeyCommand // ""' <<<"$instance")")
+[[ $resolved == ok:* ]] || fail "${resolved#err:}"
+key=${resolved#ok:}
+
+# The payload file is the only place the uuid is written, and jq encodes it. The
+# response body is a second mktemp that tn_http_request opens itself; both are
+# named to the trap, because fail exits from below and the rm written after a
+# call is not reached on the error path. TN_BODY is read with a default because
+# the trap is installed before the request has set it and `set -u` is on.
+TN_BODY=""
+payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX")
+trap 'rm -f "${payload:-}" "${TN_BODY:-}"' EXIT
+
+jq -n --arg uuid "$uuid" '{ uuid: $uuid }' >"$payload"
+
+tn_http_request POST "$base" "/api/v2.0/alert/$verb" "$key" "$timeout" "$payload"
+class=$(tn_classify)
+
+if [[ -z $class ]]; then
+  rm -f "$payload" "$TN_BODY"
+  unset key resolved
+  printf '{"ok":true}\n'
+  exit 0
+fi
+
+# tn_error_message reads the NAS's own words and reads the body file, so it runs
+# before the body is removed; a curl-level failure has no body, so name the
+# transport instead of printing an empty message.
+message=$(tn_error_message)
+[[ -n $message ]] || message=$(tn_curl_rc_message "$TN_CURL_RC")
+rm -f "$payload" "$TN_BODY"
+unset key resolved
+fail "$class" "$message"
