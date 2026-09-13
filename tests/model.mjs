@@ -1,9 +1,199 @@
-// Stub suite. The real Model.js harness lands with the model task; until then
-// this keeps the name run.sh registers green, printing the same summary shape
-// as the other node suites.
+// Runs the pure helpers in Model.js under node. Model.js has to stay loadable by
+// QML as `.import "Model.js" as Model`, so it is not a module: it is read and
+// evaluated here, and its top-level declarations are collected into one object.
+//
+//   node tests/model.mjs
+//
+// Prints one line per assertion, in the shape tests/lib.sh's `check` prints, and
+// exits non-zero if any of them failed.
 
-const pass = 0;
-const fail = 0;
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// `.pragma library` and `.import` are QML script directives, not JavaScript, so
+// they have to come off before node can evaluate the file.
+const source = readFileSync(join(root, "Model.js"), "utf8")
+  .replace(/^\.(pragma|import)\b.*$/gm, "");
+
+function declaredNames(text) {
+  const names = [];
+  const patterns = [/^function\s+([A-Za-z0-9_$]+)/gm, /^var\s+([A-Za-z0-9_$]+)\s*=/gm];
+  for (const pattern of patterns) {
+    let match = pattern.exec(text);
+    while (match !== null) {
+      names.push(match[1]);
+      match = pattern.exec(text);
+    }
+  }
+  return names;
+}
+
+const exports = declaredNames(source)
+  .map(function (name) { return name + ": " + name; })
+  .join(", ");
+const Model = new Function(source + "\nreturn { " + exports + " };")();
+
+let pass = 0;
+let fail = 0;
+
+function show(value) {
+  return String(JSON.stringify(value));
+}
+
+function check(what, want, got) {
+  if (show(want) === show(got)) {
+    pass += 1;
+    console.log("  ok   " + what);
+    return;
+  }
+  fail += 1;
+  console.log("  FAIL " + what);
+  console.log("       want " + show(want));
+  console.log("       got  " + show(got));
+}
+
+function test_case(name) {
+  console.log("\n" + name);
+}
+
+function pool(name, status, usedPct) {
+  return { name: name, status: status, usedPct: usedPct };
+}
+
+function alert(level, datetime, uuid) {
+  return { level: level, datetime: datetime, uuid: uuid };
+}
+
+const ok = { ok: true };
+
+// A QVariantList reaches a plain JS function as an object with indexed members
+// and a length, not as an Array.
+const seqLike = { 0: { name: "boot" }, 1: { name: "storage" }, length: 2 };
+
+test_case("arrayLike");
+
+check("Array.isArray is false for a sequence-like", false, Array.isArray(seqLike));
+check("arrayLike sees it", true, Model.arrayLike(seqLike));
+check("arrayLike rejects a string", false, Model.arrayLike("abcd"));
+check("arrayLike rejects null", false, Model.arrayLike(null));
+
+test_case("poolStatusRank");
+
+check("FAULTED is worse than DEGRADED",
+  true, Model.poolStatusRank("FAULTED") < Model.poolStatusRank("DEGRADED"));
+check("DEGRADED is worse than ONLINE",
+  true, Model.poolStatusRank("DEGRADED") < Model.poolStatusRank("ONLINE"));
+check("OFFLINE, UNAVAIL and REMOVED rank together",
+  true, Model.poolStatusRank("OFFLINE") === Model.poolStatusRank("REMOVED"));
+check("an unknown status is worse than DEGRADED",
+  true, Model.poolStatusRank("SUSPENDED") < Model.poolStatusRank("DEGRADED"));
+
+test_case("worstPool");
+
+check("DEGRADED outranks ONLINE",
+  "storage", Model.worstPool([pool("boot", "ONLINE", 10), pool("storage", "DEGRADED", 50)]).name);
+check("FAULTED outranks DEGRADED",
+  "dead", Model.worstPool([pool("dead", "FAULTED", 0), pool("storage", "DEGRADED", 50)]).name);
+check("no pools is null", null, Model.worstPool([]));
+check("not a list is null", null, Model.worstPool(null));
+
+test_case("capacityPct");
+
+check("no pools is null, not 0", null, Model.capacityPct({ pools: [] }));
+check("a pool without a percentage is skipped",
+  null, Model.capacityPct({ pools: [pool("storage", "ONLINE", null)] }));
+check("the fullest pool wins",
+  71, Model.capacityPct({ pools: [pool("boot", "ONLINE", 12), pool("storage", "ONLINE", 71)] }));
+check("a real zero is a real zero",
+  0, Model.capacityPct({ pools: [pool("storage", "ONLINE", 0)] }));
+check("a missing state is null", null, Model.capacityPct(null));
+
+test_case("mode");
+
+check("unconfigured when there is no schema", "unconfigured", Model.mode({ connection: ok }));
+check("offline when the connection is not ok, even with alerts", "offline",
+  Model.mode({ schema: 1, connection: { ok: false, error: "unreachable" },
+    counts: { total: 3 }, alerts: [alert("critical", "2026-01-01T00:00:00Z", "x")] }));
+check("firing when alerts are present", "firing",
+  Model.mode({ schema: 1, connection: ok, counts: { warning: 2, total: 2 },
+    alerts: [alert("warning", "2026-01-01T00:00:00Z", "w")], pools: [pool("storage", "ONLINE", 20)] }));
+check("quiet when nothing is wrong", "quiet",
+  Model.mode({ schema: 1, connection: ok, counts: { total: 0 }, alerts: [],
+    pools: [pool("storage", "ONLINE", 20)] }));
+check("degraded when a pool is OFFLINE", "degraded",
+  Model.mode({ schema: 1, connection: ok, counts: { total: 0 }, alerts: [],
+    pools: [pool("storage", "OFFLINE", 0)] }));
+check("degraded when an alert is an error", "degraded",
+  Model.mode({ schema: 1, connection: ok, counts: { error: 1, total: 1 },
+    alerts: [alert("error", "2026-01-01T00:00:00Z", "e")], pools: [pool("storage", "ONLINE", 20)] }));
+
+test_case("worstLevel");
+
+check("critical outranks error", "critical", Model.worstLevel({ critical: 1, error: 1, warning: 2 }));
+check("nothing firing is an empty string", "",
+  Model.worstLevel({ critical: 0, error: 0, warning: 0, notice: 0, info: 0 }));
+check("worstSeverity agrees", "warning", Model.worstSeverity({ critical: 0, error: 0, warning: 1 }));
+
+test_case("alertRows");
+
+const before = [
+  alert("warning", "2026-01-02T00:00:00Z", "w1"),
+  alert("critical", "2026-01-03T00:00:00Z", "c1"),
+  alert("warning", "2026-01-01T00:00:00Z", "w0")
+];
+const rows = Model.alertRows(before);
+check("critical sorts before warning", "c1", rows[0].uuid);
+check("older comes first within one level", "w0", rows[1].uuid);
+check("the input keeps its order", ["w1", "c1", "w0"], before.map(function (a) { return a.uuid; }));
+check("not a list is an empty list", [], Model.alertRows(null));
+
+test_case("byLevel");
+
+check("counts by bucket", { critical: 1, error: 0, warning: 2, notice: 0, info: 1, total: 4 },
+  Model.byLevel([alert("critical", "", "c"), alert("warning", "", "w1"),
+    alert("warning", "", "w2"), alert("info", "", "i")]));
+
+test_case("formatBytes");
+
+check("null is unknown", "", Model.formatBytes(null));
+check("undefined is unknown", "", Model.formatBytes(undefined));
+check("negative is unknown", "", Model.formatBytes(-1));
+check("NaN is unknown", "", Model.formatBytes(NaN));
+check("zero is a real zero", "0 B", Model.formatBytes(0));
+check("one TiB", "1 TiB", Model.formatBytes(1099511627776));
+check("one GiB", "1 GiB", Model.formatBytes(1073741824));
+check("exactly half a MiB in KiB", "512 KiB", Model.formatBytes(524288));
+
+test_case("errorSentence");
+
+check("unauthenticated names the key", "the API key was rejected", Model.errorSentence({ error: "unauthenticated" }));
+check("timeout is not the same sentence",
+  true, Model.errorSentence({ error: "timeout" }) !== Model.errorSentence({ error: "unauthenticated" }));
+check("not_found names the path", "the API path was not found", Model.errorSentence({ error: "not_found" }));
+check("an http code is named", "the NAS answered HTTP 400", Model.errorSentence({ error: "http_400" }));
+check("an unknown code falls back to its message", "boom", Model.errorSentence({ error: "weird", message: "boom" }));
+check("no error is an empty sentence", "", Model.errorSentence({}));
+
+test_case("glyphFor");
+
+check("offline is not the quiet glyph", true, Model.glyphFor("offline") !== Model.glyphFor("quiet"));
+check("unconfigured is not the quiet glyph", true, Model.glyphFor("unconfigured") !== Model.glyphFor("quiet"));
+check("quiet and firing share the bell", Model.glyphFor("quiet"), Model.glyphFor("firing", { total: 0 }));
+
+test_case("ageText and durationText");
+
+check("seconds", "30s", Model.ageText(30));
+check("minutes", "5m", Model.ageText(300));
+check("never", "never", Model.ageText(-1));
+const noon = Date.parse("2026-01-01T12:00:00Z");
+check("an hour and twelve minutes", "1h12m", Model.durationText("2026-01-01T10:48:00Z", noon));
+check("a missing start is blank", "", Model.durationText(null, noon));
+
+test_case("tooltipFor");
+
+check("unconfigured points at login", "TrueNAS: run truenasctl login <url>", Model.tooltipFor({}, "unconfigured"));
 
 console.log("\nmodel: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
