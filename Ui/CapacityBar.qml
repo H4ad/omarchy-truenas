@@ -36,7 +36,7 @@ Item {
     && root.usedPct !== "" && isFinite(Number(root.usedPct))
   readonly property real fraction: root.known
     ? Math.max(0, Math.min(1, Number(root.usedPct) / 100)) : 0
-  readonly property string pctText: root.known ? Math.round(Number(root.usedPct)) + "%" : "unknown"
+  readonly property string pctText: root.known ? Math.round(Number(root.usedPct)) + "%" : "capacity unknown"
   readonly property color fillColor: root.fraction >= 0.9 ? root.urgentColor : root.accentColor
 
   // Only facts that were reported are drawn. `Model.formatBytes` returns "" for
