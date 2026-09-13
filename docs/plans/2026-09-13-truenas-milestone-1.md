@@ -123,8 +123,14 @@ Adapt `~/Projects/omarchy-signoz/bin/signoz-lib.sh` wholesale, renaming
 
 Changes from the reference:
 1. `TN_CONFIG_FILE` default `~/.config/omarchy/truenas/config.json`.
-2. Credential name is `TRUENAS_API_KEY` (no per-instance suffix needed yet).
-3. `tn_classify` maps `401` → `unauthenticated`, `403` → `forbidden`.
+2. Credential name is `TRUENAS_API_KEY`; keep the reference's per-instance
+   `TRUENAS_API_KEY_<UPPER>` lookup ahead of the bare name, so the shape is
+   already right when a second NAS arrives.
+3. `tn_classify` classifies the status code **before** requiring a JSON body, so
+   an empty-body `401`/`404` is still `unauthenticated`/`not_found`; maps `401` →
+   `unauthenticated`, `403` → `forbidden`, `404` → `not_found`, `5xx` →
+   `server_error`; treats `202` as success; keeps `not_json` for a `2xx` with a
+   non-JSON body (a route that does not exist must never read as healthy).
 4. Add `tn_insecure_args`: prints `-k` only when config `insecureTLS == true`.
    `insecureTLS` is type-guarded (`!= false` would be wrong; read the boolean
    explicitly).
