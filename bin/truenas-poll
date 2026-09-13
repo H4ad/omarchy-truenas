@@ -64,23 +64,32 @@ classify_message() {
   printf '%s' "$msg"
 }
 
+# A 200 is only success when the body carries the shape its route promises. A
+# wrong-shaped body (an empty object, a bare value) would normalize into
+# fabricated empty strings and zeroes that read exactly like a real answer, so
+# it is a section failure. Runs only once the request itself succeeded.
+expect_shape() {
+  local body=$1 shape=$2
+  [[ -z $S_ERR ]] || return 0
+  jq -e "$shape" "$body" >/dev/null 2>&1 || S_ERR=not_json
+}
+
 # One endpoint into its own body file. On any failure the file is null and the
 # section is named in `warnings`; on success the validated body is copied,
 # because tn_http_get reuses the same TN_BODY path on every call.
 fetch() {
-  local section=$1 path=$2 out=$3 rc
+  local section=$1 path=$2 out=$3 rc shape
   tn_http_get "$base" "$path" "$key" "$timeout"
   rc=$TN_CURL_RC
   S_ERR=$(tn_classify)
-  # An empty 200 from a route that is not really there is not success, and a
-  # healthy alert/list is always a JSON array: a 200 carrying `{}` is a route
-  # that answered without data, not a quiet NAS.
-  if [[ -z $S_ERR ]] && ! jq -e . "$TN_BODY" >/dev/null 2>&1; then
-    S_ERR=not_json
-  elif [[ -z $S_ERR && $section == alert ]] \
-       && ! jq -e 'type == "array"' "$TN_BODY" >/dev/null 2>&1; then
-    S_ERR=not_json
-  fi
+  # A healthy alert/list and pool is always a JSON array; system/info is a
+  # non-empty object. A 200 carrying `{}` is a route that answered without
+  # data, not a quiet NAS.
+  case $section in
+    alert|pool) shape='type == "array"' ;;
+    system)     shape='type == "object" and (length > 0)' ;;
+  esac
+  expect_shape "$TN_BODY" "$shape"
   if [[ -n $S_ERR ]]; then
     S_MSG=$(classify_message "$S_ERR" "$rc")
     printf 'null\n' >"$out"

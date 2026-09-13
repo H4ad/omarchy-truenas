@@ -67,6 +67,35 @@ check "a warning names the alert section" alert \
 check "no counts are invented" 0 "$(state '.counts.total')"
 teardown
 
+test_case "a 200 with an empty system object is not a system"
+setup; single_instance_config
+printf '{}\n' >"$WORK/system.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$WORK/system.json"
+poll
+check "connected, the other sections answered" true "$(state '.connection.ok')"
+check "system is null, not a row of fabricated zeroes" null "$(state '.system')"
+check "a warning names the system section" system \
+  "$(state '.warnings[] | select(.section=="system") | .section')"
+check "counts are still present" 0 "$(state '.counts.total')"
+check "pools are still present" 2 "$(state '.pools | length')"
+teardown
+
+test_case "a 200 with an object pool body is not a pool list"
+setup; single_instance_config
+printf '{}\n' >"$WORK/pools.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$WORK/pools.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+poll
+check "pools are empty rather than a junk row" 0 "$(state '.pools | length')"
+check "a warning names the pool section" pool \
+  "$(state '.warnings[] | select(.section=="pool") | .section')"
+check "counts are still present" 0 "$(state '.counts.total')"
+check "the system is still present" 25.04.2 "$(state '.system.version')"
+teardown
+
 test_case "a DEGRADED pool normalizes and keeps its scrub"
 setup; single_instance_config
 respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
