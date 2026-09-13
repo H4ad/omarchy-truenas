@@ -1,3 +1,80 @@
 #!/usr/bin/env bash
-# Test stub. Records one line per toast so the notification matrix is assertable.
-printf '%s\n' "$*" >>"${STUB_NOTIFY_LOG:-/dev/null}"
+# Test stub for omarchy-notification-send. It reimplements the real sender's
+# argument contract closely enough that a malformed invocation -- the kind the
+# real binary rejects -- fails here too instead of being logged as a success.
+# A toast is appended to STUB_NOTIFY_LOG only after the whole argv validates.
+set -uo pipefail
+
+original=("$@")
+
+die() { printf '%s\n' "$1" >&2; exit 1; }
+
+# A word the real sender knows as an option flag, so it can never be taken as a
+# positional. Mirrors the real binary's known_flag().
+known_flag() {
+  case $1 in
+    -g | --glyph | -u | --urgency | --app-name | -i | --icon | -t | --expire-time | --image | -r | --replace-id | -p | --print-id | --exec) return 0 ;;
+    --glyph=* | --urgency=* | --app-name=* | --icon=* | --expire-time=* | --image=* | --replace-id=*) return 0 ;;
+  esac
+  return 1
+}
+
+urgency="low"
+
+# Options come before the headline. Stop at the first word that is not an
+# option; that word is the headline.
+while (($# > 0)); do
+  case $1 in
+  -p | --print-id) shift ;;
+  --?*=*)
+    opt=${1%%=*}
+    case $opt in
+    -u | --urgency)
+      urgency=${1#*=}
+      shift
+      ;;
+    -g | --glyph | --app-name | -i | --icon | -t | --expire-time | --image | -r | --replace-id | --print-id) shift ;;
+    *) break ;;
+    esac
+    ;;
+  -u | --urgency)
+    (($# >= 2)) || die "Missing value for $1"
+    urgency=$2
+    shift 2
+    ;;
+  -g | --glyph | --app-name | -i | --icon | -t | --expire-time | --image | -r | --replace-id)
+    (($# >= 2)) || die "Missing value for $1"
+    shift 2
+    ;;
+  *) break ;;
+  esac
+done
+
+(($# >= 1)) || die "no headline"
+# The headline itself is not where the contract can go wrong; only its position
+# matters, so it is consumed without being inspected.
+shift
+
+# After the headline an optional description is the next non-flag word.
+if (($# > 0)) && ! known_flag "$1"; then
+  shift
+fi
+
+if (($# == 0)); then
+  : # headline, optional description, end of argv.
+elif [[ $1 == --exec ]]; then
+  shift
+  (($# >= 1)) || die "--exec needs a command: --exec <program> [args...]"
+  if (($# == 1)) && [[ $1 == *[[:space:]]* ]]; then
+    die "--exec takes the command as separate words, not one quoted string."
+  fi
+else
+  die "Unknown option: $1"
+fi
+
+case $urgency in
+low | normal | critical) ;;
+*) die "Unknown urgency: $urgency (use low, normal, or critical)" ;;
+esac
+
+printf '%s\n' "${original[*]}" >>"${STUB_NOTIFY_LOG:-/dev/null}"

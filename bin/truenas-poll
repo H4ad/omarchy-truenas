@@ -41,15 +41,20 @@ GLYPH_OFFLINE=$'\uf1e6'
 # from payload text.
 notify() {
   local urgency=$1 glyph=$2 url=$3 head=$4 body=${5:-}
+  # The sender's contract: options first, then <headline> [description], and
+  # --exec last with the command as separate argv words. A single exec word
+  # holding a space is rejected outright, so xdg-open and the URL are two
+  # elements and the option is never built as one string.
   local args=(--app-name truenas -u "$urgency" -g "$glyph")
-  if [[ -n $url ]]; then
-    args+=(--exec "xdg-open $(printf '%q' "$url")")
-  fi
   if [[ -n $body ]]; then
-    "$NOTIFY_BIN" "${args[@]}" "$head" "$body" >/dev/null 2>&1 || true
+    args+=("$head" "$body")
   else
-    "$NOTIFY_BIN" "${args[@]}" "$head" >/dev/null 2>&1 || true
+    args+=("$head")
   fi
+  if [[ -n $url ]]; then
+    args+=(--exec xdg-open "$url")
+  fi
+  "$NOTIFY_BIN" "${args[@]}" >/dev/null 2>&1 || true
 }
 
 # A critical-urgency toast never expires, which for a feed of alerts builds a
@@ -154,8 +159,8 @@ error=""
 message=""
 code=0
 latency=0
-pool_error=""
 attempted=0
+normalize_ok=1
 default_payload
 
 if [[ -n $config_error || -z $instance ]]; then
@@ -182,9 +187,8 @@ else
     latency=$TN_TIME_MS
 
     fetch pool   "/api/v2.0/pool"        "$WORK/pools.json"
-    # Remembered apart from `error`: alert failure is the connection, but a
-    # failed pool call must not read as every pool having gone or come back.
-    pool_error=$S_ERR
+    # A failed pool call is named in `warnings`, which `pools_ok` reads below,
+    # so it cannot read as every pool having gone or come back.
 
     fetch system "/api/v2.0/system/info" "$WORK/system.json"
 
@@ -193,6 +197,7 @@ else
            --slurpfile alerts "$WORK/alerts.json" \
            --slurpfile pools  "$WORK/pools.json" \
            --arg now "$now" >"$WORK/payload.json" 2>/dev/null; then
+      normalize_ok=0
       default_payload
       warn_section normalize not_json "could not normalize the response"
     fi
@@ -226,10 +231,22 @@ else
   fi
   outage_notified=false
 
+  # A section's half of seen.json only advances when its own request produced a
+  # payload worth recording: a warning naming the section, or a normalization
+  # that fell back to the empty default, means there is no answer to trust.
+  # Writing then would erase alerts that are still firing and read the erasure
+  # as a resolution, and would wipe a pool's last known state the same way.
+  alert_warned=$(jq -r '[.[] | select(.section == "alert")] | length' <<<"$warnings")
+  pool_warned=$(jq -r '[.[] | select(.section == "pool")] | length' <<<"$warnings")
+  alerts_ok=$((normalize_ok == 1 && alert_warned == 0))
+  pools_ok=$((normalize_ok == 1 && pool_warned == 0))
+
   levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
   renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
   batch=$(jq -r '.batchThreshold // 3' <<<"$notify_json")
   want_resolved=$(jq -r 'if .resolved == null then true else .resolved end' <<<"$notify_json")
+  # A cleared alert is only true when the alert list itself is trustworthy.
+  ((alerts_ok)) || want_resolved=false
 
   jq -c -n \
     --slurpfile payload "$WORK/payload.json" \
@@ -292,29 +309,31 @@ else
     done < <(jq -c '.resolved[]' "$WORK/decisions.json")
   fi
 
-  seen_next=$(jq -c -n \
-    --argjson seen "$seen" \
-    --slurpfile payload "$WORK/payload.json" \
-    --slurpfile decisions "$WORK/decisions.json" \
-    --arg now "$now" '
-    ($payload[0]) as $p
-    | ($decisions[0]) as $d
-    | ($seen.alerts // {}) as $prev
-    | (reduce ($p.alerts[]? | select(.dismissed != true)) as $a ({};
-        .[$a.uuid] = {
-          level: $a.level,
-          name: $a.text,
-          firstSeenAt: ($prev[$a.uuid].firstSeenAt // $now),
-          lastNotifiedAt: (
-            if (($d.firing | map(.uuid) | index($a.uuid)) != null)
-               or (($d.renotify | map(.uuid) | index($a.uuid)) != null)
-            then $now
-            else ($prev[$a.uuid].lastNotifiedAt // $now) end)
-        })) as $next
-    | $seen + { alerts: $next }')
-  [[ -n $seen_next ]] && seen=$seen_next
+  if ((alerts_ok)); then
+    seen_next=$(jq -c -n \
+      --argjson seen "$seen" \
+      --slurpfile payload "$WORK/payload.json" \
+      --slurpfile decisions "$WORK/decisions.json" \
+      --arg now "$now" '
+      ($payload[0]) as $p
+      | ($decisions[0]) as $d
+      | ($seen.alerts // {}) as $prev
+      | (reduce ($p.alerts[]? | select(.dismissed != true)) as $a ({};
+          .[$a.uuid] = {
+            level: $a.level,
+            name: $a.text,
+            firstSeenAt: ($prev[$a.uuid].firstSeenAt // $now),
+            lastNotifiedAt: (
+              if (($d.firing | map(.uuid) | index($a.uuid)) != null)
+                 or (($d.renotify | map(.uuid) | index($a.uuid)) != null)
+              then $now
+              else ($prev[$a.uuid].lastNotifiedAt // $now) end)
+          })) as $next
+      | $seen + { alerts: $next }')
+    [[ -n $seen_next ]] && seen=$seen_next
+  fi
 
-  if [[ -z $pool_error ]]; then
+  if ((pools_ok)); then
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
       --argjson seen "$seen" \

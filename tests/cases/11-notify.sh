@@ -198,3 +198,43 @@ check "crossing it toasts again" 3 "$(notifications)"
 poll
 check "but staying down does not re-toast" 3 "$(notifications)"
 teardown
+
+test_case "a toast passes the exec command in the sender's argv form"
+setup; single_instance_config
+respond "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-critical.json"
+poll
+check "the alert toast is recorded rather than rejected" 1 "$(notifications)"
+check "with --exec xdg-open and the URL as separate words" 1 \
+  "$(grep -c ' --exec xdg-open ' "$STUB_NOTIFY_LOG" || true)"
+check "and the command ends with xdg-open and the URL" 1 \
+  "$(awk '{ if ($(NF-1) == "xdg-open" && $NF ~ /^https:\/\//) n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+teardown
+
+test_case "a failed pool section does not wipe or resolve the alert half"
+setup; single_instance_config
+notify_endpoints "$ROOT/tests/fixtures/alerts-critical.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+check "the alert fired once" 1 "$(notifications)"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-critical.json"
+respond_add "/api/v2.0/pool"        7 0 /dev/null
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+poll
+check "the alert half is preserved" 1 "$(seen '.alerts | length')"
+check "no resolution toast" 0 "$(grep -c 'Resolved' "$STUB_NOTIFY_LOG" || true)"
+poll
+check "the still-firing alert stays quiet" 1 "$(notifications)"
+teardown
+
+test_case "a section that cannot be normalized is not a resolution"
+setup; single_instance_config
+respond "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-critical.json"
+poll
+check "the alert fired once" 1 "$(notifications)"
+# A valid-shaped array the normalizer cannot read must not empty the alert half
+# and read that erasure as the alert having cleared.
+printf '[ "not-an-alert" ]' >"$WORK/alerts-unreadable.json"
+respond "/api/v2.0/alert/list" 0 200 "$WORK/alerts-unreadable.json"
+poll
+check "no bogus resolution toast" 1 "$(notifications)"
+check "the alert half is preserved" 1 "$(seen '.alerts | length')"
+teardown
