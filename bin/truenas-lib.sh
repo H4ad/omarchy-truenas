@@ -94,12 +94,14 @@ tn_load_config() {
       timeoutSeconds:  ([(.timeoutSeconds // 8), 2] | max),
       insecureTLS:     (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
       notify: {
-        severities:                    (.notify.severities // ["critical","error","warning"]),
-        resolved:                      (.notify.resolved // true),
-        nodata:                        (.notify.nodata // false),
+        levels:                        (.notify.levels // ["critical","error","warning"]),
+        # `//` treats an explicit false as absent, and false is the whole point
+        # of these three fields, so each is echoed only when it is a boolean.
+        resolved:                      (if (.notify.resolved | type) == "boolean" then .notify.resolved else true end),
+        nodata:                        (if (.notify.nodata | type) == "boolean" then .notify.nodata else false end),
         renotifyMinutes:               (.notify.renotifyMinutes // 0),
         batchThreshold:                (.notify.batchThreshold // 3),
-        stickyCritical:                (.notify.stickyCritical // false),
+        stickyCritical:                (if (.notify.stickyCritical | type) == "boolean" then .notify.stickyCritical else false end),
         connectionFailuresBeforeToast: (.notify.connectionFailuresBeforeToast // 3),
         metaMaxAgeSeconds:             (.notify.metaMaxAgeSeconds // 300),
         instances:                     (.notify.instances // null),

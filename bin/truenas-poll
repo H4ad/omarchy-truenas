@@ -9,6 +9,7 @@ TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=./truenas-lib.sh
 . "$TN_PLUGIN_DIR/bin/truenas-lib.sh"
 
+NOTIFY_BIN=${TRUENAS_NOTIFY_BIN:-omarchy-notification-send}
 QUIET=0
 FORCE_META=0
 for arg in "$@"; do
@@ -23,12 +24,60 @@ config=$(tn_load_config)
 config_error=$(jq -r '.configError // ""' <<<"$config")
 poll_seconds=$(jq -r '.pollSeconds // 30' <<<"$config")
 timeout=$(jq -r '.timeoutSeconds // 8' <<<"$config")
+notify_json=$(jq -c '.notify // {}' <<<"$config")
 instance=$(jq -c '.instances[0] // empty' <<<"$config")
+STICKY_CRITICAL=$(jq -r 'if .stickyCritical == null then false else .stickyCritical end' <<<"$notify_json")
+
+# The Nerd Font glyphs the bar and the toasts share. Critical is the warning
+# triangle, not a red circle, so a pool status and an alert read the same way.
+GLYPH_CRITICAL=$'\uf071'
+GLYPH_ALERT=$'\uf0f3'
+GLYPH_OK=$'\uf00c'
+GLYPH_OFFLINE=$'\uf1e6'
+
+# Every toast goes out as an argv array, never a shell string: alert text is
+# shaped by anyone who can make the NAS emit an alert, and it is passed only as
+# an argv element. The exec URL is built here from the configured base, never
+# from payload text.
+notify() {
+  local urgency=$1 glyph=$2 url=$3 head=$4 body=${5:-}
+  local args=(--app-name truenas -u "$urgency" -g "$glyph")
+  if [[ -n $url ]]; then
+    args+=(--exec "xdg-open $(printf '%q' "$url")")
+  fi
+  if [[ -n $body ]]; then
+    "$NOTIFY_BIN" "${args[@]}" "$head" "$body" >/dev/null 2>&1 || true
+  else
+    "$NOTIFY_BIN" "${args[@]}" "$head" >/dev/null 2>&1 || true
+  fi
+}
+
+# A critical-urgency toast never expires, which for a feed of alerts builds a
+# wall that buries everything else. Critical maps to normal by default; staying
+# on screen is opt-in through notify.stickyCritical.
+urgency_for() {
+  case $1 in
+    critical|error)
+      if [[ ${STICKY_CRITICAL:-false} == true ]]; then printf 'critical'
+      else printf 'normal'; fi ;;
+    warning) printf 'normal' ;;
+    *)       printf 'low' ;;
+  esac
+}
+
+glyph_for() {
+  case $1 in
+    critical|error) printf '%s' "$GLYPH_CRITICAL" ;;
+    *)              printf '%s' "$GLYPH_ALERT" ;;
+  esac
+}
 
 now=$(tn_now)
 previous=$(tn_read_json "$TN_STATE_FILE" '{}')
+seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
 prev_failures=$(jq -r '.connection.consecutiveFailures // 0' <<<"$previous")
 prev_last_ok=$(jq -r '.connection.lastOkAt // ""' <<<"$previous")
+prev_outage=$(jq -r '.connection.outageNotified // false' <<<"$previous")
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/truenas-poll.XXXXXX")
 # TN_BODY is its own mktemp under TMPDIR rather than one inside $WORK, so
@@ -105,6 +154,8 @@ error=""
 message=""
 code=0
 latency=0
+pool_error=""
+attempted=0
 default_payload
 
 if [[ -n $config_error || -z $instance ]]; then
@@ -121,6 +172,7 @@ else
     error=${resolved#err:}
   else
     key=${resolved#ok:}
+    attempted=1
 
     fetch alert "/api/v2.0/alert/list" "$WORK/alerts.json"
     # The alerts request is the connection: its code, latency and reason.
@@ -130,6 +182,10 @@ else
     latency=$TN_TIME_MS
 
     fetch pool   "/api/v2.0/pool"        "$WORK/pools.json"
+    # Remembered apart from `error`: alert failure is the connection, but a
+    # failed pool call must not read as every pool having gone or come back.
+    pool_error=$S_ERR
+
     fetch system "/api/v2.0/system/info" "$WORK/system.json"
 
     if ! jq -n -f "$TN_PLUGIN_DIR/share/normalize.jq" \
@@ -152,6 +208,172 @@ else
   last_ok=$prev_last_ok
 fi
 
+# --- Notifications and seen.json --------------------------------------------
+# A failed poll leaves seen.json untouched, so a network blip cannot replay
+# every alert as new on recovery. The outage counter rides in state.json rather
+# than seen.json: it advances on failure, and its recovery ping is sent once.
+outage_notified=$prev_outage
+if [[ -n $error ]]; then
+  threshold=$(jq -r '.connectionFailuresBeforeToast // 3' <<<"$notify_json")
+  if (( attempted )) && [[ $prev_outage != true ]] && (( failures >= threshold )); then
+    notify low "$GLYPH_OFFLINE" "$base" "TrueNAS unreachable" "${message:-$error}"
+    outage_notified=true
+  fi
+else
+  # A successful poll after an outage we toasted is the one recovery ping.
+  if [[ $prev_outage == true ]]; then
+    notify low "$GLYPH_OK" "$base" "TrueNAS reachable again" ""
+  fi
+  outage_notified=false
+
+  levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
+  renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
+  batch=$(jq -r '.batchThreshold // 3' <<<"$notify_json")
+  want_resolved=$(jq -r 'if .resolved == null then true else .resolved end' <<<"$notify_json")
+
+  jq -c -n \
+    --slurpfile payload "$WORK/payload.json" \
+    --argjson seen "$seen" \
+    --argjson levels "$levels" \
+    --argjson renotify "$renotify" \
+    --arg now "$now" '
+    ($payload[0]) as $p
+    | ($seen.alerts // {}) as $prev
+    | ($p.alerts // []) as $all
+    # A dismissed alert is out of the notification path completely: no first
+    # toast, no renotify, and no seen entry, so a later sighting is new again.
+    # The resolved list is computed against the whole array, dismissed rows
+    # included, so dismissing one never reads as it clearing.
+    | ($all | map(select(.dismissed != true))
+            | map(select(.level as $l | $levels | index($l)))) as $eligible
+    | ($now | fromdateiso8601) as $t
+    | {
+        firing: [ $eligible[] | select($prev[.uuid] == null) ],
+        renotify: [ $eligible[]
+                    | select($prev[.uuid] != null)
+                    | select($renotify > 0)
+                    | select((($prev[.uuid].lastNotifiedAt // "1970-01-01T00:00:00Z")
+                              | fromdateiso8601) + ($renotify * 60) <= $t) ],
+        resolved: [ $prev | to_entries[] as $e
+                    | select( ($all | map(.uuid) | index($e.key)) == null )
+                    | $e.value + { uuid: $e.key } ]
+      }' >"$WORK/decisions.json"
+
+  firing_count=$(jq '.firing | length' "$WORK/decisions.json")
+  if (( firing_count > batch )); then
+    crit=$(jq '[ .firing[] | select(.level == "critical" or .level == "error") ] | length' \
+      "$WORK/decisions.json")
+    notify normal "$GLYPH_CRITICAL" "$base" \
+      "$firing_count new alerts" "$crit critical or error"
+  else
+    while IFS= read -r a; do
+      [[ -n $a ]] || continue
+      sev=$(jq -r '.level' <<<"$a")
+      notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "$base" \
+        "$(jq -r '.text // "alert"' <<<"$a")" \
+        "$(jq -r '.node // ""' <<<"$a")"
+    done < <(jq -c '.firing[]' "$WORK/decisions.json")
+  fi
+
+  while IFS= read -r a; do
+    [[ -n $a ]] || continue
+    sev=$(jq -r '.level' <<<"$a")
+    notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "$base" \
+      "Still firing: $(jq -r '.text // "alert"' <<<"$a")" \
+      "$(jq -r '.node // ""' <<<"$a")"
+  done < <(jq -c '.renotify[]' "$WORK/decisions.json")
+
+  if [[ $want_resolved == true ]]; then
+    while IFS= read -r a; do
+      [[ -n $a ]] || continue
+      notify low "$GLYPH_OK" "$base" \
+        "Resolved: $(jq -r '.name // "alert"' <<<"$a")" \
+        "$(jq -r 'if .firstSeenAt then "fired since " + .firstSeenAt else "" end' <<<"$a")"
+    done < <(jq -c '.resolved[]' "$WORK/decisions.json")
+  fi
+
+  seen_next=$(jq -c -n \
+    --argjson seen "$seen" \
+    --slurpfile payload "$WORK/payload.json" \
+    --slurpfile decisions "$WORK/decisions.json" \
+    --arg now "$now" '
+    ($payload[0]) as $p
+    | ($decisions[0]) as $d
+    | ($seen.alerts // {}) as $prev
+    | (reduce ($p.alerts[]? | select(.dismissed != true)) as $a ({};
+        .[$a.uuid] = {
+          level: $a.level,
+          name: $a.text,
+          firstSeenAt: ($prev[$a.uuid].firstSeenAt // $now),
+          lastNotifiedAt: (
+            if (($d.firing | map(.uuid) | index($a.uuid)) != null)
+               or (($d.renotify | map(.uuid) | index($a.uuid)) != null)
+            then $now
+            else ($prev[$a.uuid].lastNotifiedAt // $now) end)
+        })) as $next
+    | $seen + { alerts: $next }')
+  [[ -n $seen_next ]] && seen=$seen_next
+
+  if [[ -z $pool_error ]]; then
+    jq -c -n \
+      --slurpfile payload "$WORK/payload.json" \
+      --argjson seen "$seen" \
+      --arg now "$now" '
+      ($payload[0]) as $p
+      | ($seen.pools // {}) as $prev
+      | {
+          worsened: [ ($p.pools // [])[] as $pool
+                      | ($prev[$pool.name] // null) as $old
+                      | select($pool.status != "ONLINE")
+                      | select(($old == null) or ($old.status == "ONLINE"))
+                      | { name: $pool.name, status: $pool.status } ],
+          recovered: [ ($p.pools // [])[] as $pool
+                       | ($prev[$pool.name] // null) as $old
+                       | select($pool.status == "ONLINE")
+                       | select($old != null and $old.status != "ONLINE")
+                       | { name: $pool.name, status: $pool.status } ]
+        }' >"$WORK/pool-decisions.json"
+
+    while IFS= read -r p; do
+      [[ -n $p ]] || continue
+      notify normal "$GLYPH_CRITICAL" "$base" \
+        "Pool $(jq -r '.name' <<<"$p") is $(jq -r '.status' <<<"$p")" ""
+    done < <(jq -c '.worsened[]' "$WORK/pool-decisions.json")
+
+    while IFS= read -r p; do
+      [[ -n $p ]] || continue
+      notify low "$GLYPH_OK" "$base" \
+        "Pool $(jq -r '.name' <<<"$p") is ONLINE again" ""
+    done < <(jq -c '.recovered[]' "$WORK/pool-decisions.json")
+
+    seen_pools=$(jq -c -n \
+      --argjson seen "$seen" \
+      --slurpfile payload "$WORK/payload.json" \
+      --slurpfile decisions "$WORK/pool-decisions.json" \
+      --arg now "$now" '
+      ($payload[0]) as $p
+      | ($decisions[0]) as $d
+      | ($seen.pools // {}) as $prev
+      | (reduce ($p.pools[]?) as $pool ({};
+          .[$pool.name] = {
+            status: $pool.status,
+            lastNotifiedAt: (
+              if (($d.worsened | map(.name) | index($pool.name)) != null)
+                 or (($d.recovered | map(.name) | index($pool.name)) != null)
+              then $now
+              else ($prev[$pool.name].lastNotifiedAt // $now) end)
+          })) as $next
+      | $seen + { pools: $next }')
+    [[ -n $seen_pools ]] && seen=$seen_pools
+  fi
+fi
+
+# Only a successful poll writes seen.json: a failed one must not advance (or
+# create) it, which is what lets a recovery replay nothing.
+if [[ -z $error ]]; then
+  printf '%s\n' "$seen" | tn_write_json "$TN_SEEN_FILE"
+fi
+
 jq -n \
   --slurpfile payload "$WORK/payload.json" \
   --argjson warnings "$warnings" \
@@ -160,6 +382,7 @@ jq -n \
   --arg error "$error" --arg message "$message" \
   --argjson code "${code:-0}" --argjson latency "${latency:-0}" \
   --argjson failures "$failures" --arg lastOk "$last_ok" \
+  --argjson outageNotified "$outage_notified" \
   --arg dialect "$(tn_dialect)" '
   ($payload[0]) as $p
   | ($warnings // []) as $w
@@ -175,6 +398,7 @@ jq -n \
         message: (if $message == "" then null else $message end),
         consecutiveFailures: $failures,
         lastOkAt: (if $lastOk == "" then null else $lastOk end),
+        outageNotified: $outageNotified,
         version: (if (($p.system // {}).version // "") == "" then null else $p.system.version end),
         dialect: $dialect
       },
