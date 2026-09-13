@@ -4,18 +4,34 @@
 # tree with symlinks in it.
 set -euo pipefail
 
+if ! command -v jq >/dev/null 2>&1; then
+  printf 'dev-install: jq is required to read the manifest id; install jq and retry\n' >&2
+  exit 1
+fi
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ID=$(jq -r .id "$ROOT/manifest.json")
 DEST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$ID"
 
+# A stale file from a previous install is worse than a missing one: the shell
+# keeps loading it, the source no longer has it, and edits appear to do nothing.
+# Drop the whole directory and copy fresh every time.
+rm -rf "$DEST"
 mkdir -p "$DEST"
-# Every .js the QML imports has to be here: a missing one is not a build error,
-# it is a view that fails to load at runtime on someone else's machine.
-for path in manifest.json Model.js Search.js Links.js BarVariants.js BarWidget.qml Panel.qml \
-            Menu.qml Service.qml Views Ui bin share LICENSE README.md; do
-  [[ -e $ROOT/$path ]] || continue
-  rm -rf "$DEST/$path"
-  cp -r "$ROOT/$path" "$DEST/$path"
+
+# Copy every top-level entry except the deny-list. Listing what to *include*
+# instead means a new top-level runtime file is silently left out of the
+# install; a new file inside a copied directory is already covered.
+DENY=(.git .agent docs tests scripts preview.png .gitignore)
+for entry in "$ROOT"/* "$ROOT"/.[!.]*; do
+  [[ -e $entry ]] || continue
+  name=$(basename "$entry")
+  denied=0
+  for deny in "${DENY[@]}"; do
+    if [[ $name == "$deny" ]]; then denied=1; break; fi
+  done
+  if ((denied)); then continue; fi
+  cp -r "$entry" "$DEST/$name"
 done
 
 if command -v omarchy-plugin-validate >/dev/null 2>&1; then
@@ -25,9 +41,13 @@ fi
 # reloads the widget, but a panel loaded through a Loader keeps running its old
 # compiled component, so a QML edit appears to do nothing. Restarting the shell
 # is the only reliable way to see a panel change.
-if [[ ${1:-} == --restart ]] && command -v omarchy-restart-shell >/dev/null 2>&1; then
-  omarchy-restart-shell >/dev/null 2>&1 || true
-  printf 'installed %s and restarted the shell\n' "$ID"
+if [[ ${1:-} == --restart ]]; then
+  if command -v omarchy-restart-shell >/dev/null 2>&1 &&
+    omarchy-restart-shell >/dev/null 2>&1; then
+    printf 'installed %s and restarted the shell\n' "$ID"
+  else
+    printf 'installed %s: could not restart the shell, restart it manually\n' "$ID"
+  fi
   exit 0
 fi
 

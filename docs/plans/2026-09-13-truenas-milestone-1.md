@@ -207,9 +207,9 @@ this and the stub tests it.
   "id": "io.github.h4ad.truenas",
   "name": "TrueNAS",
   "version": "0.1.0",
-  "author": "Vinicius Lourenco",
+  "author": "Vinícius Lourenço",
   "license": "MIT",
-  "description": "TrueNAS health on the Omarchy bar: pools, alerts, disks, apps, replication and shares, with a popout and notifications.",
+  "description": "TrueNAS pool health and active alerts on the Omarchy bar, with desktop notifications and a popout for pools, alerts and system state.",
   "homepage": "https://github.com/h4ad/omarchy-truenas",
   "kinds": ["bar-widget", "menu", "service"],
   "keepLoaded": true,
@@ -234,9 +234,9 @@ this and the stub tests it.
     "schema": [
       { "key": "variant", "type": "enum",
         "label": "What the bar shows",
-        "options": ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full"],
+        "options": ["Default", "Icon", "Alerts", "Capacity", "Pool", "Full"],
         "defaultValue": "Default",
-        "description": "Default follows display.barVariant from the config; the rest pin this item. Icon is the glyph tinted by the worst state. Alerts is the active alert count. Capacity is the fullest pool. Pool is the worst pool status word. Temp is the hottest disk. Full adds alerts and capacity. An unreachable or unconfigured NAS overrides all of them with a plug or cog: a number the plugin cannot vouch for is never printed as one." },
+        "description": "Default is the active alert count when anything is firing, otherwise the fullest pool's capacity. Icon is the glyph alone, tinted by the worst state. Alerts is the active alert count. Capacity is the fullest pool. Pool is the worst pool status word. Full adds alerts and capacity. An unreachable or unconfigured NAS overrides every variant with a plug or cog: a number the plugin cannot vouch for is never printed as one." },
       { "key": "hideWhenHealthy", "type": "boolean",
         "label": "Hide the icon when everything is healthy",
         "defaultValue": false,
@@ -492,8 +492,9 @@ Views: `open base + "/ui/alerts"`, `/ui/storage`, `/ui/system`, `/ui/apps`.
 **Files:** `BarVariants.js`; test `tests/bar-variants.mjs`.
 
 Segments per variant exactly as the manifest description promises. `resolveVariant`
-takes the pinned setting, falls back to `state.display.barVariant`, then `Default`.
-`isMultiColour` for the tinted per-level row like the reference.
+takes the pinned setting; an empty or unknown setting resolves to the built-in
+`Default` (the active alert count when anything is firing, otherwise the fullest
+pool's capacity). `isMultiColour` for the tinted per-level row like the reference.
 
 **Commit:** `feat: define bar variants`.
 
