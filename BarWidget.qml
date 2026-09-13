@@ -282,7 +282,7 @@ BarWidget {
     dimmed: root.quiet || root.degraded
     fontSize: Style.font.caption
     fixedWidth: root.tintedSegments
-      ? Math.max(12, segmentSizer.implicitWidth + scaledHorizontalMargin * 2)
+      ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
       : -1
     slotSize: Style.bar.statusSlot
     tooltipText: Model.tooltipFor(root.state, root.mode) + (root.nowTick, "")

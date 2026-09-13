@@ -22,11 +22,14 @@ Column {
     if (!view.connected)
       return "No answer from the NAS: " + (Model.errorSentence(view.connection) || "the poll failed")
     var system = view.nasState.system || {}
-    var counts = view.nasState.counts || {}
+    var counts = view.nasState.counts || null
     var pools = Model.arrayLike(view.nasState.pools) ? view.nasState.pools : []
     var host = String(system.hostname || "")
+    var alerts = (counts && typeof counts.total === "number")
+      ? counts.total + " active alerts"
+      : "alert count unknown"
     return "Connected" + (host !== "" ? " to " + host : "")
-      + " · " + (counts.total || 0) + " active alerts"
+      + " · " + alerts
       + " · " + pools.length + " pools"
   }
 
