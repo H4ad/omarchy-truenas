@@ -55,9 +55,13 @@ tn_write_json() {
   tmp=$(mktemp "${TMPDIR:-/tmp}/truenas-write.XXXXXX")
   cat >"$tmp"
   if [[ -s $tmp ]] && jq -e . "$tmp" >/dev/null 2>&1; then
-    tn_write_atomic "$target" <"$tmp"
+    if tn_write_atomic "$target" <"$tmp"; then
+      rm -f "$tmp"
+      return 0
+    fi
     rm -f "$tmp"
-    return 0
+    tn_warn "could not write $target"
+    return 1
   fi
   rm -f "$tmp"
   tn_warn "refusing to write invalid JSON to $target"
@@ -79,7 +83,7 @@ tn_load_config() {
     printf '{"configError":"unconfigured","instances":[]}\n'
     return 0
   fi
-  if ! jq -e . "$cfg" >/dev/null 2>&1; then
+  if ! jq -e 'type == "object"' "$cfg" >/dev/null 2>&1; then
     printf '{"configError":"config_not_json","instances":[]}\n'
     return 0
   fi
@@ -260,6 +264,15 @@ tn_classify() {
     esac
     return 0
   fi
+  # A status that names the failure on its own is read before the body, so an
+  # empty-body 401 or 404 still classifies instead of falling through to a JSON
+  # complaint, and a 202 carrying a body is not mistaken for a non-2xx.
+  case $code in
+    401) printf 'unauthenticated'; return 0 ;;
+    403) printf 'forbidden'; return 0 ;;
+    404) printf 'not_found'; return 0 ;;
+    5??) printf 'server_error'; return 0 ;;
+  esac
   # A successful DELETE answers with no body at all, which is not a failure.
   if [[ ! -s $body ]]; then
     case $code in
@@ -276,11 +289,7 @@ tn_classify() {
   local kind
   kind=$(jq -r '.error.code // .error.type // ""' "$body" 2>/dev/null)
   case $code in
-    200|201|204) printf '' ;;
-    401) printf 'unauthenticated' ;;
-    403) printf 'forbidden' ;;
-    404) printf 'not_found' ;;
-    5??) printf 'server_error' ;;
+    200|201|202|204) printf '' ;;
     *)   [[ -n $kind ]] && printf '%s' "$kind" || printf 'http_%s' "$code" ;;
   esac
 }
