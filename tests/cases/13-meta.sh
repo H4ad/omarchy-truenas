@@ -13,10 +13,13 @@ alert_requests()     { grep -c '/api/v2.0/alert/list'        "$STUB_CURL_LOG" ||
 pool_requests()      { grep -c '/api/v2.0/pool'              "$STUB_CURL_LOG" || true; }
 disk_requests()      { grep -c '/api/v2.0/disk/details'      "$STUB_CURL_LOG" || true; }
 disk_temp_requests() { grep -c '/api/v2.0/disk/temperatures' "$STUB_CURL_LOG" || true; }
+service_requests()   { grep -c '/api/v2.0/service'           "$STUB_CURL_LOG" || true; }
+app_requests()       { grep -c '/api/v2.0/app'               "$STUB_CURL_LOG" || true; }
 meta_file()          { jq -r "$1" "$XDG_STATE_HOME/omarchy/truenas/meta.json"; }
 
 # The whole map every poll needs, with the system response variable so a case
-# can change it between polls without losing the alert, pool and disk entries.
+# can change it between polls without losing the alert, pool, disk, service and
+# app entries.
 meta_responses() {
   local rc=${1:-0} code=${2:-200} body=${3:-$ROOT/tests/fixtures/system-info.json}
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
@@ -24,6 +27,8 @@ meta_responses() {
   respond_add "/api/v2.0/system/info" "$rc" "$code" "$body"
   respond_add "/api/v2.0/disk/details"      0 200 "$ROOT/tests/fixtures/disks.json"
   respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+  respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
+  respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
 }
 
 # A system/info body whose version is the one field a case varies.
@@ -51,6 +56,8 @@ check "with an ISO fetch time of their own" true \
   "$(meta_file '.diskTemps.fetchedAt | test("^[0-9]{4}-")')"
 check "the cold poll fetched the details once" 1 "$(disk_requests)"
 check "and the temperatures once" 1 "$(disk_temp_requests)"
+check "and the services once" 1 "$(service_requests)"
+check "and the apps once" 1 "$(app_requests)"
 poll
 check "the second poll stays inside the window" 1 "$(system_requests)"
 check "the system still reaches state from the cache" 25.04.2 "$(state '.system.version')"
@@ -58,10 +65,14 @@ check "and the alerts request still happened" 2 "$(alert_requests)"
 check "so did the pool request" 2 "$(pool_requests)"
 check "the cached poll makes no disk request" 1 "$(disk_requests)"
 check "nor a temperatures request" 1 "$(disk_temp_requests)"
-check "a warm poll is two fast requests" 7 "$(requests)"
+check "nor a service request" 1 "$(service_requests)"
+check "nor an app request" 1 "$(app_requests)"
+check "a warm poll is two fast requests" 9 "$(requests)"
 check "the disk rows still reach state from the cache" 5 "$(state '.disks | length')"
 check "with their temperature normalized" 38 \
   "$(state '.disks[] | select(.name=="sda") | .tempC')"
+check "the cached service rows still reach state" 8 "$(state '.services | length')"
+check "so do the cached apps" 4 "$(state '.apps | length')"
 teardown
 
 test_case "--force-meta spends one more system request and refreshes the version"
@@ -80,6 +91,8 @@ check "nor the temperatures" 1 "$(disk_temp_requests)"
 check "--force-meta spends exactly one more" 2 "$(system_requests)"
 check "and one more disk fetch" 2 "$(disk_requests)"
 check "and one more temperatures fetch" 2 "$(disk_temp_requests)"
+check "and one more service fetch" 2 "$(service_requests)"
+check "and one more app fetch" 2 "$(app_requests)"
 check "and reports the new version" 25.10.0 "$(state '.system.version')"
 check "the alerts are still polled every time" 3 "$(alert_requests)"
 teardown
@@ -173,24 +186,26 @@ check "the meta file is byte-for-byte the previous one" "$before" \
   "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
 teardown
 
-test_case "a meta.json missing either disk key self-heals on the next poll"
+test_case "a meta.json missing any slow-section key self-heals on the next poll"
 setup; single_instance_config
 meta_responses
 poll
 # A cache from before this milestone: a usable system section, a fresh fetch
-# time, and one disk key at a time missing. The fresh age must not save it;
-# each presence predicate has to stand on its own.
-for missing in disks diskTemps; do
+# time, and one slow-section key at a time missing. The fresh age must not save
+# it; each presence predicate has to stand on its own.
+for missing in disks diskTemps services apps; do
   jq -c --arg k "$missing" 'del(.[$k])' \
     "$XDG_STATE_HOME/omarchy/truenas/meta.json" >"$WORK/meta-m1.json"
   cp "$WORK/meta-m1.json" "$XDG_STATE_HOME/omarchy/truenas/meta.json"
   : >"$STUB_CURL_LOG"
   poll
-  check "a cache missing $missing is stale and refetches all five" 5 "$(requests)"
+  check "a cache missing $missing is stale and refetches all seven" 7 "$(requests)"
   check "and $missing is written again" true "$(meta_file "has(\"$missing\")")"
 done
 check "the disk rows are cached again" 5 "$(meta_file '.disks.rows | length')"
 check "and the temperature map too" 5 "$(meta_file '.diskTemps.map | length')"
+check "and the service rows too" 8 "$(meta_file '.services.rows | length')"
+check "and the app rows too" 4 "$(meta_file '.apps.rows | length')"
 check "the old system data was not lost" 25.04.2 "$(state '.system.version')"
 teardown
 
@@ -203,6 +218,8 @@ respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.js
 respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
 respond_add "/api/v2.0/disk/details" 0 200 "$WORK/disks-with-ids.json"
 respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
 poll
 check "no cached row carries a serial, identifier or lunid" 0 \
   "$(meta_file '[.disks.rows[] | select(has("serial") or has("identifier") or has("lunid"))] | length')"
@@ -211,6 +228,31 @@ check "the consumed fields survive the filter" boot-pool \
 check "the filtered rows still normalize" 5 "$(state '.disks | length')"
 check "with the temperature from the raw map" 38 \
   "$(state '.disks[] | select(.name=="sda") | .tempC')"
+teardown
+
+test_case "the meta cache keeps the consumed app fields and drops notes and image ids"
+setup; single_instance_config
+meta_responses
+poll
+check "the app rows are cached" 4 "$(meta_file '.apps.rows | length')"
+check "no cached app row carries notes" 0 \
+  "$(meta_file '[.apps.rows[] | select(has("notes"))] | length')"
+check "no cached app row carries an image identifier" 0 \
+  "$(meta_file '[.apps.rows[] | select(has("image") or has("image_id"))] | length')"
+check "nor a workload detail beyond the container count" 0 \
+  "$(meta_file '[.apps.rows[] | select(.active_workloads | has("container_details") or has("used_ports"))] | length')"
+check "the reduced workload count survives" 1 \
+  "$(meta_file '.apps.rows[] | select(.name=="appc") | .active_workloads.containers')"
+check "the consumed metadata survives the filter" appc \
+  "$(meta_file '.apps.rows[] | select(.name=="appc") | .metadata.title')"
+check "the cached wire key is kept, not a normalized row" 16.0.4-rootless_1.2.39 \
+  "$(meta_file '.apps.rows[] | select(.name=="appc") | .human_version')"
+check "the service rows are cached" 8 "$(meta_file '.services.rows | length')"
+check "no cached service row carries pids" 0 \
+  "$(meta_file '[.services.rows[] | select(has("pids"))] | length')"
+check "the service wire key is kept" RUNNING \
+  "$(meta_file '.services.rows[] | select(.service=="cifs") | .state')"
+check "and the filtered rows still normalize" 8 "$(state '.services | length')"
 teardown
 
 test_case "the meta cache round-trips a null system field"

@@ -11,6 +11,8 @@ all_healthy() {
   respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
   respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
   respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+  respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
+  respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
 }
 
 test_case "a healthy NAS reports the pools and a quiet count"
@@ -38,6 +40,34 @@ check "critical" 60 "$(state '.disks[] | select(.name=="sda") | .tempCriticalC')
 check "state ok" ok "$(state '.disks[] | select(.name=="sda") | .tempState')"
 check "the model is carried" SATA_HDD_500G "$(state '.disks[] | select(.name=="sda") | .model')"
 check "the size is a number" 500107862016 "$(state '.disks[] | select(.name=="sda") | .size')"
+check "eight services" 8 "$(state '.services | length')"
+check "services sorted by name" "cifs,ftp,iscsitarget,nfs,nvmet,snmp,ssh,ups" \
+  "$(state '.services | map(.service) | join(",")')"
+check "an enabled service is true" true "$(state '.services[] | select(.service=="cifs") | .enable')"
+check "a disabled service is false" false "$(state '.services[] | select(.service=="ftp") | .enable')"
+check "the service state is the wire string" RUNNING \
+  "$(state '.services[] | select(.service=="ssh") | .state')"
+check "four apps" 4 "$(state '.apps | length')"
+check "apps sorted by name" "appa,appb,appc,appe" \
+  "$(state '.apps | map(.name) | join(",")')"
+check "an app title comes from metadata" appc \
+  "$(state '.apps[] | select(.name=="appc") | .title')"
+check "a missing title falls back to the name" appa \
+  "$(state '.apps[] | select(.name=="appa") | .title')"
+check "a missing container count is null, not 0" null \
+  "$(state '.apps[] | select(.name=="appa") | .containers')"
+check "a real container count is a number" 2 \
+  "$(state '.apps[] | select(.name=="appb") | .containers')"
+check "the Web UI portal is chosen" "Web UI" \
+  "$(state '.apps[] | select(.name=="appc") | .webui.label')"
+check "with its url" "http://nas.example:30142/" \
+  "$(state '.apps[] | select(.name=="appc") | .webui.url')"
+check "a portal with no Web UI uses the first sorted key" Admin \
+  "$(state '.apps[] | select(.name=="appe") | .webui.label')"
+check "an empty portal map is null" null \
+  "$(state '.apps[] | select(.name=="appa") | .webui')"
+check "the upgrade flag is a boolean" true \
+  "$(state '.apps[] | select(.name=="appb") | .upgradeAvailable')"
 check "the details request is a POST" 2 "$(grep -o 'POST' "$STUB_METHOD_LOG" | wc -l)"
 check "with the USED type" 1 "$(grep -c '"type":"USED"' "$STUB_PAYLOAD_LOG" || true)"
 check "and temperatures asked per disk, with thresholds" 1 \
@@ -363,6 +393,42 @@ check "the alerts still count" 1 "$(state '.counts.critical')"
 check "the pools are still present" 2 "$(state '.pools | length')"
 teardown
 
+test_case "a failed service call leaves services empty while pools render"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 500 "$ROOT/tests/fixtures/err-500.json"
+respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
+poll
+check "services are empty, not fabricated rows" "[]" "$(state '.services')"
+check "no service carries a fabricated 0" 0 \
+  "$(state '[.services[]? | select(.id == 0)] | length')"
+check "a warning names the service section" service \
+  "$(state '.warnings[] | select(.section=="service") | .section')"
+check "the pools still render" 2 "$(state '.pools | length')"
+check "and the apps answered" 4 "$(state '.apps | length')"
+teardown
+
+test_case "a failed app call leaves apps empty while pools render"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app"         0 500 "$ROOT/tests/fixtures/err-500.json"
+poll
+check "apps are empty, not fabricated rows" "[]" "$(state '.apps')"
+check "a warning names the app section" app \
+  "$(state '.warnings[] | select(.section=="app") | .section')"
+check "the pools still render" 2 "$(state '.pools | length')"
+check "and the services answered" 8 "$(state '.services | length')"
+teardown
+
 test_case "no instance at all is unconfigured, and still writes state"
 setup
 poll
@@ -378,7 +444,7 @@ setup; single_instance_config
 all_healthy
 "$ROOT/bin/truenas-poll" --quiet --force-meta
 check "connected" true "$(state '.connection.ok')"
-check "five requests on a cold poll" 5 "$(requests)"
+check "seven requests on a cold poll" 7 "$(requests)"
 teardown
 
 test_case "failures accumulate, hold lastOkAt, and reset on recovery"

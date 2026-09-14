@@ -1,7 +1,8 @@
 # Normalizes the TrueNAS REST v2.0 bodies a poll reads into the stable shape
 # state.json carries. Input: --slurpfile system, --slurpfile alerts,
-# --slurpfile pools, --slurpfile disks and --slurpfile diskTemps, each holding
-# one response body (or null when that request failed), plus --arg now.
+# --slurpfile pools, --slurpfile disks, --slurpfile diskTemps, --slurpfile
+# services and --slurpfile apps, each holding one response body (or null when
+# that request failed), plus --arg now.
 # `connection` is built by the poll, not here, because it is about the poll's
 # own reachability rather than the NAS's contents.
 
@@ -159,14 +160,60 @@ def disk_norm($temps):
 def alert_rank:
   { "critical": 0, "error": 1, "warning": 2, "notice": 3, "info": 4 }[.] // 5;
 
+# The service list row. `enable` is true only when the wire says true; a missing
+# enable is false, which is what the list means. A missing state is the empty
+# string, never a fabricated RUNNING, and an absent id is null, never 0.
+def service_norm:
+  {
+    id:      ((.id? // null) | num),
+    service: (.service // ""),
+    state:   (.state // ""),
+    enable:  (.enable == true)
+  };
+
+# The one portal a row links out to. The Web UI entry wins when it is there;
+# otherwise the first key sorted, so the pick is stable across builds. An empty
+# or missing map is null, never a row with empty text.
+def portal_norm:
+  if type != "object" or length == 0 then null
+  elif has("Web UI") then { label: "Web UI", url: (.["Web UI"] // "") }
+  else (to_entries | sort_by(.key) | .[0]) as $e
+       | { label: ($e.key // ""), url: ($e.value // "") }
+  end;
+
+# The app list row. metadata may be absent or null; title falls back to name,
+# version to human_version then version, and every absent string is "", never
+# "undefined". containers is a number or null, never 0, and the booleans default
+# false only because a missing flag is the wire saying off.
+def app_norm:
+  ((.metadata? // {}) | if type == "object" then . else {} end) as $m
+  | {
+      id:               (.id // null),
+      name:             (.name // ""),
+      title:            (if ($m.title // "") == "" then (.name // "") else $m.title end),
+      state:            (.state // ""),
+      version:          (if (.human_version // "") == "" then (.version // "") else .human_version end),
+      appVersion:       ($m.app_version // ""),
+      train:            ($m.train // ""),
+      custom:           (.custom_app == true),
+      upgradeAvailable: (.upgrade_available == true),
+      migrated:         (.migrated == true),
+      containers:       ((.active_workloads.containers? // null) | num),
+      webui:            ((.portals? // {}) | portal_norm)
+    };
+
 ($system[0]) as $sys
 | ($alerts[0] // []) as $alerts_raw
 | ($pools[0]  // []) as $pools_raw
 | ($disks[0]  // []) as $disks_raw
 | ($diskTemps[0] // {}) as $temps
+| ($services[0] // []) as $services_raw
+| ($apps[0]     // []) as $apps_raw
 | ([ $alerts_raw[]? | alert_norm ]) as $alert_rows
 | ([ $pools_raw[]?  | pool_norm  ]) as $pool_rows
 | ([ $disks_raw[]?  | disk_norm($temps) ]) as $disk_rows
+| ([ $services_raw[]? | service_norm ]) as $service_rows
+| ([ $apps_raw[]?     | app_norm     ]) as $app_rows
 # Dismissed alerts stay in `alerts`, flagged, because a row that disappears when
 # it is dismissed is how a person loses track of what they silenced. They leave
 # `counts`, which is what the bar reads, and are counted as `dismissed` there.
@@ -184,5 +231,10 @@ def alert_rank:
     },
     alerts: ($alert_rows | sort_by([(.level | alert_rank), (.datetime // "")])),
     pools:  $pool_rows,
-    disks:  ($disk_rows | sort_by(.name))
+    disks:  ($disk_rows | sort_by(.name)),
+    # A failed services or apps fetch contributes no rows, so the list is empty
+    # and the poll names the section in `warnings`; it never becomes an
+    # empty-but-healthy list. Both sorted for stable tests and UI.
+    services: ($service_rows | sort_by(.service)),
+    apps:     ($app_rows | sort_by(.name))
   }

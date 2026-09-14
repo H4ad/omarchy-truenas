@@ -1,0 +1,10 @@
+[
+  { "id": 3,  "service": "ups",         "enable": false, "state": "STOPPED", "pids": [] },
+  { "id": 2,  "service": "ssh",         "enable": true,  "state": "RUNNING", "pids": [2345] },
+  { "id": 8,  "service": "nfs",         "enable": true,  "state": "RUNNING", "pids": [2346] },
+  { "id": 4,  "service": "cifs",        "enable": true,  "state": "RUNNING", "pids": [2347] },
+  { "id": 5,  "service": "ftp",         "enable": false, "state": "STOPPED", "pids": [] },
+  { "id": 6,  "service": "iscsitarget", "enable": false, "state": "STOPPED", "pids": [] },
+  { "id": 11, "service": "snmp",        "enable": false, "state": "STOPPED", "pids": [] },
+  { "id": 7,  "service": "nvmet",       "enable": false, "state": "STOPPED", "pids": [] }
+]
