@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# The one write path the panel has for alerts. Every verb answers with a single
-# JSON object, so Panel.qml has one shape to parse whether the write landed or
-# not: {"ok":true} on any 2xx, and {error, message} otherwise.
+# The one write path the panel has: alert dismiss/restore, and the service and
+# app control verbs. Every verb answers with a single JSON object, so Panel.qml
+# has one shape to parse whether the write landed or not: {"ok":true} on a JSON
+# 2xx (the NAS answers `true` for a service, a job id for an app), and
+# {error, message} otherwise. A 2xx whose body is not JSON at all is a failure
+# (`not_json`), which is how a route that does not exist is told from a landed
+# write.
 #
 # The key is resolved exactly the way the poller resolves it and handed to curl
-# as a config file on stdin, never in argv. The alert uuid is written into the
+# as a config file on stdin, never in argv. The name or uuid is written into the
 # request body by jq, never interpolated into a shell string, so a value that
 # came off the wire can only ever be one JSON string and never a second field.
 set -uo pipefail
@@ -15,10 +19,16 @@ TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 usage() {
   cat <<'TXT'
-truenas-api <verb> <uuid>
+truenas-api <verb> <name|uuid>
 
-  dismiss <uuid>   dismiss one alert
-  restore <uuid>   restore a dismissed alert
+  dismiss <uuid>          dismiss one alert
+  restore <uuid>          restore a dismissed alert
+  service-start <name>    start a service
+  service-stop <name>     stop a service
+  service-restart <name>  restart a service
+  app-start <name>        start an app
+  app-stop <name>         stop an app
+  app-redeploy <name>     redeploy an app
 
 Answers with one JSON object: {"ok":true} on success, {error, message} otherwise.
 TXT
@@ -32,14 +42,27 @@ fail() {
 tn_have jq || { tn_warn "jq is required"; exit 1; }
 
 # Unknown verb first, so the usage text is the only thing on the way out and the
-# exit status (2) is a different class from a failed write (1).
+# exit status (2) is a different class from a failed write (1). Each arm names
+# its route, the body key the NAS expects and the word for the positional
+# argument, so the request below and this guard read the same table.
 verb=${1:-}
-uuid=${2:-}
+target=${2:-}
 case $verb in
-  dismiss|restore) ;;
+  dismiss)         path=/api/v2.0/alert/dismiss;   body_key=uuid;     what="an alert uuid" ;;
+  restore)         path=/api/v2.0/alert/restore;   body_key=uuid;     what="an alert uuid" ;;
+  service-start)   path=/api/v2.0/service/start;   body_key=service;  what="a service name" ;;
+  service-stop)    path=/api/v2.0/service/stop;    body_key=service;  what="a service name" ;;
+  service-restart) path=/api/v2.0/service/restart; body_key=service;  what="a service name" ;;
+  app-start)       path=/api/v2.0/app/start;       body_key=app_name; what="an app name" ;;
+  app-stop)        path=/api/v2.0/app/stop;        body_key=app_name; what="an app name" ;;
+  app-redeploy)    path=/api/v2.0/app/redeploy;    body_key=app_name; what="an app name" ;;
   *) usage >&2; exit 2 ;;
 esac
-[[ -n $uuid ]] || { tn_warn "a $verb needs an alert uuid"; usage >&2; exit 2; }
+
+# Exactly one positional. A second one is a usage error rather than a silent
+# ignore, because a caller that passed the wrong tuple needs to hear about it.
+(( $# > 2 )) && { tn_warn "truenas-api takes one argument, got $(( $# - 1 ))"; usage >&2; exit 2; }
+[[ -n $target ]] || { tn_warn "a $verb needs $what"; usage >&2; exit 2; }
 
 config=$(tn_load_config)
 config_error=$(jq -r '.configError // ""' <<<"$config")
@@ -58,18 +81,19 @@ resolved=$(tn_resolve_key "$id" \
 [[ $resolved == ok:* ]] || fail "${resolved#err:}"
 key=${resolved#ok:}
 
-# The payload file is the only place the uuid is written, and jq encodes it. The
-# response body is a second mktemp that tn_http_request opens itself; both are
-# named to the trap, because fail exits from below and the rm written after a
-# call is not reached on the error path. TN_BODY is read with a default because
-# the trap is installed before the request has set it and `set -u` is on.
+# The payload file is the only place the name or uuid is written, and jq encodes
+# it. The response body is a second mktemp that tn_http_request opens itself;
+# both are named to the trap, because fail exits from below and the rm written
+# after a call is not reached on the error path. TN_BODY is read with a default
+# because the trap is installed before the request has set it and `set -u` is on.
 TN_BODY=""
-payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX")
+payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX") \
+  || { tn_warn "could not create a temporary file"; exit 1; }
 trap 'rm -f "${payload:-}" "${TN_BODY:-}"' EXIT
 
-jq -n --arg uuid "$uuid" '{ uuid: $uuid }' >"$payload"
+jq -n --arg k "$body_key" --arg v "$target" '{ ($k): $v }' >"$payload"
 
-tn_http_request POST "$base" "/api/v2.0/alert/$verb" "$key" "$timeout" "$payload"
+tn_http_request POST "$base" "$path" "$key" "$timeout" "$payload"
 class=$(tn_classify)
 
 if [[ -z $class ]]; then
@@ -79,9 +103,10 @@ if [[ -z $class ]]; then
   exit 0
 fi
 
-# tn_error_message reads the NAS's own words and reads the body file, so it runs
-# before the body is removed; a curl-level failure has no body, so name the
-# transport instead of printing an empty message.
+# tn_error_message reads the NAS's own words (including the top-level `.message`
+# a service control route uses) and reads the body file, so it runs before the
+# body is removed; a curl-level failure has no body, so name the transport
+# instead of printing an empty message.
 message=$(tn_error_message)
 [[ -n $message ]] || message=$(tn_curl_rc_message "$TN_CURL_RC")
 rm -f "$payload" "$TN_BODY"
