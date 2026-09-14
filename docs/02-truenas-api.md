@@ -1,10 +1,11 @@
 # TrueNAS API surface
 
-Sources: the versioned API reference at <https://api.truenas.com/v25.04.2/>
-(method names, parameter shapes and the REST deprecation note), and live probes
-against the installed TrueNAS SCALE 25.10.6 on 2026-09-13. The REST paths below
-are the ones a poll reads; for the milestone-1 routes the JSON-RPC method in
-brackets is the same operation under the new API, and the migration target.
+Sources: the versioned API references at <https://api.truenas.com/v25.04.2/>
+and <https://api.truenas.com/v25.10/> (method names, parameter shapes and the
+REST deprecation note), and live probes against the installed TrueNAS SCALE
+25.10.6 on 2026-09-13. The REST paths below are the ones a poll reads; for the
+milestone-1 routes the JSON-RPC method in brackets is the same operation under
+the new API, and the migration target.
 
 ## Transport and auth
 
@@ -168,7 +169,7 @@ as a POST here. Verified against the live 25.10.6 on 2026-09-13:
 | disk inventory + pool mapping | POST | `/api/v2.0/disk/details` | `{"type":"USED"}` | JSON array, one object per disk; `imported_zpool` names the pool |
 | temperatures (+ critical) | POST | `/api/v2.0/disk/temperatures` | `{"name":["sda",…],"include_thresholds":true}` | JSON object `{"sda":[38.0,60.0],…}` |
 
-Traps, each one observed on that box:
+Traps, each observed on that box unless marked otherwise:
 
 - `GET /api/v2.0/disk/temperatures` is `405 Method Not Allowed`; the route is
   POST-only.
@@ -179,10 +180,10 @@ Traps, each one observed on that box:
 - `{"type":"BOTH"}` on `disk/details` answers a **`{used,unused}`** object
   instead of an array. M2 uses `USED`: the array shape is simpler, and on the
   live box every disk is in use.
-- With `include_thresholds:true` each value is normally `[tempC, criticalC]`,
-  but a disk that reports no threshold answers a bare number even when
-  thresholds were asked for. `share/normalize.jq` normalizes both shapes; the
-  missing threshold stays `null`, never `0`.
+- With `include_thresholds:true` a value is normally `[tempC, criticalC]`. A
+  bare number is the supported shape for a disk that reports no threshold (a
+  shape rule, not a live probe; `share/normalize.jq` handles both). The missing
+  threshold stays `null`, never `0`.
 - The pool mapping is `imported_zpool` on `disk/details` (the plain `/disk`
   route has `"pool":null` on every row and is not used). Observed:
   `nvme0n1→storage`, `sda,sdb→boot-pool`, `sdc,sdd→Backup`.
@@ -190,11 +191,13 @@ Traps, each one observed on that box:
   them (see the meta cache below).
 
 **SMART test results are not available on 25.04+.** `GET
-/api/v2.0/smart/test/results` answers `404` on the live 25.10.6, and the 25.04
-and 25.10 API references list no `smart.*` method at all -- SMART tests were
-removed after 24.10. Milestone 2 therefore ships temperature notifications only
-(the design's `smartHealth`/`lastTest` disk fields are dropped), and a later
-milestone that wants drive health has to find another signal.
+/api/v2.0/smart/test/results` answers `404` on the live 25.10.6, and both API
+references list no `smart.*` method at all -- 25.04.2
+(<https://api.truenas.com/v25.04/>) and 25.10
+(<https://api.truenas.com/v25.10/>) -- SMART tests were removed after 24.10.
+Milestone 2 therefore ships temperature notifications only (the design's
+`smartHealth`/`lastTest` disk fields are dropped), and a later milestone that
+wants drive health has to find another signal.
 
 ### The disk meta cache
 

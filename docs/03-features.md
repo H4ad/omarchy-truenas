@@ -3,8 +3,9 @@
 What milestones 1 and 2 ship, and what the design defers. The split is the
 design's: bar value against cost (API unknowns plus QML work). The design is
 [plans/2026-09-13-truenas-plugin-design.md](plans/2026-09-13-truenas-plugin-design.md);
-the task-by-task version is
-[plans/2026-09-13-truenas-milestone-1.md](plans/2026-09-13-truenas-milestone-1.md).
+the task-by-task versions are
+[plans/2026-09-13-truenas-milestone-1.md](plans/2026-09-13-truenas-milestone-1.md)
+and [plans/2026-09-13-truenas-milestone-2.md](plans/2026-09-13-truenas-milestone-2.md).
 The endpoints are in [02-truenas-api.md](02-truenas-api.md), and the traps that
 have already cost time are in [11-pitfalls.md](11-pitfalls.md).
 
@@ -71,8 +72,9 @@ reported a threshold. A disk with no reading says `temperature unknown`, never
 read. The filter field matches name, model, type, pool and bus.
 
 **`Temp` bar variant.** A seventh variant: the hottest known disk's temperature,
-rounded and signed (`54°`), tinted by the worst disk state, and blank when no
-disk reports one. It is selectable in Setup > Plugins alongside the other six.
+rounded with a degree sign (`54°`), tinted by the worst disk state, and blank
+when no disk reports one. It is selectable in Setup > Plugins alongside the
+other six.
 
 **Temperature notifications.** A toast when a disk crosses into the warning or
 critical band (`Disk sda is hot` / `61 °C, critical at 60 °C`) and one when it
@@ -83,8 +85,8 @@ does not replay every disk on recovery. There are no SMART toasts: the API
 dropped SMART tests after 24.10 and `smart/test/results` is `404` on 25.10.6.
 
 **`truenasctl disks`.** `NAME  TYPE  SIZE  POOL  TEMP`, where `TEMP` is
-`38 °C` or `unknown`; a failed disk section prints the unknown-reason sentence
-instead of an empty table.
+`38 °C` or `unknown`; a failed disk or temperatures section prints the
+unknown-reason sentence instead of an empty table.
 
 ## Planned
 

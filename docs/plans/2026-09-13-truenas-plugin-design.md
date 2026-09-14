@@ -212,13 +212,13 @@ Deduped in `seen.json`, namespaced by stable key:
 | Alert new / cleared | `alert:<uuid>` | critical/error urgent, warning normal |
 | Pool state change | `pool:<name>:<status>` | worsening urgent, recovery low |
 | Scrub / replication / cloudsync finished | `scrub:<pool>:<start>`, `<task>:<id>:<state>` | failure urgent, success low |
-| Disk temp | `disk:<name>:temp` | warning/critical normal, cooled low |
+| Disk temp | `.disks.<name>` | warning/critical normal, cooled low |
 | App / service down | `app:<id>:state`, `service:<id>:state` | normal |
 | Update available | `update:<version>` | low |
 
-There is no `disk:<name>:smart` row: SMART test results are not available on
-25.04+ (`GET /api/v2.0/smart/test/results` is `404` on the live 25.10.6, and the
-API reference lists no `smart.*` method at all -- SMART tests were dropped after
+There is no SMART entry: SMART test results are not available on 25.04+ (`GET
+/api/v2.0/smart/test/results` is `404` on the live 25.10.6, and the API
+references list no `smart.*` method at all -- SMART tests were dropped after
 24.10), so M2 ships temperature toasts only.
 
 A failed poll leaves `seen.json` untouched, so a network blip does not replay
