@@ -22,6 +22,7 @@ check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
 check "the body carries the uuid" 1 "$(grep -c "$alert_uuid" "$STUB_PAYLOAD_LOG")"
 check "the body is one uuid object" "$alert_uuid" \
   "$(jq -r '.uuid' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" uuid "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 check "the dismiss path was requested" 1 \
   "$(grep -c '/api/v2.0/alert/dismiss' "$STUB_CURL_LOG")"
 teardown
@@ -69,6 +70,7 @@ check "the restore path was requested" 1 \
   "$(grep -c '/api/v2.0/alert/restore' "$STUB_CURL_LOG")"
 check "the dismiss path was not" 0 "$(grep -c '/api/v2.0/alert/dismiss' "$STUB_CURL_LOG")"
 check "the body carries the uuid" 1 "$(grep -c "$alert_uuid" "$STUB_PAYLOAD_LOG")"
+check "the body is one key" uuid "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 teardown
 
 test_case "an unknown verb is a usage error with status 2"
@@ -170,6 +172,7 @@ check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
 check "the exact route" "$api_base/api/v2.0/app/redeploy" \
   "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
 check "the body key is app_name" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" app_name "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 teardown
 
 # The NAS answers an unknown service with the name as a top-level message, not
