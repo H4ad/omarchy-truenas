@@ -352,8 +352,8 @@ else
   # carries no current rows worth recording. Without its gate that half of
   # seen.json is not written: a blip must not replay every service as stopped
   # on the poll after it.
-  services_ok=$((normalize_ok == 1 && service_warned == 0))
-  apps_ok=$((normalize_ok == 1 && app_warned == 0))
+  services_notify_ok=$((normalize_ok == 1 && service_warned == 0))
+  apps_notify_ok=$((normalize_ok == 1 && app_warned == 0))
 
   levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
   renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
@@ -567,119 +567,137 @@ else
     [[ -n $seen_disks ]] && seen=$seen_disks
   fi
 
-  if ((services_ok)); then
-    # A service is down when its state is neither RUNNING nor blank; a blank
-    # state is "I cannot tell", not an outage. Reduce over the current rows only
-    # so a service dropped from the list does not leave a seen entry behind.
+  if ((services_notify_ok)); then
+    # A decisive service state is any non-empty state. seen stores the last
+    # decisive state and a stable `down` boolean, not the raw observation: a
+    # blank or transitional poll carries both forward untouched, so it cannot
+    # erase the signal a later crash or recovery is read against. Reduce over
+    # the current rows only, so a service dropped from the list leaves no seen
+    # entry behind.
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
-      --argjson seen "$seen" '
+      --argjson seen "$seen" \
+      --arg now "$now" '
       ($payload[0]) as $p
       | ($seen.services // {}) as $prev
+      | [ $p.services[]? as $svc
+          | ($prev[$svc.service] // null) as $old
+          | { name: $svc.service,
+              cur: $svc.state,
+              prevState: ($old.state // ""),
+              prevDown: ($old.down // false),
+              decided: ($svc.state != ""),
+              seen: ($old != null) }
+          | . + { down: (if .decided then (.cur != "RUNNING") else .prevDown end) }
+          | . + { stopped:   (.seen and (.prevDown == false) and (.down == true)),
+                  recovered: (.seen and (.prevDown == true) and (.down == false)) } ] as $rows
       | {
-          stopped: [ ($p.services // [])[] as $svc
-                     | ($prev[$svc.service] // null) as $old
-                     | select($svc.state != "RUNNING" and $svc.state != "")
-                     | select($old != null and $old.state == "RUNNING")
-                     | { name: $svc.service, state: $svc.state } ],
-          recovered: [ ($p.services // [])[] as $svc
-                       | ($prev[$svc.service] // null) as $old
-                       | select($svc.state == "RUNNING")
-                       | select($old != null and $old.state != "RUNNING"
-                                and $old.state != "")
-                       | { name: $svc.service, state: $svc.state } ]
-        }' >"$WORK/service-decisions.json"
+          decisions: {
+            stopped: [ $rows[] | select(.stopped)
+                       | { name: .name, state: .cur, prev: .prevState } ],
+            recovered: [ $rows[] | select(.recovered)
+                         | { name: .name, state: .cur } ]
+          },
+          services: (reduce $rows[] as $r ({};
+            .[$r.name] = {
+              state: (if $r.decided then $r.cur else $r.prevState end),
+              down: $r.down,
+              lastNotifiedAt: (
+                if ($r.stopped or $r.recovered) then $now
+                else ($prev[$r.name].lastNotifiedAt // $now) end)
+            }))
+        }' >"$WORK/service-notify.json"
 
     while IFS= read -r s; do
       [[ -n $s ]] || continue
+      svc_name=$(jq -r '.name' <<<"$s")
       svc_state=$(jq -r '.state' <<<"$s")
+      svc_prev=$(jq -r '.prev // ""' <<<"$s")
+      if [[ -n $svc_prev ]]; then
+        svc_body="state changed from $svc_prev to $svc_state"
+      else
+        svc_body="state changed to $svc_state"
+      fi
       notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" \
-        "Service $(jq -r '.name' <<<"$s") is $svc_state" \
-        "state changed from RUNNING to $svc_state"
-    done < <(jq -c '.stopped[]' "$WORK/service-decisions.json")
+        "Service $svc_name is $svc_state" "$svc_body"
+    done < <(jq -c '.decisions.stopped[]' "$WORK/service-notify.json")
 
     while IFS= read -r s; do
       [[ -n $s ]] || continue
       notify low "$GLYPH_OK" "$base" \
         "Service $(jq -r '.name' <<<"$s") is running again" ""
-    done < <(jq -c '.recovered[]' "$WORK/service-decisions.json")
+    done < <(jq -c '.decisions.recovered[]' "$WORK/service-notify.json")
 
-    seen_services=$(jq -c -n \
-      --argjson seen "$seen" \
-      --slurpfile payload "$WORK/payload.json" \
-      --slurpfile decisions "$WORK/service-decisions.json" \
-      --arg now "$now" '
-      ($payload[0]) as $p
-      | ($decisions[0]) as $d
-      | ($seen.services // {}) as $prev
-      | (reduce ($p.services[]?) as $svc ({};
-          .[$svc.service] = {
-            state: $svc.state,
-            lastNotifiedAt: (
-              if (($d.stopped | map(.name) | index($svc.service)) != null)
-                 or (($d.recovered | map(.name) | index($svc.service)) != null)
-              then $now
-              else ($prev[$svc.service].lastNotifiedAt // $now) end)
-          })) as $next
-      | $seen + { services: $next }')
+    seen_services=$(jq -c --argjson seen "$seen" \
+      '. as $d | $seen + { services: $d.services }' "$WORK/service-notify.json")
     [[ -n $seen_services ]] && seen=$seen_services
   fi
 
-  if ((apps_ok)); then
-    # An app is down only in a terminal failure state. DEPLOYING, STARTING,
-    # STOPPING and a blank state are transitions, not outages, so they neither
-    # toast as stopped nor recover from one. Reduce over the current rows only.
+  if ((apps_notify_ok)); then
+    # The decisive and down sets are closed literals. RUNNING, STOPPED, CRASHED,
+    # FAILED and EXITED are decisive; DEPLOYING, STARTING, STOPPING, blank and
+    # anything else off the list are non-decisive and carry the last decisive
+    # state forward. Reduce over the current rows only.
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
-      --argjson seen "$seen" '
+      --argjson seen "$seen" \
+      --arg now "$now" '
       ($payload[0]) as $p
       | ($seen.apps // {}) as $prev
+      | (["RUNNING","STOPPED","CRASHED","FAILED","EXITED"]) as $decisive
       | (["STOPPED","CRASHED","FAILED","EXITED"]) as $down
+      | [ $p.apps[]? as $app
+          | ($prev[$app.name] // null) as $old
+          | { name: $app.name,
+              cur: $app.state,
+              prevState: ($old.state // ""),
+              prevDown: ($old.down // false),
+              decided: (($decisive | index($app.state)) != null),
+              seen: ($old != null) }
+          | .cur as $c
+          | . + { down: (if .decided then (($down | index($c)) != null)
+                         else .prevDown end) }
+          | . + { stopped:   (.seen and (.prevDown == false) and (.down == true)),
+                  recovered: (.seen and (.prevDown == true) and (.down == false)) } ] as $rows
       | {
-          stopped: [ ($p.apps // [])[] as $app
-                     | ($prev[$app.name] // null) as $old
-                     | select($down | index($app.state))
-                     | select($old != null and $old.state == "RUNNING")
-                     | { name: $app.name, state: $app.state } ],
-          recovered: [ ($p.apps // [])[] as $app
-                       | ($prev[$app.name] // null) as $old
-                       | select($app.state == "RUNNING")
-                       | select($old != null and ($down | index($old.state)))
-                       | { name: $app.name, state: $app.state } ]
-        }' >"$WORK/app-decisions.json"
+          decisions: {
+            stopped: [ $rows[] | select(.stopped)
+                       | { name: .name, state: .cur, prev: .prevState } ],
+            recovered: [ $rows[] | select(.recovered)
+                         | { name: .name, state: .cur } ]
+          },
+          apps: (reduce $rows[] as $r ({};
+            .[$r.name] = {
+              state: (if $r.decided then $r.cur else $r.prevState end),
+              down: $r.down,
+              lastNotifiedAt: (
+                if ($r.stopped or $r.recovered) then $now
+                else ($prev[$r.name].lastNotifiedAt // $now) end)
+            }))
+        }' >"$WORK/app-notify.json"
 
     while IFS= read -r a; do
       [[ -n $a ]] || continue
+      app_name=$(jq -r '.name' <<<"$a")
       app_state=$(jq -r '.state' <<<"$a")
+      app_prev=$(jq -r '.prev // ""' <<<"$a")
+      if [[ -n $app_prev ]]; then
+        app_body="state changed from $app_prev to $app_state"
+      else
+        app_body="state changed to $app_state"
+      fi
       notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" \
-        "App $(jq -r '.name' <<<"$a") is $app_state" \
-        "state changed from RUNNING to $app_state"
-    done < <(jq -c '.stopped[]' "$WORK/app-decisions.json")
+        "App $app_name is $app_state" "$app_body"
+    done < <(jq -c '.decisions.stopped[]' "$WORK/app-notify.json")
 
     while IFS= read -r a; do
       [[ -n $a ]] || continue
       notify low "$GLYPH_OK" "$base" \
         "App $(jq -r '.name' <<<"$a") is running again" ""
-    done < <(jq -c '.recovered[]' "$WORK/app-decisions.json")
+    done < <(jq -c '.decisions.recovered[]' "$WORK/app-notify.json")
 
-    seen_apps=$(jq -c -n \
-      --argjson seen "$seen" \
-      --slurpfile payload "$WORK/payload.json" \
-      --slurpfile decisions "$WORK/app-decisions.json" \
-      --arg now "$now" '
-      ($payload[0]) as $p
-      | ($decisions[0]) as $d
-      | ($seen.apps // {}) as $prev
-      | (reduce ($p.apps[]?) as $app ({};
-          .[$app.name] = {
-            state: $app.state,
-            lastNotifiedAt: (
-              if (($d.stopped | map(.name) | index($app.name)) != null)
-                 or (($d.recovered | map(.name) | index($app.name)) != null)
-              then $now
-              else ($prev[$app.name].lastNotifiedAt // $now) end)
-          })) as $next
-      | $seen + { apps: $next }')
+    seen_apps=$(jq -c --argjson seen "$seen" \
+      '. as $d | $seen + { apps: $d.apps }' "$WORK/app-notify.json")
     [[ -n $seen_apps ]] && seen=$seen_apps
   fi
 fi

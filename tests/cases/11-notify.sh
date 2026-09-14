@@ -441,7 +441,7 @@ check "the body carries the transition" 1 \
   "$(grep -c 'state changed from RUNNING to STOPPED' "$STUB_NOTIFY_LOG" || true)"
 check "with the alert glyph" 1 \
   "$(awk -v g=$'\uf0f3' '/Service cifs is STOPPED/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "at warning urgency" 1 \
+check "at normal urgency (warning maps to normal)" 1 \
   "$(awk '/Service cifs is STOPPED/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the exec is argv words, xdg-open then the base" 1 \
   "$(awk '/Service cifs is STOPPED/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
@@ -523,7 +523,7 @@ check "the body carries the transition" 1 \
   "$(grep -c 'state changed from RUNNING to CRASHED' "$STUB_NOTIFY_LOG" || true)"
 check "with the alert glyph" 1 \
   "$(awk -v g=$'\uf0f3' '/App appc is CRASHED/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "at warning urgency" 1 \
+check "at normal urgency (warning maps to normal)" 1 \
   "$(awk '/App appc is CRASHED/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the exec is argv words, xdg-open then the base" 1 \
   "$(awk '/App appc is CRASHED/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
@@ -599,5 +599,150 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
   "$WORK/apps-appc-deploying.json"
 poll
 check "a deploying app is not down" 0 "$(notifications)"
-check "and its state is recorded" DEPLOYING "$(seen '.apps.appc.state')"
+check "and the decisive state is carried forward" RUNNING "$(seen '.apps.appc.state')"
+check "with down still false" false "$(seen '.apps.appc.down')"
+teardown
+
+# --- The decisive state survives a non-decisive poll ------------------------
+# A blank or transitional poll must not clobber the last decisive state: the
+# transition that follows is read against the state that was there before the
+# gap, not against the gap itself. Reading the raw previous observation instead
+# produced missed crashes and phantom recoveries.
+
+test_case "a blank service poll does not erase the running state"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+check "the running baseline is quiet" 0 "$(notifications)"
+down_service cifs "" "$WORK/services-cifs-blank.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-blank.json"
+poll
+check "the blank poll toasts nothing" 0 "$(notifications)"
+check "and carries RUNNING forward" RUNNING "$(seen '.services.cifs.state')"
+check "with down still false" false "$(seen '.services.cifs.down')"
+down_service cifs STOPPED "$WORK/services-cifs-stopped.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-stopped.json"
+poll
+check "the crash after the gap still toasts" 1 "$(notifications)"
+check "reading the state from before the gap" 1 \
+  "$(grep -c 'state changed from RUNNING to STOPPED' "$STUB_NOTIFY_LOG" || true)"
+check "and it is recorded down" true "$(seen '.services.cifs.down')"
+teardown
+
+test_case "a blank service poll does not erase the stopped state"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+down_service cifs STOPPED "$WORK/services-cifs-stopped.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-stopped.json"
+poll
+check "the down toast fired first" 1 "$(notifications)"
+down_service cifs "" "$WORK/services-cifs-blank.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-blank.json"
+poll
+check "the blank poll toasts nothing new" 1 "$(notifications)"
+check "and carries STOPPED forward" STOPPED "$(seen '.services.cifs.state')"
+check "with down still true" true "$(seen '.services.cifs.down')"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+check "the recovery after the gap still toasts" 2 "$(notifications)"
+check "saying it is running again" 1 \
+  "$(grep -c 'Service cifs is running again' "$STUB_NOTIFY_LOG" || true)"
+teardown
+
+test_case "a service first sighted blank toasts a later down with no empty from"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+down_service cifs "" "$WORK/services-cifs-blank.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-blank.json"
+poll
+check "the blank first sighting is quiet" 0 "$(notifications)"
+check "with no decisive state yet" "" "$(seen '.services.cifs.state')"
+down_service cifs STOPPED "$WORK/services-cifs-stopped.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-stopped.json"
+poll
+check "the later down toasts" 1 "$(notifications)"
+check "with no state to name as the from" 1 \
+  "$(grep -c 'state changed to STOPPED' "$STUB_NOTIFY_LOG" || true)"
+check "and never an empty from" 0 \
+  "$(grep -c 'state changed from  to' "$STUB_NOTIFY_LOG" || true)"
+teardown
+
+test_case "a deploying app does not erase the running state"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+check "the running baseline is quiet" 0 "$(notifications)"
+down_app appc DEPLOYING "$WORK/apps-appc-deploying.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$ROOT/tests/fixtures/services.json" \
+  "$WORK/apps-appc-deploying.json"
+poll
+check "the transitional poll toasts nothing" 0 "$(notifications)"
+check "and carries RUNNING forward" RUNNING "$(seen '.apps.appc.state')"
+check "with down still false" false "$(seen '.apps.appc.down')"
+down_app appc CRASHED "$WORK/apps-appc-crashed.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$ROOT/tests/fixtures/services.json" \
+  "$WORK/apps-appc-crashed.json"
+poll
+check "the crash after the transition still toasts" 1 "$(notifications)"
+check "reading the state from before the transition" 1 \
+  "$(grep -c 'state changed from RUNNING to CRASHED' "$STUB_NOTIFY_LOG" || true)"
+check "and it is recorded down" true "$(seen '.apps.appc.down')"
+teardown
+
+test_case "a deploying app does not erase the crashed state"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+down_app appc CRASHED "$WORK/apps-appc-crashed.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$ROOT/tests/fixtures/services.json" \
+  "$WORK/apps-appc-crashed.json"
+poll
+check "the crash toast fired first" 1 "$(notifications)"
+down_app appc DEPLOYING "$WORK/apps-appc-deploying.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$ROOT/tests/fixtures/services.json" \
+  "$WORK/apps-appc-deploying.json"
+poll
+check "the transitional poll toasts nothing new" 1 "$(notifications)"
+check "and carries CRASHED forward" CRASHED "$(seen '.apps.appc.state')"
+check "with down still true" true "$(seen '.apps.appc.down')"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+check "the recovery after the transition still toasts" 2 "$(notifications)"
+check "saying it is running again" 1 \
+  "$(grep -c 'App appc is running again' "$STUB_NOTIFY_LOG" || true)"
+teardown
+
+test_case "one poll toasts a service down and another up"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+jq -c 'map(if .service == "ssh" then .state = "STOPPED" else . end)' \
+  "$ROOT/tests/fixtures/services.json" >"$WORK/services-ssh-stopped.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-ssh-stopped.json"
+poll
+check "the mixed first sighting is quiet" 0 "$(notifications)"
+check "cifs is recorded up" false "$(seen '.services.cifs.down')"
+check "ssh is recorded down" true "$(seen '.services.ssh.down')"
+jq -c 'map(if .service == "cifs" then .state = "STOPPED"
+           elif .service == "ssh" then .state = "RUNNING" else . end)' \
+  "$ROOT/tests/fixtures/services.json" >"$WORK/services-two-moves.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-two-moves.json"
+poll
+check "two toasts from one poll" 2 "$(notifications)"
+check "the service that went down" 1 \
+  "$(grep -c 'Service cifs is STOPPED' "$STUB_NOTIFY_LOG" || true)"
+check "the service that came back" 1 \
+  "$(grep -c 'Service ssh is running again' "$STUB_NOTIFY_LOG" || true)"
+check "cifs is now down" true "$(seen '.services.cifs.down')"
+check "ssh is now up" false "$(seen '.services.ssh.down')"
 teardown
