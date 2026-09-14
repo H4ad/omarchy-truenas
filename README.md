@@ -1,8 +1,8 @@
 # TrueNAS for Omarchy
 
-TrueNAS pool health, disk temperatures, active alerts and protection tasks on the
-Omarchy bar, with desktop notifications when something degrades and a popout for a
-running NAS.
+TrueNAS pool health, disk temperatures and active alerts on the Omarchy bar, with
+desktop notifications when something degrades and a popout that also covers
+protection, shares and network.
 
 ![The TrueNAS bar item and Health popout](preview.png)
 
