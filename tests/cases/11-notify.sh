@@ -280,6 +280,8 @@ check "the critical disk is critical urgency" 1 \
   "$(awk '/Disk sda is hot/ && /-u critical/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the warning disk is normal urgency" 1 \
   "$(awk '/Disk sdc is hot/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the hot toast opens the configured base" 1 \
+  "$(awk '/Disk sda is hot/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "sda is recorded critical" critical "$(seen '.disks.sda.state')"
 check "sdc is recorded warning" warning "$(seen '.disks.sdc.state')"
 check "sdb is still ok" ok "$(seen '.disks.sdb.state')"
@@ -329,5 +331,69 @@ respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
 respond_add "/api/v2.0/disk/temperatures" 0 500 "$ROOT/tests/fixtures/err-500.json"
 poll
 check "no disk toast from a failed temperature answer" 0 "$(notifications)"
-check "seen.disks is byte-for-byte unchanged" "$before" "$(seen '.disks')"
+check "the serialized seen.disks is unchanged" "$before" "$(seen '.disks')"
+teardown
+
+test_case "a failed details call leaves seen.disks untouched"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
+poll
+check "the cool baseline is quiet" 0 "$(notifications)"
+before=$(seen '.disks')
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 500 "$ROOT/tests/fixtures/err-500.json"
+poll
+check "no disk toast from a failed details answer" 0 "$(notifications)"
+check "the serialized seen.disks is unchanged" "$before" "$(seen '.disks')"
+teardown
+
+test_case "an unknown disk that reads hot toasts"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+jq -c 'del(.sda)' "$ROOT/tests/fixtures/disk-temperatures.json" >"$WORK/temps-no-sda.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$WORK/temps-no-sda.json"
+poll
+check "a missing reading is unknown" unknown "$(seen '.disks.sda.state')"
+check "and unknown toasts nothing" 0 "$(notifications)"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures-hot.json"
+poll
+check "crossing from unknown into critical toasts" 1 \
+  "$(awk '/Disk sda is hot/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "sda is recorded critical" critical "$(seen '.disks.sda.state')"
+teardown
+
+test_case "a removed disk drops its seen entry"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures-hot.json"
+poll
+check "five disks are recorded" 5 "$(seen '.disks | length')"
+jq -c 'map(select(.name != "sda"))' "$ROOT/tests/fixtures/disks.json" >"$WORK/disks-no-sda.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$WORK/disks-no-sda.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures-hot.json"
+poll
+check "the removed disk is gone" false "$(seen '.disks | has("sda")')"
+check "four disks remain" 4 "$(seen '.disks | length')"
+teardown
+
+test_case "a disk that goes unknown does not toast as cooled"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures-hot.json"
+poll
+check "the hot pair toasted" 2 "$(notifications)"
+jq -c 'del(.sda)' "$ROOT/tests/fixtures/disk-temperatures.json" >"$WORK/temps-no-sda.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$WORK/temps-no-sda.json"
+poll
+check "sda went unknown" unknown "$(seen '.disks.sda.state')"
+check "no cooled toast for sda" 0 \
+  "$(awk '/Disk sda cooled/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "but the warning disk cooled" 3 "$(notifications)"
 teardown
