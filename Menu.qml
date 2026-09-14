@@ -354,6 +354,7 @@ Ui.Panel {
       { kind: "view", args: ["protection"], label: "Protection", detail: root.protectionText },
       { kind: "view", args: ["alerts"], label: "Alerts", detail: root.alertsText },
       { kind: "view", args: ["config"], label: "Config", detail: root.configText },
+      { kind: "help", args: [], label: "Help", detail: "what the words mean" },
       { kind: "poll", args: [], label: "Poll now", detail: root.pollText }
     ]
     if (root.dashboardUrl() !== "")
@@ -400,6 +401,17 @@ Ui.Panel {
     }
     if (row.kind === "poll") {
       root.pollNow()
+      return
+    }
+    if (row.kind === "help") {
+      var widget = root.panelWidget()
+      if (widget && typeof widget.openHelp === "function") {
+        widget.openHelp()
+        root.close()
+        return
+      }
+      if (root.openPanelView("health")) root.close()
+      else root.notice = "there is no TrueNAS item on the bar to open the panel from"
       return
     }
     root.openDashboard()
@@ -542,6 +554,17 @@ Ui.Panel {
               color: Color.menu.text
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.body
+              renderType: Text.NativeRendering
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.manifest && root.manifest.version
+                ? String(root.manifest.version) : ""
+              visible: text !== ""
+              color: Qt.darker(Color.menu.text, 1.5)
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
               renderType: Text.NativeRendering
             }
           }
