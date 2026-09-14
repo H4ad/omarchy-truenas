@@ -33,6 +33,21 @@ owner lifts the hold.
 - Merged milestone branches still exist locally as `agent/desk/m1-*` … `m6-*`
   (audit); the worktrees were removed.
 
+## After 1.0.0 (unreleased polish)
+
+Landed after the 1.0.0 milestone, before any publication. Version stays `1.0.0`.
+
+- The help sheet rendered as a one-line box: it sized itself from `body.height`,
+  a layout cycle, and now sizes from `body.contentHeight` and scrolls.
+- The nine tabs clipped the last one: the strip is a wrapping `Flow` and the
+  default panel width is 520.
+- `omarchy-shell io.github.h4ad.truenas help` opens the glossary over IPC.
+- Eight new bar variants (15 total): `Severity`, `Down`, `Protection`, `Uptime`,
+  `CapacityBar`, `Pools`, `DiskHeat`, `Sparkline`. The sparkline reads
+  `~/.local/state/omarchy/truenas/history.json`, appended by the poller (capped
+  at 60, `null` gaps, never a fake zero). Design:
+  `docs/plans/2026-09-14-truenas-bar-variants-design.md`.
+
 ## How to continue (the process that worked)
 
 Each task: a fresh implementer subagent does it and commits, then a separate
