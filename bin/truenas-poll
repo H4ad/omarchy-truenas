@@ -166,12 +166,14 @@ fetch() {
   fi
   rc=$TN_CURL_RC
   S_ERR=$(tn_classify)
-  # A healthy alert/list, pool, disk/details, service and app body is always a
-  # JSON array; system/info is a non-empty object, and so is
-  # disk/temperatures (an empty map is a NAS that answered with no readings,
-  # not a failed route).
+  # A healthy alert/list, pool and disk/details is always a JSON array. The
+  # service and app lists are arrays of objects, so a bare null entry is a
+  # failed section rather than a nameless card. system/info is a non-empty
+  # object, and so is disk/temperatures (an empty map is a NAS that answered
+  # with no readings, not a failed route).
   case $section in
-    alert|pool|disk|service|app) shape='type == "array"' ;;
+    service|app)     shape='type == "array" and all(.[]; type == "object")' ;;
+    alert|pool|disk) shape='type == "array"' ;;
     system)          shape='type == "object" and (length > 0)' ;;
     diskTemp)        shape='type == "object"' ;;
   esac
@@ -597,17 +599,19 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
         # The service list drops pids; the app list drops notes, image ids and
         # the workload details, keeping only the count. Whitelisting the fields
         # here, rather than deleting known-bad ones, is what keeps a new wire
-        # field from leaking to disk by accident.
+        # field from leaking to disk by accident. The service id goes through
+        # `+ 0`, the same canonicalization the num def applies in normalize.jq,
+        # so a wire 4.0 caches as 4 rather than as raw text.
         services: {
           fetchedAt: $now,
-          rows: [ $services[0][]? | { id:      ((.id? // null) | tonumber? // null),
+          rows: [ $services[0][]? | { id:      ((.id? // null) | (tonumber? // null) | if . == null then null else . + 0 end),
                                       service: (.service // ""),
                                       state:   (.state // ""),
                                       enable:  (.enable == true) } ]
         },
         apps: {
           fetchedAt: $now,
-          rows: [ $apps[0][]? | (.metadata? // {}) as $m
+          rows: [ $apps[0][]? | ((.metadata? // {}) | if type == "object" then . else {} end) as $m
                  | { name:               (.name // ""),
                      id:                 (.id // null),
                      state:              (.state // ""),

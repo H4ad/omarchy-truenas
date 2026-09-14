@@ -72,7 +72,24 @@ check "the disk rows still reach state from the cache" 5 "$(state '.disks | leng
 check "with their temperature normalized" 38 \
   "$(state '.disks[] | select(.name=="sda") | .tempC')"
 check "the cached service rows still reach state" 8 "$(state '.services | length')"
-check "so do the cached apps" 4 "$(state '.apps | length')"
+check "so do the cached apps" 5 "$(state '.apps | length')"
+teardown
+
+test_case "a cold and a warm poll render the same services and apps"
+setup; single_instance_config
+meta_responses
+poll
+cold_services=$(jq -c '.services' "$STATE")
+cold_apps=$(jq -c '.apps' "$STATE")
+poll
+check "the warm service rows match the cold ones" "$cold_services" \
+  "$(jq -c '.services' "$STATE")"
+check "the warm app rows match the cold ones" "$cold_apps" \
+  "$(jq -c '.apps' "$STATE")"
+check "so the fallback version survives the cache" 10.9.0 \
+  "$(state '.apps[] | select(.name=="appd") | .version')"
+check "and the absent state stays empty through the cache" "" \
+  "$(state '.apps[] | select(.name=="appd") | .state')"
 teardown
 
 test_case "--force-meta spends one more system request and refreshes the version"
@@ -186,6 +203,46 @@ check "the meta file is byte-for-byte the previous one" "$before" \
   "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
 teardown
 
+test_case "a failed service fetch leaves the previous meta byte-for-byte intact"
+setup; single_instance_config
+meta_responses
+poll
+before=$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 500 "$ROOT/tests/fixtures/err-500.json"
+respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+check "the forced poll asked for the services" 2 "$(service_requests)"
+check "a warning names the service section" service \
+  "$(state '.warnings[] | select(.section=="service") | .section')"
+check "the meta file is byte-for-byte the previous one" "$before" \
+  "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
+teardown
+
+test_case "a failed app fetch leaves the previous meta byte-for-byte intact"
+setup; single_instance_config
+meta_responses
+poll
+before=$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app"         0 500 "$ROOT/tests/fixtures/err-500.json"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+check "the forced poll asked for the apps" 2 "$(app_requests)"
+check "a warning names the app section" app \
+  "$(state '.warnings[] | select(.section=="app") | .section')"
+check "the meta file is byte-for-byte the previous one" "$before" \
+  "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
+teardown
+
 test_case "a meta.json missing any slow-section key self-heals on the next poll"
 setup; single_instance_config
 meta_responses
@@ -205,7 +262,7 @@ done
 check "the disk rows are cached again" 5 "$(meta_file '.disks.rows | length')"
 check "and the temperature map too" 5 "$(meta_file '.diskTemps.map | length')"
 check "and the service rows too" 8 "$(meta_file '.services.rows | length')"
-check "and the app rows too" 4 "$(meta_file '.apps.rows | length')"
+check "and the app rows too" 5 "$(meta_file '.apps.rows | length')"
 check "the old system data was not lost" 25.04.2 "$(state '.system.version')"
 teardown
 
@@ -234,7 +291,7 @@ test_case "the meta cache keeps the consumed app fields and drops notes and imag
 setup; single_instance_config
 meta_responses
 poll
-check "the app rows are cached" 4 "$(meta_file '.apps.rows | length')"
+check "the app rows are cached" 5 "$(meta_file '.apps.rows | length')"
 check "no cached app row carries notes" 0 \
   "$(meta_file '[.apps.rows[] | select(has("notes"))] | length')"
 check "no cached app row carries an image identifier" 0 \
@@ -253,6 +310,25 @@ check "no cached service row carries pids" 0 \
 check "the service wire key is kept" RUNNING \
   "$(meta_file '.services.rows[] | select(.service=="cifs") | .state')"
 check "and the filtered rows still normalize" 8 "$(state '.services | length')"
+teardown
+
+test_case "a non-object metadata does not stall the meta cache"
+setup; single_instance_config
+jq -c '[ .[] | if .name == "appc" then .metadata = "junk" else . end ]' \
+  "$ROOT/tests/fixtures/apps.json" >"$WORK/apps-junk-meta.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app"         0 200 "$WORK/apps-junk-meta.json"
+poll
+check "the meta cache advanced anyway" true "$(meta_file 'has("apps")')"
+check "the junk metadata is cached as an empty object" null \
+  "$(meta_file '.apps.rows[] | select(.name=="appc") | .metadata.title')"
+check "and the title falls back to the name" appc \
+  "$(state '.apps[] | select(.name=="appc") | .title')"
 teardown
 
 test_case "the meta cache round-trips a null system field"

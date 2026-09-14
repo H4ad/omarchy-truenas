@@ -47,13 +47,17 @@ check "an enabled service is true" true "$(state '.services[] | select(.service=
 check "a disabled service is false" false "$(state '.services[] | select(.service=="ftp") | .enable')"
 check "the service state is the wire string" RUNNING \
   "$(state '.services[] | select(.service=="ssh") | .state')"
-check "four apps" 4 "$(state '.apps | length')"
-check "apps sorted by name" "appa,appb,appc,appe" \
+check "five apps" 5 "$(state '.apps | length')"
+check "apps sorted by name" "appa,appb,appc,appd,appe" \
   "$(state '.apps | map(.name) | join(",")')"
 check "an app title comes from metadata" appc \
   "$(state '.apps[] | select(.name=="appc") | .title')"
 check "a missing title falls back to the name" appa \
   "$(state '.apps[] | select(.name=="appa") | .title')"
+check "a missing state is the empty string, not RUNNING" "" \
+  "$(state '.apps[] | select(.name=="appd") | .state')"
+check "a missing human_version falls back to version" 10.9.0 \
+  "$(state '.apps[] | select(.name=="appd") | .version')"
 check "a missing container count is null, not 0" null \
   "$(state '.apps[] | select(.name=="appa") | .containers')"
 check "a real container count is a number" 2 \
@@ -409,7 +413,7 @@ check "no service carries a fabricated 0" 0 \
 check "a warning names the service section" service \
   "$(state '.warnings[] | select(.section=="service") | .section')"
 check "the pools still render" 2 "$(state '.pools | length')"
-check "and the apps answered" 4 "$(state '.apps | length')"
+check "and the apps answered" 5 "$(state '.apps | length')"
 teardown
 
 test_case "a failed app call leaves apps empty while pools render"
@@ -427,6 +431,26 @@ check "a warning names the app section" app \
   "$(state '.warnings[] | select(.section=="app") | .section')"
 check "the pools still render" 2 "$(state '.pools | length')"
 check "and the services answered" 8 "$(state '.services | length')"
+teardown
+
+test_case "a 200 with a non-object list row fails the section, not fabricates a card"
+setup; single_instance_config
+printf '[{}, null]\n' >"$WORK/bad-list.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"     0 200 "$WORK/bad-list.json"
+respond_add "/api/v2.0/app"         0 200 "$WORK/bad-list.json"
+poll
+check "services are empty, not a nameless card" "[]" "$(state '.services')"
+check "and a warning names the service section" service \
+  "$(state '.warnings[] | select(.section=="service") | .section')"
+check "apps are empty too" "[]" "$(state '.apps')"
+check "and a warning names the app section" app \
+  "$(state '.warnings[] | select(.section=="app") | .section')"
+check "the pools still render" 2 "$(state '.pools | length')"
 teardown
 
 test_case "no instance at all is unconfigured, and still writes state"

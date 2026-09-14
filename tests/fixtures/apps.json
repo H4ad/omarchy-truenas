@@ -84,5 +84,22 @@
     },
     "portals": {},
     "active_workloads": {}
+  },
+  {
+    "name": "appd",
+    "id": "appd",
+    "custom_app": false,
+    "upgrade_available": false,
+    "migrated": false,
+    "version": "10.9.0",
+    "metadata": {
+      "title": "appd",
+      "app_version": "10.9.0",
+      "train": "community",
+      "home": "https://appd.org/",
+      "icon": "https://example.test/icons/appd.png"
+    },
+    "portals": { "Web UI": "http://nas.example:8096/" },
+    "active_workloads": { "containers": 1 }
   }
 ]
