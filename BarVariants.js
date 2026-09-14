@@ -35,7 +35,7 @@
 // back to the next, then to "", because a mark a caller can forget to pass is a
 // mark that can silently go missing.
 
-var VARIANTS = ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full", "Severity", "Down", "Protection", "Uptime", "CapacityBar", "Pools", "DiskHeat", "Sparkline"];
+var VARIANTS = ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full", "Severity", "Down", "Protection", "Uptime", "CapacityBar", "Pools", "DiskHeat", "Sparkline", "Custom"];
 var DEFAULT_VARIANT = "Default";
 var SEPARATOR = "·";
 
@@ -245,6 +245,9 @@ function bodySegments(variant, view) {
     case "Pools":
     case "DiskHeat":
     case "Sparkline":
+    // Custom prints no segments either: its pieces, text and charts mixed, come
+    // from customItems below.
+    case "Custom":
       return [];
     default:
       return defaultSegments(view);
@@ -310,6 +313,99 @@ function chartFor(variant, view) {
     default:
       return null;
   }
+}
+
+// The Custom variant builds its own item from the pieces the user switched on,
+// so it is not a segment list and not one chart. A piece with nothing to say is
+// dropped, and a chart with nothing to draw is dropped by chartFor, so an empty
+// piece never becomes a zero.
+function isComposed(variant) {
+  return resolveVariant(variant) === "Custom";
+}
+
+// The settings keys the composer reads, in one place, with the defaults: every
+// piece is off and the state glyph is on, so Custom with nothing ticked is the
+// glyph alone.
+function customOptions(settings, glyphs) {
+  var s = settings || {};
+  function on(key) { return s[key] === true; }
+  return {
+    // The glyph set rides along so an override mode (offline/unconfigured) can
+    // still replace the composed item with its plug or cog.
+    glyphs: glyphs || null,
+    severity: on("showSeverity"),
+    alerts: on("showAlerts"),
+    down: on("showDown"),
+    protection: on("showProtection"),
+    capacity: on("showCapacity"),
+    capacityBar: on("showCapacityBar"),
+    pool: on("showPool"),
+    pools: on("showPools"),
+    diskHeat: on("showDiskHeat"),
+    temp: on("showTemp"),
+    sparkline: on("showSparkline"),
+    uptime: on("showUptime"),
+    glyph: s.showGlyph !== false
+  };
+}
+
+// The ordered pieces for the Custom variant as a flat list of tokens:
+// { kind: "text", text, severity } or { kind: "chart", spec }. A separator token
+// sits between two pieces, never at either end. Order is fixed so the item reads
+// the same way every poll: alerts, then capacity, then pools, then disks, then
+// uptime.
+function customItems(view, options) {
+  var v = view || {};
+  var opts = options || {};
+
+  if (isOverride(String(v.mode || ""))) {
+    return [{ kind: "text", text: overrideGlyph(v.mode, opts.glyphs), severity: "" }];
+  }
+
+  var pieces = [];
+  function addText(segments) {
+    for (var i = 0; i < segments.length; i++)
+      pieces.push({ kind: "text", text: segments[i].text, severity: segments[i].severity });
+  }
+  function addChart(variant) {
+    var spec = chartFor(variant, v);
+    if (spec) pieces.push({ kind: "chart", spec: spec });
+  }
+
+  if (opts.glyph === true) pieces.push({ kind: "text", text: mainGlyph(opts.glyphs), severity: "" });
+  if (opts.severity === true) addText(severitySegments(v));
+  if (opts.alerts === true) addText(alertSegments(v));
+  if (opts.down === true) addText(downSegments(v));
+  if (opts.protection === true) addText(protectionSegments(v));
+  if (opts.capacity === true) addText(capacitySegments(v));
+  if (opts.capacityBar === true) addChart("CapacityBar");
+  if (opts.pool === true) addText(poolSegments(v));
+  if (opts.pools === true) addChart("Pools");
+  if (opts.diskHeat === true) addChart("DiskHeat");
+  if (opts.temp === true) addText(tempSegments(v));
+  if (opts.sparkline === true) addChart("Sparkline");
+  if (opts.uptime === true) addText(uptimeSegments(v));
+
+  var tokens = [];
+  for (var j = 0; j < pieces.length; j++) {
+    if (j > 0) tokens.push({ kind: "sep", text: SEPARATOR, severity: "" });
+    tokens.push(pieces[j]);
+  }
+  return tokens;
+}
+
+// The plain text a composed item prints, for the non-icon path and for tests.
+// A chart contributes nothing here, exactly like the textFor path for the chart
+// variants, because a shape is not type.
+function customText(tokens) {
+  var parts = [];
+  for (var i = 0; i < (tokens || []).length; i++) {
+    var token = tokens[i] || {};
+    if (token.kind !== "text") continue;
+    var text = String(token.text || "");
+    if (text !== "") parts.push(text);
+  }
+  return parts.join(" ");
 }
 
 // `view` is the plain object documented at the top; `glyphs` the widget's set.

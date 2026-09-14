@@ -55,6 +55,12 @@ Landed after the 1.0.0 milestone, before any publication. Version stays `1.0.0`.
   would open (`BarWidget.route` via `bar.findPanelWidget`); `refresh` broadcasts
   to all. The duplicate `IpcHandler` warning is the shell's normal pattern, the
   same one bluetooth and network show.
+- A `Custom` variant (16 total) composes pieces into one item from `show*`
+  booleans, text and charts mixed, through `BarVariants.customItems` and
+  `Ui/BarChartPiece.qml`. Note the bar host loads an icon component into a square
+  `opticalCanvas`, so a component that draws at its own top-left lands above the
+  bar; both `BarChartPiece` and the composed row centre their content, and the
+  widget widens `opticalSize` to the measured content.
 
 ## How to continue (the process that worked)
 

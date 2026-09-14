@@ -11,7 +11,7 @@ self-signed certificate handled through `insecureTLS`).
 
 ## What the bar shows
 
-One widget, fifteen variants. The text variants are `Default` (the active alert
+One widget, sixteen variants. The text variants are `Default` (the active alert
 count when anything is firing, otherwise the fullest pool's capacity), `Icon`,
 `Alerts`, `Capacity`, `Pool`, `Temp`, `Full`, `Severity` (the worst two alert
 buckets, each tinted by its own level), `Down` (services and apps not running),
@@ -21,8 +21,10 @@ percent), `Pools` (one square per pool by status), `DiskHeat` (one square per
 disk by temperature band) and `Sparkline` (the fullest pool's recent capacity).
 The item is tinted by the worst state, and an unreachable NAS shows a plug while
 an unconfigured one shows a cog, so "nothing is wrong" and "I cannot tell" never
-look the same. Add it to the bar more than once, each with its own variant, to
-show several things at once; all the items share the one poll.
+look the same. `Custom` draws any mix of those pieces, switched on individually,
+so one item can show, for example, a capacity bar plus the pool status and the
+hottest disk. Add it to the bar more than once too, each item with its own
+variant; all the items share the one poll.
 
 ## What the popout shows
 

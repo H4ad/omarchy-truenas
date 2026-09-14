@@ -6,6 +6,7 @@ import qs.Ui
 import "Model.js" as Model
 import "BarVariants.js" as BarVariants
 import "Links.js" as Links
+import "Ui" as Local
 
 // The bar item. A read-only watcher of the state file the service writes: it
 // never polls on a timer of its own, so there is one poll per machine rather
@@ -152,16 +153,30 @@ BarWidget {
     var base = root.bar ? root.bar.foreground : Color.foreground
     return Qt.rgba(base.r, base.g, base.b, 0.22)
   }
-  readonly property Component chartComponent: {
-    if (!root.chartSpec) return null
-    switch (root.chartSpec.kind) {
-      case "bar":  return chartBar
-      case "dots": return chartDots
-      case "heat": return chartDots
-      case "spark": return chartSpark
+  readonly property Component chartComponent: root.chartSpec ? chartPiece : null
+
+  // The Custom composer: one item built from the pieces the user switched on.
+  // composedItems is a flat token list (text and chart alternating with
+  // separators); composedRow below draws it, so text and a chart share one item.
+  readonly property bool composed: BarVariants.isComposed(root.variantChoice)
+  readonly property var customOptions: BarVariants.customOptions(root.settings, root.glyphs)
+  readonly property var composedItems:
+    root.composed ? BarVariants.customItems(root.barView, root.customOptions) : []
+  // One line height for every token, so a 5px square and a glyph sit on the same
+  // centre line instead of top-aligning in the Row.
+  readonly property real composedLineHeight:
+    Math.max(root.segmentFontSize + 4, root.chartCellHeight, root.chartSparkHeight, root.chartDotSize)
+  readonly property int composedOverflow: {
+    var total = 0
+    for (var i = 0; i < root.composedItems.length; i++) {
+      var token = root.composedItems[i]
+      if (token && token.kind === "chart" && token.spec && token.spec.overflow)
+        total += Number(token.spec.overflow)
     }
-    return null
+    return total
   }
+  readonly property string composedOverflowTooltip:
+    root.composedOverflow > 0 ? " · +" + root.composedOverflow + " more" : ""
 
   // One glyph paints one colour, so per-severity segments go through the icon
   // slot as a Row of separately tinted Text items. A vertical bar has no
@@ -412,83 +427,71 @@ BarWidget {
     sourceComponent: root.chartComponent
   }
 
-  // CapacityBar: `total` cells, the first `filled` tinted, then the percent.
-  // Each child is an Item of one height so the cells and the label sit on one
-  // centred line; a Row alone would top-align the shorter cells against the text.
+  // One chart, through the shared piece so a chart looks the same here and in
+  // the Custom composer.
   Component {
-    id: chartBar
+    id: chartPiece
 
-    Item {
-      implicitWidth: barRow.implicitWidth
-      implicitHeight: barRow.implicitHeight
-
-      Row {
-        id: barRow
-        anchors.centerIn: parent
-        spacing: root.chartCellGap
-
-        Repeater {
-          model: root.chartSpec ? root.chartSpec.total : 0
-
-          Item {
-            required property int index
-            width: root.chartCellWidth
-            height: root.chartBarRowHeight
-
-            Rectangle {
-              anchors.centerIn: parent
-              width: root.chartCellWidth
-              height: root.chartCellHeight
-              color: index < (root.chartSpec ? root.chartSpec.filled : 0)
-                ? root.colorForSeverity(root.chartSpec ? root.chartSpec.severity : "")
-                : root.chartEmptyColor
-            }
-          }
-        }
-
-        Item {
-          width: barLabel.implicitWidth
-          height: root.chartBarRowHeight
-
-          Text {
-            id: barLabel
-            anchors.centerIn: parent
-            text: root.chartSpec ? root.chartSpec.label : ""
-            color: root.colorForSeverity(root.chartSpec ? root.chartSpec.severity : "")
-            font.family: root.segmentFontFamily
-            font.pixelSize: root.segmentFontSize
-            renderType: Text.NativeRendering
-          }
-        }
-      }
+    Local.BarChartPiece {
+      spec: root.chartSpec
+      foreground: root.bar ? root.bar.foreground : Color.foreground
+      urgent: root.bar ? root.bar.urgent : Color.urgent
+      accent: Color.accent
+      fontFamily: root.segmentFontFamily
+      fontSize: root.segmentFontSize
     }
   }
 
-  // Pools and DiskHeat: one small square per row, coloured by its severity. A
-  // healthy or unknown square is the bar's own foreground.
+  // The composed item: text tokens and chart tokens in one Row, each drawn the
+  // way the rest of the widget draws it. A chart token instantiates the same
+  // BarChartPiece the single-chart variants use, and every token shares one line
+  // height so a 5px square and a glyph sit on the same centre line.
   Component {
-    id: chartDots
+    id: composedRow
 
+    // Root is an Item with a centred Row, like segmentRow: the host loads this
+    // into a square optical canvas, so a Row at the item's top-left would be
+    // drawn above the bar.
     Item {
-      implicitWidth: dotsRow.implicitWidth
-      implicitHeight: dotsRow.implicitHeight
+      implicitWidth: composedInner.implicitWidth
+      implicitHeight: root.composedLineHeight
 
       Row {
-        id: dotsRow
+        id: composedInner
         anchors.centerIn: parent
-        spacing: root.chartCellGap
+        spacing: root.segmentSpacing
 
         Repeater {
-          model: root.chartSpec ? root.chartSpec.items : []
+          model: root.composedItems
 
           Item {
+            id: token
             required property var modelData
-            width: root.chartDotSize
-            height: root.chartDotSize
+            readonly property bool isChart: (modelData || {}).kind === "chart"
+            width: token.isChart ? piece.implicitWidth : labelItem.implicitWidth
+            height: root.composedLineHeight
 
-            Rectangle {
-              anchors.fill: parent
-              color: root.colorForSeverity(modelData ? modelData.severity : "")
+            Text {
+              id: labelItem
+              visible: !token.isChart
+              anchors.verticalCenter: parent.verticalCenter
+              text: token.isChart ? "" : String((token.modelData || {}).text || "")
+              color: root.colorForSeverity((token.modelData || {}).severity)
+              font.family: root.segmentFontFamily
+              font.pixelSize: root.segmentFontSize
+              renderType: Text.NativeRendering
+            }
+
+            Local.BarChartPiece {
+              id: piece
+              visible: token.isChart
+              anchors.verticalCenter: parent.verticalCenter
+              spec: token.isChart ? token.modelData.spec : null
+              foreground: root.bar ? root.bar.foreground : Color.foreground
+              urgent: root.bar ? root.bar.urgent : Color.urgent
+              accent: Color.accent
+              fontFamily: root.segmentFontFamily
+              fontSize: root.segmentFontSize
             }
           }
         }
@@ -496,52 +499,25 @@ BarWidget {
     }
   }
 
-  // Sparkline: one thin column per sample, oldest first, bottom-aligned in a
-  // 10px band. A null sample draws nothing, so a gap in the history stays a gap;
-  // a real 0 keeps a 1px stub so it is not mistaken for the gap.
-  Component {
-    id: chartSpark
-
-    Item {
-      implicitWidth: sparkRow.implicitWidth
-      implicitHeight: root.chartSparkHeight
-
-      Row {
-        id: sparkRow
-        anchors.centerIn: parent
-        spacing: 0
-
-        Repeater {
-          model: root.chartSpec ? root.chartSpec.columns : []
-
-          Item {
-            required property var modelData
-            width: root.chartSparkColumnWidth
-            height: root.chartSparkHeight
-
-            Rectangle {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              height: (modelData === null || modelData === undefined)
-                ? 0 : Math.max(1, Number(modelData) * root.chartSparkHeight)
-              color: root.colorForSeverity(root.chartSpec ? root.chartSpec.severity : "")
-            }
-          }
-        }
-      }
-    }
+  // The composed path's sizing twin, for the same reason as the chart's.
+  Loader {
+    id: composedSizer
+    visible: false
+    active: root.composed
+    sourceComponent: composedRow
   }
 
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: (root.showChart || root.tintedSegments)
+    text: (root.composed || root.showChart || root.tintedSegments)
       ? "" : BarVariants.textFor(root.segments)
-    iconComponent: root.showChart
-      ? root.chartComponent
-      : (root.tintedSegments ? segmentRow : null)
+    iconComponent: root.composed
+      ? composedRow
+      : (root.showChart
+          ? root.chartComponent
+          : (root.tintedSegments ? segmentRow : null))
     foreground: root.degraded
       ? (root.bar ? root.bar.foreground : Color.foreground)
       : (root.soleSeverity !== ""
@@ -549,14 +525,26 @@ BarWidget {
           : root.severityColor)
     dimmed: root.quiet || root.degraded
     fontSize: Style.font.caption
-    fixedWidth: root.showChart
-      ? Math.max(12, chartSizer.implicitWidth + button.scaledHorizontalMargin * 2)
-      : (root.tintedSegments
-          ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
-          : -1)
+    // BarIconButton confines iconComponent to `opticalCanvas`, a fixed square, so
+    // a chart or a composed row wider than that square overflows onto the
+    // neighbours. Widen the canvas to the measured content; the sizing twins give
+    // the same number fixedWidth uses.
+    opticalSize: {
+      if (root.composed) return Math.max(Style.bar.iconCanvas, composedSizer.implicitWidth)
+      if (root.showChart) return Math.max(Style.bar.iconCanvas, chartSizer.implicitWidth)
+      if (root.tintedSegments) return Math.max(Style.bar.iconCanvas, segmentSizer.implicitWidth)
+      return Style.bar.iconCanvas
+    }
+    fixedWidth: root.composed
+      ? Math.max(12, composedSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+      : (root.showChart
+          ? Math.max(12, chartSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+          : (root.tintedSegments
+              ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+              : -1))
     slotSize: Style.bar.statusSlot
     tooltipText: Model.tooltipFor(root.state, root.mode)
-      + root.chartOverflowTooltip + (root.nowTick, "")
+      + root.chartOverflowTooltip + root.composedOverflowTooltip + (root.nowTick, "")
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.MiddleButton) root.refresh()

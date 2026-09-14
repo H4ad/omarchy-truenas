@@ -120,6 +120,55 @@ Column {
     onPicked: function(variant) { view.panel.setWidgetSetting("variant", variant) }
   }
 
+  // The Custom variant's pieces. The order here is the order the bar draws them,
+  // so the list doubles as the documentation of the composition.
+  PanelSectionHeader {
+    text: "CUSTOM"
+    foreground: view.panel.contentForeground
+    fontFamily: view.panel.contentFontFamily
+  }
+
+  Text {
+    width: parent.width
+    wrapMode: Text.WordWrap
+    text: "Pick the Custom variant to draw these pieces in one item, in this "
+      + "order, text and charts mixed. A piece with nothing to say is dropped."
+    color: view.panel.dimForeground
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Repeater {
+    model: [
+      { key: "showGlyph", label: "state glyph", fallback: true },
+      { key: "showSeverity", label: "alert buckets" },
+      { key: "showAlerts", label: "alert count" },
+      { key: "showDown", label: "services and apps down" },
+      { key: "showProtection", label: "protection failures" },
+      { key: "showCapacity", label: "capacity percent" },
+      { key: "showCapacityBar", label: "capacity bar" },
+      { key: "showPool", label: "pool status word" },
+      { key: "showPools", label: "pool squares" },
+      { key: "showDiskHeat", label: "disk heat" },
+      { key: "showTemp", label: "hottest disk" },
+      { key: "showSparkline", label: "capacity sparkline" },
+      { key: "showUptime", label: "uptime" }
+    ]
+
+    Toggle {
+      required property var modelData
+      width: view.width
+      label: String(modelData.label)
+      checked: view.panel.setting(modelData.key, modelData.fallback === true) === true
+      foreground: view.panel.contentForeground
+      accent: Color.accent
+      fontFamily: view.panel.contentFontFamily
+      onClicked: view.panel.setWidgetSetting(
+        modelData.key,
+        !view.panel.setting(modelData.key, modelData.fallback === true))
+    }
+  }
+
   InfoRow {
     label: "hide when healthy"
     value: view.panel.setting("hideWhenHealthy", false) ? "on" : "off"

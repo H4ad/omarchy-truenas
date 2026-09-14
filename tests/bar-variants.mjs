@@ -112,7 +112,7 @@ function severities(variant, v) {
 test_case("the fifteen variants");
 check("the frozen order", ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full",
   "Severity", "Down", "Protection", "Uptime",
-  "CapacityBar", "Pools", "DiskHeat", "Sparkline"], BarVariants.VARIANTS);
+  "CapacityBar", "Pools", "DiskHeat", "Sparkline", "Custom"], BarVariants.VARIANTS);
 check("Default is the built-in fallback", "Default", BarVariants.DEFAULT_VARIANT);
 
 test_case("the manifest offers exactly the same variants");
@@ -540,15 +540,66 @@ check("BarVariants.js never uses Model in code", false, /\bModel\b/.test(barCode
 check("the suite loads BarVariants.js and nothing else", false,
   /evaluated\(\s*"Model\.js"\s*\)/.test(readFileSync(fileURLToPath(import.meta.url), "utf8")));
 
+test_case("isComposed");
+
+check("Custom is composed", true, BarVariants.isComposed("Custom"));
+check("case does not matter", true, BarVariants.isComposed("custom"));
+check("a preset is not composed", false, BarVariants.isComposed("Full"));
+check("a chart is not composed", false, BarVariants.isComposed("CapacityBar"));
+check("an unknown setting is not composed", false, BarVariants.isComposed("nonsense"));
+
+test_case("customItems");
+
+const composedSample = view({
+  mode: "firing", alertCount: 3, counts: { warning: 3, total: 3 },
+  capacityText: "71%", capacityFill: 4, worstPool: "ONLINE", worstLevel: "warning",
+  tempText: "54\u00B0", tempLevel: ""
+});
+const customAll = BarVariants.customOptions({
+  showGlyph: true, showAlerts: true, showCapacity: true, showPool: true, showTemp: true
+}, GLYPHS);
+const customTokens = BarVariants.customItems(composedSample, customAll);
+check("the glyph leads", "G", customTokens[0].text);
+check("every token is text, a separator or a chart", [],
+  customTokens.filter(function (t) {
+    return t.kind !== "text" && t.kind !== "sep" && t.kind !== "chart";
+  }));
+check("a separator sits between pieces", true,
+  customTokens.filter(function (t) { return t.text === "\u00B7"; }).length > 0);
+check("the composed text is the pieces in order", "G 3 71% ONLINE 54\u00B0",
+  BarVariants.customText(customTokens));
+
+const customQuiet = BarVariants.customOptions({ showGlyph: false, showAlerts: true }, GLYPHS);
+check("an empty piece contributes nothing", "",
+  BarVariants.customText(BarVariants.customItems(view({ mode: "quiet", alertCount: 0 }), customQuiet)));
+check("glyph off and nothing to say is an empty item", 0,
+  BarVariants.customItems(view({ mode: "quiet", alertCount: 0 }), customQuiet).length);
+
+check("an override replaces the composed pieces", "P",
+  BarVariants.customText(BarVariants.customItems(view({ mode: "offline" }), customAll)));
+
+const customCharts = BarVariants.customOptions(
+  { showGlyph: false, showCapacityBar: true, showTemp: true }, GLYPHS);
+const chartTokens = BarVariants.customItems(
+  view({ capacityText: "71%", capacityFill: 4, tempText: "54\u00B0" }), customCharts);
+check("a chart token is included", true,
+  chartTokens.some(function (t) { return t.kind === "chart" && t.spec.kind === "bar"; }));
+check("a chart contributes no text", "54\u00B0", BarVariants.customText(chartTokens));
+
 test_case("the picker sample previews every variant non-empty");
 // The config picker previews each row against BarVariants.sampleView(). A
 // variant whose preview is empty is a row that reads blank, which is exactly
-// the bug this pins: every text variant must yield a segment and every chart
-// variant must yield a spec on that one sample.
+// the bug this pins: every text variant must yield a segment, every chart a
+// spec, and Custom its pieces.
 const pickerSample = BarVariants.sampleView();
+const pickerCustomOptions = BarVariants.customOptions(
+  { showGlyph: true, showAlerts: true, showCapacity: true, showTemp: true }, GLYPHS);
 BarVariants.VARIANTS.forEach(function (variant) {
   const kind = BarVariants.chartKind(variant);
-  if (kind === "") {
+  if (BarVariants.isComposed(variant)) {
+    check(variant + " previews its pieces on the picker sample", true,
+      BarVariants.customItems(pickerSample, pickerCustomOptions).length > 0);
+  } else if (kind === "") {
     check(variant + " previews text on the picker sample", true,
       segmentsFor(variant, pickerSample).length > 0);
   } else {

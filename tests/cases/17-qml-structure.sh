@@ -54,12 +54,14 @@ check "BarWidget asks for the chart kind" "1" \
   "$(grep -c 'BarVariants.chartKind(root.variantChoice)' "$ROOT/BarWidget.qml")"
 check "BarWidget builds the chart spec" "1" \
   "$(grep -c 'BarVariants.chartFor(root.variantChoice, root.barView)' "$ROOT/BarWidget.qml")"
-check "BarWidget gives the icon slot the chart component" "1" \
-  "$(grep -c 'iconComponent: root.showChart' "$ROOT/BarWidget.qml")"
-check "BarWidget sizes the chart from the sizing twin" "1" \
+check "BarWidget gives the icon slot the chart or composed component" "1" \
+  "$(grep -c 'iconComponent: root.composed' "$ROOT/BarWidget.qml")"
+check "BarWidget sizes the chart from the sizing twin" "2" \
   "$(grep -c 'chartSizer.implicitWidth' "$ROOT/BarWidget.qml")"
-check "all three chart components are declared" "3" \
-  "$(grep -c 'id: chartBar\|id: chartDots\|id: chartSpark' "$ROOT/BarWidget.qml")"
+check "one chart piece component is declared" "1" \
+  "$(grep -c 'id: chartPiece' "$ROOT/BarWidget.qml")"
+check "BarWidget sizes the composed item from its twin" "2" \
+  "$(grep -c 'composedSizer.implicitWidth' "$ROOT/BarWidget.qml")"
 
 # ------------------------------------------------------------------ functions
 # Two `function` declarations with the same name in one object collide, and the
@@ -150,6 +152,20 @@ check "the panel writes a widget setting by selector" "1" \
   "$(grep -c 'registry.setBarWidget(' "$ROOT/Panel.qml")"
 check "the bar item relays ipc to the opened instance" "1" \
   "$(grep -c 'root.bar.findPanelWidget(root.moduleName)' "$ROOT/BarWidget.qml")"
+
+# The Custom variant composes pieces into one item. The composer is in
+# BarVariants.js, the shared chart in Ui/BarChartPiece.qml, the toggles in the
+# manifest schema and the panel's switch list, and the bar item draws the tokens.
+check "the shared chart piece exists" "yes" \
+  "$([[ -f "$ROOT/Ui/BarChartPiece.qml" ]] && echo yes)"
+check "the widget draws charts through the shared piece" "2" \
+  "$(grep -c 'Local.BarChartPiece {' "$ROOT/BarWidget.qml")"
+check "the composer is wired into the bar item" "1" \
+  "$(grep -c 'BarVariants.customItems(root.barView' "$ROOT/BarWidget.qml")"
+check "the config view lists one toggle per custom piece" "13" \
+  "$(grep -c '{ key: "show' "$ROOT/Views/Config.qml")"
+check "the manifest declares one key per custom piece" "13" \
+  "$(jq -r '[.barWidget.schema[] | select(.key | startswith("show"))] | length' "$ROOT/manifest.json")"
 
 # Every variant the JS resolves must be selectable in the manifest, and the
 # manifest must not offer one the JS would fall back to Default for. Both lists

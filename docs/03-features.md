@@ -270,8 +270,9 @@ with the glossary, so a keybinding can reach it. The other verbs are `open`,
 
 ## More bar variants
 
-**Fifteen variants.** The bar gains eight, for fifteen total. Four are text,
-through the existing segment renderer. `Severity` prints one segment per non-empty
+**Sixteen variants.** The bar gains nine, for sixteen total: four text through
+the existing segment renderer, four charts, and `Custom`, which composes the
+pieces the user switches on. `Severity` prints one segment per non-empty
 alert bucket, worst two, each tinted by its own level, e.g. `2▲ 1●`. `Down`
 counts the services and apps not running. `Protection` counts the failed
 replication, cloud sync, snapshot and scrub jobs. `Uptime` prints the time since
@@ -299,8 +300,19 @@ helpers with a state argument, `protectionFailures` and `downTotal`, plus
 `capacityBarFill`, `sparkColumns` and the pool and disk dot severity maps join
 `Model.js`. The widget passes plain data, `chartKind` names the shape and
 `chartFor` builds the spec, and severity stays the contract: the JS names a level
-and the widget maps it to the theme. The manifest lists all fifteen and the
+and the widget maps it to the theme. The manifest lists all sixteen and the
 variant picker names each one.
+
+**Custom composer.** `Custom` is one item built from the pieces switched on in
+the manifest's `show*` booleans: the state glyph, the eight text pieces, and the
+four charts, drawn in a fixed order with a separator between two pieces. Text and
+a chart can share the item because each piece is a token, and the widget draws
+text and chart tokens in one Row through `Ui/BarChartPiece.qml`, the same piece
+the single-chart variants use. A piece with nothing to say is dropped, a chart
+with nothing to draw is dropped, and the offline or unconfigured override still
+replaces the whole item. The Config tab shows one switch per piece, and the
+picker previews a representative composition. One item, several things at once,
+which is the toggle alternative to adding the widget twice.
 
 **More than one item.** The manifest sets `allowMultiple`, so the widget can sit
 on the bar more than once, each entry with its own variant. Every instance shares

@@ -45,6 +45,13 @@ Column {
   })
   readonly property var previewView: root.view ? root.view : root.sampleView
   readonly property var previewGlyphs: root.glyphs ? root.glyphs : root.sampleGlyphs
+  // A representative Custom composition for the preview row: the glyph, the alert
+  // count, the capacity, the pool status, the temp and a capacity bar, so the row
+  // shows what mixing text and a chart looks like.
+  readonly property var customSampleOptions: BarVariants.customOptions({
+    showGlyph: true, showAlerts: true, showCapacity: true, showPool: true,
+    showTemp: true, showCapacityBar: true
+  }, root.previewGlyphs)
 
   function colorForSeverity(severity) {
     switch (String(severity || "")) {
@@ -80,6 +87,7 @@ Column {
       case "Pools":        return "one square per pool"
       case "DiskHeat":     return "one square per disk"
       case "Sparkline":    return "capacity trend"
+      case "Custom":       return "the pieces you switch on"
       default:             return "alerts, else capacity"
     }
   }
@@ -99,6 +107,11 @@ Column {
       // the bar draws (cells, squares, columns) through the same chart spec.
       readonly property string chartKind: BarVariants.chartKind(modelData)
       readonly property var chart: BarVariants.chartFor(modelData, root.previewView)
+      readonly property bool composed: BarVariants.isComposed(modelData)
+      readonly property string composedPreviewText: row.composed
+        ? BarVariants.customText(
+            BarVariants.customItems(root.previewView, root.customSampleOptions))
+        : ""
 
       width: parent.width
       implicitHeight: Math.max(name.implicitHeight, blurb.implicitHeight, preview.implicitHeight)
@@ -158,6 +171,21 @@ Column {
             renderType: Text.NativeRendering
           }
         }
+      }
+
+      // The Custom preview: its text pieces as one string. A chart piece is not
+      // type, so it is left out here rather than faked; the row is about what the
+      // composer reads, not the exact pixels.
+      Text {
+        visible: row.composed
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(3)
+        anchors.verticalCenter: parent.verticalCenter
+        text: row.composedPreviewText
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
       }
 
       // The chart preview: cells for CapacityBar, one square per dot for Pools and
