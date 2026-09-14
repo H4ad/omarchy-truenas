@@ -240,6 +240,7 @@ BarWidget {
     function toggle(): void { root.toggle() }
     function refresh(): void { root.broadcast("refresh") }
     function view(name: string): void { root.openView(name) }
+    function help(): void { root.openHelp() }
   }
 
   // The visible row is loaded inside BarIconButton's icon slot, where no width
