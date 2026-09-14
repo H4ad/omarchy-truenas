@@ -141,3 +141,30 @@ setup
 TN_BODY=$WORK/empty.json; TN_CODE=400; TN_CURL_RC=0
 check "an empty 400 is http_400, not not_json" http_400 "$(tn_classify)"
 teardown
+
+# A 422 validation body carries the message one level down under an array key
+# instead of at `.message` or `.error.message`, so the flat reads find nothing
+# and used to render an empty sentence.
+test_case "tn_error_message surfaces a keyed message on a 422 body"
+setup
+printf '{"null":[{"message":"PeriodicSnapshotTask 999999 does not exist"}]}\n' \
+  >"$WORK/keyed-null.json"
+TN_BODY=$WORK/keyed-null.json
+check "the keyed message is read" \
+  "PeriodicSnapshotTask 999999 does not exist" "$(tn_error_message)"
+printf '{"data":[{"message":"bad input","errno":22}]}\n' >"$WORK/keyed-data.json"
+TN_BODY=$WORK/keyed-data.json
+check "a data array message is read" "bad input" "$(tn_error_message)"
+printf '{"error":{"message":"older shape"}}\n' >"$WORK/keyed-old.json"
+TN_BODY=$WORK/keyed-old.json
+check "the existing error.message still wins" "older shape" "$(tn_error_message)"
+printf '{"message":"top level"}\n' >"$WORK/keyed-top.json"
+TN_BODY=$WORK/keyed-top.json
+check "the existing top-level message still wins" "top level" "$(tn_error_message)"
+printf '{"data":"not an array"}\n' >"$WORK/keyed-scalar.json"
+TN_BODY=$WORK/keyed-scalar.json
+check "a non-array value is not iterated" "" "$(tn_error_message)"
+printf '{"data":[]}\n' >"$WORK/keyed-empty.json"
+TN_BODY=$WORK/keyed-empty.json
+check "an empty array yields nothing" "" "$(tn_error_message)"
+teardown

@@ -309,11 +309,31 @@ tn_classify() {
 
 tn_error_message() {
   # The top-level `.message` is read too: the service control routes answer an
-  # unknown name with `{"message":"<name>"}` and no `.error` at all. The type
-  # guard keeps a non-string (a number, an array) from being dumped as a bare
-  # value by -r, which would print JSON in the middle of a sentence.
-  jq -r '(.error.message // .error.type // .message // "")
-         | if type == "string" then . else tostring end' "$TN_BODY" 2>/dev/null
+  # unknown name with `{"message":"<name>"}` and no `.error` at all.
+  #
+  # A model-layer validation failure answers 422 with the message buried one
+  # level down under an array key, e.g.
+  # `{"null":[{"message":"PeriodicSnapshotTask 999999 does not exist"}]}` or
+  # `{"data":[{"message":"...","errno":22}]}`. When the three flat reads find
+  # nothing, walk the first array-valued key and take its first object's
+  # `.message`. The array guard keeps a scalar value (or an empty array) from
+  # being iterated, and the string guard keeps a non-string from being printed.
+  #
+  # The type guard at the end keeps a non-string (a number, an array) from being
+  # dumped as a bare value by -r, which would print JSON in the middle of a
+  # sentence.
+  jq -r '
+    def keyed_message:
+      if type == "object" then
+        [ to_entries[]
+          | select(.value | type == "array")
+          | .value[]
+          | select(type == "object")
+          | .message
+          | select(type == "string" and length > 0) ][0] // ""
+      else "" end;
+    (.error.message // .error.type // .message // keyed_message // "")
+    | if type == "string" then . else tostring end' "$TN_BODY" 2>/dev/null
 }
 
 tn_curl_rc_message() {
