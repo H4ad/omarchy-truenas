@@ -540,5 +540,22 @@ check("BarVariants.js never uses Model in code", false, /\bModel\b/.test(barCode
 check("the suite loads BarVariants.js and nothing else", false,
   /evaluated\(\s*"Model\.js"\s*\)/.test(readFileSync(fileURLToPath(import.meta.url), "utf8")));
 
+test_case("the picker sample previews every variant non-empty");
+// The config picker previews each row against BarVariants.sampleView(). A
+// variant whose preview is empty is a row that reads blank, which is exactly
+// the bug this pins: every text variant must yield a segment and every chart
+// variant must yield a spec on that one sample.
+const pickerSample = BarVariants.sampleView();
+BarVariants.VARIANTS.forEach(function (variant) {
+  const kind = BarVariants.chartKind(variant);
+  if (kind === "") {
+    check(variant + " previews text on the picker sample", true,
+      segmentsFor(variant, pickerSample).length > 0);
+  } else {
+    check(variant + " previews a " + kind + " chart on the picker sample", true,
+      BarVariants.chartFor(variant, pickerSample) !== null);
+  }
+});
+
 console.log("\nbar variants: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

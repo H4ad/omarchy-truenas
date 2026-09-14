@@ -34,19 +34,10 @@ Column {
 
   signal picked(string variant)
 
-  // Every field the text and chart variants read, so each row previews the real
-  // renderer on live-shaped numbers instead of blank.
-  readonly property var sampleView: ({
-    mode: "firing", alertCount: 3,
-    counts: { critical: 0, error: 2, warning: 1, notice: 0, info: 1 },
-    capacityText: "71%", capacityFill: 4,
-    worstPool: "DEGRADED", worstLevel: "warning",
-    tempText: "54\u00B0", tempLevel: "warning",
-    downTotal: 1, protectionCount: 1, uptimeText: "up 18h",
-    poolDots: [{ severity: "" }, { severity: "" }, { severity: "warning" }],
-    diskDots: [{ severity: "warning" }, { severity: "" }, { severity: "" }],
-    sparkColumns: [0.2, 0.35, 0.3, 0.6, 0.55, 0.8]
-  })
+  // The sample lives in BarVariants.js, next to the code that consumes it, so
+  // the preview here and the node test that proves every row renders non-empty
+  // cannot drift apart.
+  readonly property var sampleView: BarVariants.sampleView()
   readonly property var sampleGlyphs: ({
     main: Model.glyphFor("firing", ({ warning: 1 })),
     offline: Model.GLYPH.offline,

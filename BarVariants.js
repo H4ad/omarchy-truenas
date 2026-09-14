@@ -369,3 +369,22 @@ function soleSeverity(segments) {
   }
   return found;
 }
+
+// The one sample the config picker previews against, with a value in every
+// field the text and chart variants read. It lives here, next to the code that
+// consumes it, so the picker and the node test that proves no variant previews
+// blank read the same numbers; a new view field has to be added here too, and
+// the test catches it when a variant goes empty.
+function sampleView() {
+  return {
+    mode: "firing", alertCount: 3,
+    counts: { critical: 0, error: 2, warning: 1, notice: 0, info: 1 },
+    capacityText: "71%", capacityFill: 4,
+    worstPool: "DEGRADED", worstLevel: "warning",
+    tempText: "54\u00B0", tempLevel: "warning",
+    downTotal: 1, protectionCount: 1, uptimeText: "up 18h",
+    poolDots: [{ severity: "" }, { severity: "" }, { severity: "warning" }],
+    diskDots: [{ severity: "warning" }, { severity: "" }, { severity: "" }],
+    sparkColumns: [0.2, 0.35, 0.3, 0.6, 0.55, 0.8]
+  };
+}
