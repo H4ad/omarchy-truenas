@@ -112,6 +112,79 @@ function capacityPct(state) {
   return best;
 }
 
+// Temperature states, worst first. A state this file does not recognise ranks
+// with `unknown` at the bottom: "I cannot tell" must never sort above a known
+// ok. The states are share/normalize.jq's, which computes them once for both
+// the notifier and the views.
+var TEMP_STATE_RANK = {
+  "critical": 3,
+  "warning": 2,
+  "ok": 1
+};
+
+function tempStateRank(state) {
+  var key = String(state || "");
+  if (Object.prototype.hasOwnProperty.call(TEMP_STATE_RANK, key)) return TEMP_STATE_RANK[key];
+  return 0;
+}
+
+// The worst temperature state across the rows, or "" when nothing is hot.
+// Unknown and missing states answer "" rather than a word: the bar tints from
+// this, and unknown must not look like a level of heat.
+function tempLevel(disks) {
+  var list = arrayLike(disks) ? disks : [];
+  var warning = false;
+  for (var i = 0; i < list.length; i++) {
+    var rank = tempStateRank(list[i] && list[i].tempState);
+    if (rank === TEMP_STATE_RANK.critical) return "critical";
+    if (rank === TEMP_STATE_RANK.warning) warning = true;
+  }
+  return warning ? "warning" : "";
+}
+
+// The hottest temperature any row reports, or null when none does. Null, blank
+// and non-finite values are not temperatures and are skipped. Absence is null,
+// never 0: 0 °C is a real reading (a disk in a cold room), a different fact
+// from a disk that did not answer.
+function hottestTempC(disks) {
+  var list = arrayLike(disks) ? disks : [];
+  var best = null;
+  for (var i = 0; i < list.length; i++) {
+    var value = list[i] && list[i].tempC;
+    if (value === null || value === undefined || value === "") continue;
+    var number = Number(value);
+    if (!isFinite(number)) continue;
+    if (best === null || number > best) best = number;
+  }
+  return best;
+}
+
+// The bar label for the hottest disk: whole degrees and a degree sign, or ""
+// when no row reports a temperature. Rounded because a fraction of a degree is
+// noise on a bar, and blank rather than "0°" so absence stays visible.
+function hotTempLabel(disks) {
+  var hottest = hottestTempC(disks);
+  return hottest === null ? "" : Math.round(hottest) + "\u00B0";
+}
+
+// "38 °C" for a card header or a CLI column, "" for null, blank and
+// non-finite. Whole degrees on purpose, so the card and the bar's tempText
+// cannot disagree about what the same reading is.
+function formatTemp(value) {
+  if (value === null || value === undefined || value === "") return "";
+  var number = Number(value);
+  if (!isFinite(number)) return "";
+  return Math.round(number) + " \u00B0C";
+}
+
+// The threshold line under a disk, "" when the threshold is unknown. Goes
+// through formatTemp so its unit and rounding match the temperature it
+// belongs to.
+function tempThresholdText(disk) {
+  var text = formatTemp(disk && disk.tempCriticalC);
+  return text === "" ? "" : "critical at " + text;
+}
+
 function hasAlerts(state) {
   var counts = state && state.counts;
   if (counts && typeof counts.total === "number") return counts.total > 0;
