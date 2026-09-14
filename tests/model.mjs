@@ -213,8 +213,10 @@ test_case("appStateRank");
 
 check("RUNNING is healthy", 0, Model.appStateRank("RUNNING"));
 check("the state is case-insensitive", 0, Model.appStateRank("running"));
+check("a stopped app is down", 1, Model.appStateRank("STOPPED"));
 check("a crashed app is down", 1, Model.appStateRank("CRASHED"));
 check("a failed app is down", 1, Model.appStateRank("FAILED"));
+check("an exited app is down", 1, Model.appStateRank("EXITED"));
 check("DEPLOYING is transitional, not down", 2, Model.appStateRank("DEPLOYING"));
 check("STARTING is transitional, not down", 2, Model.appStateRank("STARTING"));
 check("STOPPING is transitional, not down", 2, Model.appStateRank("STOPPING"));

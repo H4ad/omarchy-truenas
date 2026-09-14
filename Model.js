@@ -185,24 +185,37 @@ function tempThresholdText(disk) {
   return text === "" ? "" : "critical at " + text;
 }
 
-// Service states, worst first. RUNNING is healthy; a blank state is unknown; any
-// other state is a real problem the view calls out. Case-insensitive because the
-// wire says RUNNING today and the plugin must not break if it says Running.
+// Service state ranks. 0 is healthy, 1 is down (the worst), 2 is unknown. The
+// scale is deliberately not monotonic: a blank state ranks above a down one
+// because "I cannot tell" must not read as a stopped service. Case-insensitive
+// because the wire says RUNNING today and the plugin must not break if it says
+// Running. A state absent from the table is a real, named problem and ranks 1.
+var SERVICE_STATE_RANK = {
+  "RUNNING": 0,
+  "": 2
+};
+
 function serviceStateRank(state) {
   var key = String(state || "").toUpperCase();
-  if (key === "RUNNING") return 0;
-  if (key === "") return 2;
+  if (Object.prototype.hasOwnProperty.call(SERVICE_STATE_RANK, key)) return SERVICE_STATE_RANK[key];
   return 1;
 }
 
-// App states, worst first. DEPLOYING, STARTING and STOPPING are transitional,
-// like blank, and must never look like a down app: the poller reads the NAS
-// back and the next poll catches up. Everything else that is not RUNNING is
-// down.
+// App state ranks. 0 is healthy, 1 is down (the worst), 2 is unknown.
+// DEPLOYING, STARTING and STOPPING are transitional, like blank, and must never
+// look like a down app: the poller reads the NAS back and the next poll catches
+// up. A state absent from the table is down and ranks 1.
+var APP_STATE_RANK = {
+  "RUNNING": 0,
+  "": 2,
+  "DEPLOYING": 2,
+  "STARTING": 2,
+  "STOPPING": 2
+};
+
 function appStateRank(state) {
   var key = String(state || "").toUpperCase();
-  if (key === "RUNNING") return 0;
-  if (key === "" || key === "DEPLOYING" || key === "STARTING" || key === "STOPPING") return 2;
+  if (Object.prototype.hasOwnProperty.call(APP_STATE_RANK, key)) return APP_STATE_RANK[key];
   return 1;
 }
 

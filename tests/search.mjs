@@ -176,6 +176,8 @@ test_case("services preserves order, copies and survives junk");
 
 check("an empty needle returns every service", ["cifs", "ups", "nvmet"],
   Search.services(services, "").map(function (s) { return s.service; }));
+check("matching order is input order", ["ups", "nvmet"],
+  Search.services(services, "stopped").map(function (s) { return s.service; }));
 const servicesBefore = JSON.stringify(services);
 Search.services(services, "cifs");
 check("the input list is untouched", servicesBefore, JSON.stringify(services));
