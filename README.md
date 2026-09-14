@@ -1,21 +1,88 @@
 # TrueNAS for Omarchy
 
-TrueNAS pool health and capacity, active alerts and system state on the Omarchy
-bar, with desktop notifications when something degrades and a popout for pools,
-alerts and system detail.
+TrueNAS pool health, disk temperatures, active alerts and protection tasks on the
+Omarchy bar, with desktop notifications when something degrades and a popout for a
+running NAS.
 
 ![The TrueNAS bar item and Health popout](preview.png)
 
 Verified against a live TrueNAS 25.10.6 (two pools, real alert levels, the
 self-signed certificate handled through `insecureTLS`).
 
-Run `truenasctl login` once to point the plugin at your NAS and store the API
-key at mode 600. After that the bar and popout read the state the poller writes.
-The API notes are in [docs/02-truenas-api.md](docs/02-truenas-api.md), what ships
-and what does not in [docs/03-features.md](docs/03-features.md), and the traps
-that have already cost time in [docs/11-pitfalls.md](docs/11-pitfalls.md); read
-the pitfalls before changing anything, most of them fail silently.
+## What the bar shows
 
-**Planned:** milestone 6 is polish (menu completeness, the in-panel glossary, a
-fresh preview image and the marketplace submission); shares and network shipped
-in milestone 5.
+One widget, seven variants: `Default` (the active alert count when anything is
+firing, otherwise the fullest pool's capacity), `Icon`, `Alerts`, `Capacity`,
+`Pool`, `Temp` and `Full`. The item is tinted by the worst state, and an
+unreachable NAS shows a plug while an unconfigured one shows a cog, so "nothing
+is wrong" and "I cannot tell" never look the same.
+
+## What the popout shows
+
+Nine tabs. Health has connection state and last-poll age, hostname, version,
+uptime, pool capacity and alert counts. Pools shows a capacity bar, status, scrub
+state and vdev errors per pool. Disks shows one card per disk with its
+temperature, model and pool. Services and Apps show state, with start, stop,
+restart and redeploy each behind a confirmation. Shares and Network are
+read-only. Protection covers replication, cloud sync, snapshot and scrub tasks,
+with run-now for each. Alerts lists a row per alert with dismiss and restore
+where the alert allows it. Config holds the bar settings and the NAS read-out.
+
+## Notifications
+
+A toast when an alert starts firing or clears, when a pool leaves or returns to
+`ONLINE`, when a disk crosses into the warning or critical band and cools back,
+when a service or app goes down or returns, and when a replication or cloud sync
+task fails or recovers. Toasts are deduped in `seen.json`, so a network blip does
+not replay them as new.
+
+## The CLI
+
+`truenasctl` is the terminal side: `login`, `logout`, `test [-v]`, `status`,
+`alerts`, `pools`, `disks`, `services`, `apps`, `replication`, `cloudsync`,
+`snapshots`, `scrubs`, `shares`, `network`, `poll`, `config list|set|set-key`,
+`open` and `purge`.
+
+## Install
+
+From the Omarchy marketplace, or:
+
+```
+omarchy plugin add https://github.com/h4ad/omarchy-truenas.git --enable
+```
+
+## Setup
+
+Point the plugin at your NAS and store the API key at mode 600:
+
+```
+truenasctl login https://<host>[:<port>]
+```
+
+The key is read on stdin, so it never reaches the command line. After login the
+bar and popout read the state the poller writes.
+
+## Security notes
+
+A self-signed certificate is the norm, which is why `insecureTLS` exists; enable
+it for a NAS whose certificate your desktop does not trust. TrueNAS REST
+`/api/v2.0` is deprecated and removed in TrueNAS 26, so every call goes through
+one helper, `tn_call`/`tn_http_request`, the migration seam to the newer API. The
+key reaches curl only through a stdin document: never argv, never `shell.json`,
+never a log.
+
+## Requirements
+
+TrueNAS 25.10, one NAS, one API key.
+
+## Docs
+
+- What ships and what does not: [docs/03-features.md](docs/03-features.md)
+- The TrueNAS API surface: [docs/02-truenas-api.md](docs/02-truenas-api.md)
+- The traps that have already cost time: [docs/11-pitfalls.md](docs/11-pitfalls.md)
+- The handoff, including the shapes that were never measured live:
+  [docs/04-handoff.md](docs/04-handoff.md)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
