@@ -293,6 +293,44 @@ check("blind rows are skipped, not down", 0,
 check("not a list is an empty list", [], Model.downApps(null));
 check("a blank is an empty list", [], Model.downApps(""));
 
+test_case("unknownServices");
+
+check("only rank-2 rows are copied", ["ups"],
+  Model.unknownServices([service("cifs", "RUNNING"), service("ups", "")])
+    .map(function (s) { return s.service; }));
+check("input order survives", ["ftp", "ups"],
+  Model.unknownServices([service("ftp", ""), service("cifs", "RUNNING"), service("ups", "")])
+    .map(function (s) { return s.service; }));
+const unknownServiceRows = [service("cifs", "RUNNING"), service("ups", "")];
+check("the result is a copy, not the input", false,
+  Model.unknownServices(unknownServiceRows) === unknownServiceRows);
+check("the input is untouched", 2, unknownServiceRows.length);
+check("a down state is not unknown", 0,
+  Model.unknownServices([service("ups", "STOPPED")]).length);
+check("a row without a state is unknown, like the rank says", 1,
+  Model.unknownServices([{}]).length);
+check("not a list is an empty list", [], Model.unknownServices(null));
+check("a blank is an empty list", [], Model.unknownServices(""));
+
+test_case("unknownApps");
+
+check("only rank-2 rows are copied", ["appb"],
+  Model.unknownApps([app("appc", "appc", "RUNNING"), app("appb", "appb", "DEPLOYING")])
+    .map(function (a) { return a.name; }));
+check("a blank state is unknown", ["appa"],
+  Model.unknownApps([app("appa", "appa", "")])
+    .map(function (a) { return a.name; }));
+const unknownAppRows = [app("appc", "appc", "RUNNING"), app("appb", "appb", "STARTING")];
+check("the result is a copy, not the input", false,
+  Model.unknownApps(unknownAppRows) === unknownAppRows);
+check("the input is untouched", 2, unknownAppRows.length);
+check("a down state is not unknown", 0,
+  Model.unknownApps([app("appb", "appb", "CRASHED")]).length);
+check("a row without a state is unknown, like the rank says", 1,
+  Model.unknownApps([{}]).length);
+check("not a list is an empty list", [], Model.unknownApps(null));
+check("a blank is an empty list", [], Model.unknownApps(""));
+
 test_case("appsUpgradeable");
 
 check("counts only true flags", 1,

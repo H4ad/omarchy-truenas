@@ -170,9 +170,10 @@ Ui.Panel {
     return root.disks.length + (root.disks.length === 1 ? " disk" : " disks")
   }
 
-  // A failed services request leaves the list empty too, so "nothing down" and
-  // the count print only when the service section warned about nothing. A zero
-  // down count is a phrase, never the number "0".
+  // A failed services request leaves the list empty too, so the counts print
+  // only when the service section warned about nothing. Down and unknown are
+  // reported apart: an unknown is a service mid-transition, never "nothing
+  // down", and a zero count is a phrase rather than the number "0".
   readonly property string servicesText: {
     if (!root.snapshot) return "no state yet, the poller has not run"
     if (!root.configured) return "not configured yet"
@@ -183,10 +184,15 @@ Ui.Panel {
     if (root.serviceWarning) return "the service list could not be read"
     if (!root.services.length) return "no services reported"
     var down = Model.downServices(root.services).length
-    return down === 0 ? "nothing down" : down + " down"
+    var unknown = Model.unknownServices(root.services).length
+    if (down > 0 && unknown > 0) return down + " down, " + unknown + " unknown"
+    if (down > 0) return down + " down"
+    if (unknown > 0) return unknown + " unknown"
+    return "nothing down"
   }
 
-  // The same rule for apps: a failed app request prints why, never a count.
+  // The same rule for apps: a failed app request prints why, never a count, and
+  // a transitional state is unknown rather than down.
   readonly property string appsText: {
     if (!root.snapshot) return "no state yet, the poller has not run"
     if (!root.configured) return "not configured yet"
@@ -197,7 +203,11 @@ Ui.Panel {
     if (root.appWarning) return "the app list could not be read"
     if (!root.apps.length) return "no apps reported"
     var down = Model.downApps(root.apps).length
-    return down === 0 ? "nothing down" : down + " down"
+    var unknown = Model.unknownApps(root.apps).length
+    if (down > 0 && unknown > 0) return down + " down, " + unknown + " unknown"
+    if (down > 0) return down + " down"
+    if (unknown > 0) return unknown + " unknown"
+    return "nothing down"
   }
 
   // "Nothing firing" is only true of a connected NAS whose alert request

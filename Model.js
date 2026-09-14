@@ -266,6 +266,28 @@ function downApps(apps) {
   return out;
 }
 
+// The unknown services, in input order, as a new list. A blank state is unknown,
+// not down, and it is counted separately so a list of unknown rows never reads
+// as "nothing down".
+function unknownServices(services) {
+  var list = arrayLike(services) ? services : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (serviceStateRank(list[i] && list[i].state) === 2) out.push(list[i]);
+  }
+  return out;
+}
+
+// The same for apps: blank and transitional states are unknown, not down.
+function unknownApps(apps) {
+  var list = arrayLike(apps) ? apps : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (appStateRank(list[i] && list[i].state) === 2) out.push(list[i]);
+  }
+  return out;
+}
+
 // How many rows carry an update. A non-list counts zero because the caller
 // asked how many of these rows need one and there are no rows; a row whose flag
 // is missing or not exactly true is not counted.

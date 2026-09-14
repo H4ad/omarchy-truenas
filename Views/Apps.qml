@@ -97,10 +97,35 @@ Column {
     return String(app && app.webui && app.webui.label || "")
   }
 
+  // The portal, admitted only when Links.safeUrl accepts it against the
+  // configured base. A portal on another origin would otherwise render a link
+  // that opens nothing at all.
+  function webuiSafeUrl(app) {
+    return Links.safeUrl(view.webuiUrl(app), view.panel.baseUrl)
+  }
+
   function actionLabel(verb) {
     if (verb === "app-start") return "Start"
     if (verb === "app-stop") return "Stop"
     return "Redeploy"
+  }
+
+  // What the verb does to the app. A confirmation that names only the target
+  // leaves the consequence to be guessed, and a misclick here stops a service.
+  function consequence(verb) {
+    if (verb === "app-start") return "It is deployed and begins serving."
+    if (verb === "app-stop") return "It stops serving until started again."
+    return "It is stopped and rebuilt from its image."
+  }
+
+  // The inapplicable verb is not offered: no Start on a running app, no Stop on
+  // a stopped one. Redeploy is always available. A rank-2 transitional app
+  // offers both, because the panel cannot tell which one applies.
+  function actionVisible(app, verb) {
+    var rank = Model.appStateRank(app && app.state)
+    if (verb === "app-start") return rank !== 0
+    if (verb === "app-stop") return rank !== 1
+    return true
   }
 
   // The confirmation, then the write, then a forced re-poll. `panel` is captured
@@ -113,7 +138,7 @@ Column {
     var label = view.actionLabel(verb)
     var named = Model.appLabel(app) || name
     panel.requestConfirm(
-      label + " the " + named + " app?",
+      label + " the " + named + " app? " + view.consequence(verb),
       function() {
         panel.runApi([verb, name], function() {
           panel.actionNotice = named + " " + label.toLowerCase() + " requested"
@@ -185,7 +210,7 @@ Column {
 
       readonly property string detailLine: view.detailText(modelData)
       readonly property bool hasUpdate: modelData.upgradeAvailable === true
-      readonly property string webuiUrl: view.webuiUrl(modelData)
+      readonly property string webuiUrl: view.webuiSafeUrl(modelData)
       readonly property string webuiLabel: view.webuiLabel(modelData)
 
       Item {
@@ -251,6 +276,7 @@ Column {
           Text {
             required property var modelData
             text: modelData.label
+            visible: view.actionVisible(appCard.modelData, modelData.verb)
             color: actionMouse.containsMouse ? Color.accent : view.panel.dimForeground
             font.family: view.panel.contentFontFamily
             font.pixelSize: Style.font.caption

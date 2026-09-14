@@ -86,6 +86,24 @@ Column {
     return "Restart"
   }
 
+  // What the verb does to the service. A confirmation that names only the target
+  // leaves the consequence to be guessed, and a misclick here drops connections.
+  function consequence(verb) {
+    if (verb === "service-start") return "It begins serving and stays up until stopped."
+    if (verb === "service-stop") return "It stops serving until started again."
+    return "Existing connections are dropped."
+  }
+
+  // The inapplicable verb is not offered: no Start on a running service, no Stop
+  // on a stopped one. Restart is always available. A rank-2 unknown offers both,
+  // because the panel cannot tell which one applies.
+  function actionVisible(service, verb) {
+    var rank = Model.serviceStateRank(service && service.state)
+    if (verb === "service-start") return rank !== 0
+    if (verb === "service-stop") return rank !== 1
+    return true
+  }
+
   // The confirmation, then the write, then a forced re-poll. `panel` is captured
   // rather than read back off `view`, because the panel's queue outlives a view
   // that is destroyed by a tab switch.
@@ -95,7 +113,7 @@ Column {
     if (name === "") return
     var label = view.actionLabel(verb)
     panel.requestConfirm(
-      label + " the " + name + " service?",
+      label + " the " + name + " service? " + view.consequence(verb),
       function() {
         panel.runApi([verb, name], function() {
           panel.actionNotice = name + " service " + label.toLowerCase() + " requested"
@@ -215,6 +233,7 @@ Column {
           Text {
             required property var modelData
             text: modelData.label
+            visible: view.actionVisible(serviceCard.modelData, modelData.verb)
             color: actionMouse.containsMouse ? Color.accent : view.panel.dimForeground
             font.family: view.panel.contentFontFamily
             font.pixelSize: Style.font.caption

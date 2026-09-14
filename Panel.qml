@@ -8,7 +8,7 @@ import "Ui" as Local
 import "Model.js" as Model
 import "Links.js" as Links
 
-// The popout. A shell and a write queue, plus the five views.
+// The popout. A shell and a write queue, plus the seven views.
 //
 // The panel owns every write: views ask it to run a verb, it serialises the
 // argv through one Process (apiQueue/pumpApi), then refreshes the state with a
