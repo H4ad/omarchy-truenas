@@ -46,6 +46,7 @@ Ui.Panel {
 
   readonly property var counts: (snapshot && snapshot.counts) || ({})
   readonly property var pools: (snapshot && Model.arrayLike(snapshot.pools)) ? snapshot.pools : []
+  readonly property var disks: (snapshot && Model.arrayLike(snapshot.disks)) ? snapshot.disks : []
   readonly property string mode: Model.mode(snapshot)
   readonly property var connection: (snapshot && snapshot.connection) || null
   readonly property bool connected: !!(connection && connection.ok)
@@ -65,6 +66,13 @@ Ui.Panel {
     for (var i = 0; i < root.warnings.length; i++) {
       if (String(root.warnings[i] && root.warnings[i].section || "") === "pool")
         return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var diskWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      var section = String(root.warnings[i] && root.warnings[i].section || "")
+      if (section === "disk" || section === "diskTemp") return root.warnings[i]
     }
     return null
   }
@@ -124,6 +132,20 @@ Ui.Panel {
     return text
   }
 
+  // A failed disk request leaves the list empty too, so "no disks reported"
+  // prints only when neither disk section warned.
+  readonly property string disksText: {
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
+    if (root.diskWarning) return "the disk state could not be read"
+    if (!root.disks.length) return "no disks reported"
+    return root.disks.length + (root.disks.length === 1 ? " disk" : " disks")
+  }
+
   // "Nothing firing" is only true of a connected NAS whose alert request
   // answered; an offline or failed-alert state prints why, never the phrase.
   readonly property string alertsText: {
@@ -155,6 +177,7 @@ Ui.Panel {
     var list = [
       { kind: "view", args: ["health"], label: "Health", detail: root.statusText },
       { kind: "view", args: ["pools"], label: "Pools", detail: root.poolsText },
+      { kind: "view", args: ["disks"], label: "Disks", detail: root.disksText },
       { kind: "view", args: ["alerts"], label: "Alerts", detail: root.alertsText },
       { kind: "view", args: ["config"], label: "Config", detail: root.configText },
       { kind: "poll", args: [], label: "Poll now", detail: root.pollText }

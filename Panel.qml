@@ -74,6 +74,7 @@ Panel {
   readonly property var tabs: [
     { key: "health", label: "Health" },
     { key: "pools", label: "Pools" },
+    { key: "disks", label: "Disks" },
     { key: "alerts", label: "Alerts" },
     { key: "config", label: "Config" }
   ]
@@ -81,6 +82,7 @@ Panel {
   readonly property var viewComponents: ({
     "health": healthView,
     "pools": poolsView,
+    "disks": disksView,
     "alerts": alertsView,
     "config": configView
   })
@@ -567,6 +569,7 @@ Panel {
   // where it is created.
   Component { id: healthView; Views.Health { panel: root } }
   Component { id: poolsView; Views.Pools { panel: root } }
+  Component { id: disksView; Views.Disks { panel: root } }
   Component { id: alertsView; Views.Alerts { panel: root } }
   Component { id: configView; Views.Config { panel: root } }
 }

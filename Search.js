@@ -63,3 +63,24 @@ function pools(list, needle) {
   }
   return out;
 }
+
+// A disk matches on its device name, its model, its type, the pool it belongs
+// to and its bus. Empty fields never match a non-empty needle, so a row the
+// poller could not describe is only ever reached by the empty needle.
+function disks(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var disk = items[i];
+    if (!disk || typeof disk !== "object") continue;
+    if (contains(disk.name, needle)
+        || contains(disk.model, needle)
+        || contains(disk.type, needle)
+        || contains(disk.pool, needle)
+        || contains(disk.bus, needle)) {
+      out.push(disk);
+    }
+  }
+  return out;
+}
