@@ -274,3 +274,98 @@ check "not in the method log" 0 "$(grep -c "$secret_key" "$STUB_METHOD_LOG")"
 check "not in the payload log" 0 "$(grep -c "$secret_key" "$STUB_PAYLOAD_LOG")"
 check "not in the curl log" 0 "$(grep -c "$secret_key" "$STUB_CURL_LOG")"
 teardown
+
+# The four protection run verbs. replication-run needs the bare integer body the
+# route expects, not the one-key object; cloudsync-sync and snapshot-run carry
+# the id in the path and send no body; scrub-start sends a name and an action.
+test_case "replication-run posts the bare integer id"
+setup; single_instance_config
+printf '1077\n' >"$WORK/job.json"
+respond "/api/v2.0/replication/run" 0 200 "$WORK/job.json"
+out=$(api replication-run 1)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/replication/run" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body is the bare integer, not an object" 1 "$(jq -r '.' "$STUB_PAYLOAD_LOG")"
+check "the body is a number" number "$(jq -r '. | type' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "cloudsync-sync puts the id in the path and sends no body"
+setup; single_instance_config
+printf '1078\n' >"$WORK/job.json"
+respond "/api/v2.0/cloudsync/id/7/sync" 0 200 "$WORK/job.json"
+out=$(api cloudsync-sync 7)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/cloudsync/id/7/sync" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "no body was sent" 0 "$(wc -c <"$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "snapshot-run puts the id in the path and accepts a null body"
+setup; single_instance_config
+printf 'null\n' >"$WORK/snap-null.json"
+respond "/api/v2.0/pool/snapshottask/id/6/run" 0 200 "$WORK/snap-null.json"
+out=$(api snapshot-run 6)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the exact route" "$api_base/api/v2.0/pool/snapshottask/id/6/run" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "no body was sent" 0 "$(wc -c <"$STUB_PAYLOAD_LOG")"
+check "a null body is not action_failed" "" "$(jq -r '.error // ""' <<<"$out")"
+teardown
+
+test_case "scrub-start posts the pool name and the START action"
+setup; single_instance_config
+printf '1083\n' >"$WORK/job.json"
+respond "/api/v2.0/pool/scrub/scrub" 0 200 "$WORK/job.json"
+out=$(api scrub-start storage)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the exact route" "$api_base/api/v2.0/pool/scrub/scrub" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body names the pool" storage "$(jq -r '.name' "$STUB_PAYLOAD_LOG")"
+check "the body starts the scrub" START "$(jq -r '.action' "$STUB_PAYLOAD_LOG")"
+check "the body is two keys" "action,name" "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "a non-numeric protection id is a usage error with status 2"
+setup; single_instance_config
+for verb_name in replication-run cloudsync-sync snapshot-run; do
+  out=$(api "$verb_name" not-a-number 2>&1)
+  rc=$?
+  check "$verb_name rejects a non-numeric id" 2 "$rc"
+  check "$verb_name explains the numeric id" 1 \
+    "$(grep -c "needs a numeric id" <<<"$out")"
+done
+check "no request was sent" 0 "$(requests)"
+teardown
+
+test_case "a 404 from a protection run carries the NAS message"
+setup; single_instance_config
+printf '{"message":"pool not found"}\n' >"$WORK/notfound.json"
+respond "/api/v2.0/pool/scrub/scrub" 0 404 "$WORK/notfound.json"
+out=$(api scrub-start nope)
+rc=$?
+check "exit non-zero" 1 "$rc"
+check "names the error" not_found "$(jq -r '.error' <<<"$out")"
+check "carries the NAS message" "pool not found" "$(jq -r '.message' <<<"$out")"
+teardown
+
+test_case "the key never reaches the logs for a protection write"
+setup; single_instance_config
+printf 'TRUENAS_API_KEY=%s\n' "$secret_key" >"$TRUENAS_CREDENTIALS_FILE"
+chmod 600 "$TRUENAS_CREDENTIALS_FILE"
+respond "/api/v2.0/replication/run" 0 200 /dev/null
+api replication-run 1 >/dev/null 2>&1
+check "not in the method log" 0 "$(grep -c "$secret_key" "$STUB_METHOD_LOG")"
+check "not in the payload log" 0 "$(grep -c "$secret_key" "$STUB_PAYLOAD_LOG")"
+check "not in the curl log" 0 "$(grep -c "$secret_key" "$STUB_CURL_LOG")"
+teardown

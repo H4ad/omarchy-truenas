@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# The one write path the panel has: alert dismiss/restore, and the service and
-# app control verbs. Every verb answers with a single JSON object, so Panel.qml
-# has one shape to parse whether the write landed or not: {"ok":true} on a JSON
-# 2xx (the NAS answers `true` for a service, a job id for an app), and
+# The one write path the panel has: alert dismiss/restore, the service and app
+# control verbs, and the protection run verbs. Every verb answers with a single
+# JSON object, so Panel.qml has one shape to parse whether the write landed or
+# not: {"ok":true} on a JSON 2xx (the NAS answers `true` for a service, a job id
+# for an app or a protection run, `null` for a snapshot task), and
 # {error, message} otherwise. A 2xx whose body is not JSON at all is a failure
 # (`not_json`), which is how a route that does not exist is told from a landed
 # write.
@@ -11,6 +12,7 @@
 # as a config file on stdin, never in argv. The name or uuid is written into the
 # request body by jq, never interpolated into a shell string, so a value that
 # came off the wire can only ever be one JSON string and never a second field.
+# An id that goes into a path is validated numeric first.
 set -uo pipefail
 
 TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -29,6 +31,10 @@ truenas-api <verb> <name|uuid>
   app-start <name>        start an app
   app-stop <name>         stop an app
   app-redeploy <name>     redeploy an app
+  replication-run <id>    run a replication task now
+  cloudsync-sync <id>     run a cloud sync task now
+  snapshot-run <id>       run a periodic snapshot task now
+  scrub-start <pool>      start a scrub for a pool
 
 Answers with one JSON object: {"ok":true} on success, {error, message} otherwise.
 TXT
@@ -43,19 +49,27 @@ tn_have jq || { tn_warn "jq is required"; exit 1; }
 
 # Unknown verb first, so the usage text is the only thing on the way out and the
 # exit status (2) is a different class from a failed write (1). Each arm names
-# its route, the body key the NAS expects and the word for the positional
-# argument, so the request below and this guard read the same table.
+# its route, how the body is built and the word for the positional argument, so
+# the request below and this guard read the same table. `body=field` writes one
+# key; `body=int` writes the bare integer the replication run route expects;
+# `body=scrub` writes the name and action pair; `body=none` sends no body, with
+# the id already in the path.
 verb=${1:-}
 target=${2:-}
+id_in_path=0
 case $verb in
-  dismiss)         path=/api/v2.0/alert/dismiss;   body_key=uuid;     what="an alert uuid" ;;
-  restore)         path=/api/v2.0/alert/restore;   body_key=uuid;     what="an alert uuid" ;;
-  service-start)   path=/api/v2.0/service/start;   body_key=service;  what="a service name" ;;
-  service-stop)    path=/api/v2.0/service/stop;    body_key=service;  what="a service name" ;;
-  service-restart) path=/api/v2.0/service/restart; body_key=service;  what="a service name" ;;
-  app-start)       path=/api/v2.0/app/start;       body_key=app_name; what="an app name" ;;
-  app-stop)        path=/api/v2.0/app/stop;        body_key=app_name; what="an app name" ;;
-  app-redeploy)    path=/api/v2.0/app/redeploy;    body_key=app_name; what="an app name" ;;
+  dismiss)         path=/api/v2.0/alert/dismiss;   body=field; body_key=uuid;     what="an alert uuid" ;;
+  restore)         path=/api/v2.0/alert/restore;   body=field; body_key=uuid;     what="an alert uuid" ;;
+  service-start)   path=/api/v2.0/service/start;   body=field; body_key=service;  what="a service name" ;;
+  service-stop)    path=/api/v2.0/service/stop;    body=field; body_key=service;  what="a service name" ;;
+  service-restart) path=/api/v2.0/service/restart; body=field; body_key=service;  what="a service name" ;;
+  app-start)       path=/api/v2.0/app/start;       body=field; body_key=app_name; what="an app name" ;;
+  app-stop)        path=/api/v2.0/app/stop;        body=field; body_key=app_name; what="an app name" ;;
+  app-redeploy)    path=/api/v2.0/app/redeploy;    body=field; body_key=app_name; what="an app name" ;;
+  replication-run) path=/api/v2.0/replication/run;              body=int;   what="a replication id" ;;
+  cloudsync-sync)  path=/api/v2.0/cloudsync/id/{id}/sync;       body=none;  id_in_path=1; what="a cloud sync id" ;;
+  snapshot-run)    path=/api/v2.0/pool/snapshottask/id/{id}/run; body=none; id_in_path=1; what="a snapshot task id" ;;
+  scrub-start)     path=/api/v2.0/pool/scrub/scrub;             body=scrub; what="a pool name" ;;
   *) usage >&2; exit 2 ;;
 esac
 
@@ -81,6 +95,15 @@ resolved=$(tn_resolve_key "$id" \
 [[ $resolved == ok:* ]] || fail "${resolved#err:}"
 key=${resolved#ok:}
 
+# An id that reaches a path or the bare-integer body has to be numeric first, so
+# nothing can turn into a second path segment or a stray JSON token. This runs
+# after the config is read, so a caller with no config hears about that first.
+if [[ $body == int || $id_in_path == 1 ]]; then
+  [[ $target =~ ^[0-9]+$ ]] || {
+    tn_warn "a $verb needs a numeric id, got: $target"; usage >&2; exit 2; }
+  path=${path//\{id\}/$target}
+fi
+
 # The payload file is the only place the name or uuid is written, and jq encodes
 # it. The response body is a second mktemp that tn_http_request opens itself;
 # both are named to the trap, because fail exits from below and the rm written
@@ -91,9 +114,18 @@ payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX") \
   || { tn_warn "could not create a temporary file"; exit 1; }
 trap 'rm -f "${payload:-}" "${TN_BODY:-}"' EXIT
 
-jq -n --arg k "$body_key" --arg v "$target" '{ ($k): $v }' >"$payload"
+case $body in
+  field) jq -n --arg k "$body_key" --arg v "$target" '{ ($k): $v }' >"$payload" ;;
+  int)   jq -n --argjson n "$target" '$n' >"$payload" ;;
+  scrub) jq -n --arg name "$target" '{ name: $name, action: "START" }' >"$payload" ;;
+  none)  : >"$payload" ;;
+esac
 
-tn_http_request POST "$base" "$path" "$key" "$timeout" "$payload"
+if [[ $body == none ]]; then
+  tn_http_request POST "$base" "$path" "$key" "$timeout"
+else
+  tn_http_request POST "$base" "$path" "$key" "$timeout" "$payload"
+fi
 class=$(tn_classify)
 
 if [[ -z $class ]]; then
