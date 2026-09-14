@@ -104,7 +104,7 @@ Item {
         { term: "NFS", text: "The share protocol Unix clients use, shown by its path because NFS exports have no name." },
         { term: "iSCSI", text: "A block-level target a client mounts as a disk, shown with its alias and mode." },
         { term: "interface", text: "A physical or virtual network adapter, shown with its type, negotiated media and addresses." },
-        { term: "link state", text: "Whether the interface is up or down, and a state the plugin does not recognise reads as unknown rather than down." }
+        { term: "link state", text: "Whether the interface is up or down, and a spelling the plugin does not know counts as down, not as healthy, even though its word prints unknown." }
       ]
     },
     {
