@@ -79,6 +79,8 @@ function view(extra) {
     capacityText: "",
     worstPool: "",
     worstLevel: "",
+    tempText: "",
+    tempLevel: "",
     degraded: false
   };
   for (const key in (extra || {})) base[key] = extra[key];
@@ -99,10 +101,24 @@ function severities(variant, v) {
 
 // ------------------------------------------------------------------ the settings
 
-test_case("the six variants");
-check("the manifest order", ["Default", "Icon", "Alerts", "Capacity", "Pool", "Full"],
+test_case("the seven variants");
+check("the frozen order", ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full"],
   BarVariants.VARIANTS);
 check("Default is the built-in fallback", "Default", BarVariants.DEFAULT_VARIANT);
+
+test_case("the manifest offers exactly the same variants");
+// The setting's options and VARIANTS are two spellings of one list. A variant
+// the setting cannot spell is unreachable, and one VARIANTS has and the setting
+// does not is dead code; the description has to name Temp or the picker shows a
+// word nobody explained.
+const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+const variantSetting = manifest.barWidget.schema.filter(function (entry) {
+  return entry.key === "variant";
+})[0];
+check("the manifest options match VARIANTS, in order", BarVariants.VARIANTS,
+  variantSetting && variantSetting.options);
+check("the description names Temp as the hottest disk", true,
+  /Temp is the hottest disk/.test(String((variantSetting || {}).description || "")));
 
 test_case("resolveVariant");
 check("the manifest spelling is pinned", "Alerts", BarVariants.resolveVariant("Alerts"));
@@ -245,6 +261,48 @@ check("no pool prints nothing", "G",
 check("a null pool prints nothing", "G",
   render("Pool", view({ mode: "quiet", worstPool: null })));
 
+// ----------------------------------------------------------------------- Temp
+
+test_case("Temp is the hottest disk");
+check("a known temperature", "G 54\u00B0",
+  render("Temp", view({ mode: "quiet", tempText: "54\u00B0", tempLevel: "warning" })));
+check("the label carries the level", ["", "warning"],
+  severities("Temp", view({ mode: "quiet", tempText: "54\u00B0", tempLevel: "warning" })));
+check("a critical hottest disk keeps critical", ["", "critical"],
+  severities("Temp", view({ mode: "quiet", tempText: "61\u00B0", tempLevel: "critical" })));
+check("a healthy label has no tint of its own", ["", ""],
+  severities("Temp", view({ mode: "quiet", tempText: "38\u00B0", tempLevel: "" })));
+
+test_case("Temp with nothing known prints nothing, never a fabricated zero");
+// tempText is "" when no disk answered, which is a different fact from a disk
+// at 0 degrees: the empty view must spend no slot and draw no digit.
+check("an empty label", "G", render("Temp", view({ mode: "quiet", tempText: "" })));
+check("a null label", "G", render("Temp", view({ mode: "quiet", tempText: null })));
+check("a missing label", "G", render("Temp", view({ mode: "quiet" })));
+check("and never a fabricated zero degrees", false,
+  /0\u00B0/.test(render("Temp", view({ mode: "quiet", tempText: "" }))));
+check("exactly the glyph survives", 1,
+  segmentsFor("Temp", view({ mode: "quiet", tempText: "" })).length);
+
+test_case("Temp is overridden when the NAS is unreachable or unconfigured");
+check("offline shows the plug glyph", "P",
+  render("Temp", view({ mode: "offline", tempText: "54\u00B0", tempLevel: "warning" })));
+check("unconfigured shows the cog glyph", "C",
+  render("Temp", view({ mode: "unconfigured", tempText: "54\u00B0", tempLevel: "warning" })));
+check("offline prints no temperature", false,
+  /[0-9]/.test(render("Temp", view({ mode: "offline", tempText: "54\u00B0", tempLevel: "warning" }))));
+check("unconfigured prints no temperature", false,
+  /[0-9]/.test(render("Temp", view({ mode: "unconfigured", tempText: "54\u00B0", tempLevel: "warning" }))));
+
+test_case("only Temp prints the temperature");
+// The other variants keep their own contract; a value handed to the view is not
+// a licence to print it everywhere. Default and Full still read alerts and
+// capacity with the temperature present and unused.
+check("Default ignores tempText", "G 71%",
+  render("Default", view({ mode: "quiet", capacityText: "71%", tempText: "54\u00B0", tempLevel: "warning" })));
+check("Full ignores tempText", "G 3 \u00B7 71%",
+  render("Full", view({ mode: "firing", alertCount: 3, capacityText: "71%", tempText: "54\u00B0", tempLevel: "warning" })));
+
 // ----------------------------------------------------------------------- Full
 
 test_case("Full is alerts and capacity");
@@ -284,6 +342,26 @@ check("nothing tinted is one colour", false,
   BarVariants.isMultiColour([{ text: "G", severity: "" }]));
 check("no segments at all", false, BarVariants.isMultiColour([]));
 check("a null list", false, BarVariants.isMultiColour(null));
+
+// ----------------------------------------------------------------- soleSeverity
+
+test_case("soleSeverity is the one colour a single tint can paint");
+// The widget's single-tint path cannot carry two colours, and it must not lose
+// the one colour it has: a lone hot disk prints "61°" in critical, and only
+// this tells the widget to use the temperature's severity rather than the
+// alert count's.
+check("one tinted segment beside the glyph", "critical",
+  BarVariants.soleSeverity([{ text: "G", severity: "" }, { text: "61\u00B0", severity: "critical" }]));
+check("two segments of one severity", "warning",
+  BarVariants.soleSeverity([{ text: "3", severity: "warning" }, { text: "51\u00B0", severity: "warning" }]));
+check("two distinct severities need the row", "",
+  BarVariants.soleSeverity([{ text: "3", severity: "critical" }, { text: "51\u00B0", severity: "warning" }]));
+check("nothing tinted at all", "",
+  BarVariants.soleSeverity([{ text: "G", severity: "" }]));
+check("no segments", "", BarVariants.soleSeverity([]));
+check("a null list", "", BarVariants.soleSeverity(null));
+check("a missing severity key is untinted", "info",
+  BarVariants.soleSeverity([{ text: "G" }, { text: "i", severity: "info" }]));
 
 // ------------------------------------------------------------- the segment shape
 

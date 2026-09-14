@@ -29,6 +29,21 @@ for script in Model.js Links.js Search.js BarVariants.js; do
     ".pragma library" "$(head -n 1 "$ROOT/$script")"
 done
 
+# --------------------------------------------------------------- bar tint path
+# The single-tint path paints the whole item one colour. It has to come from
+# the segments' own severity, or a lone hot disk keeps the alert count's colour
+# and a hot bar reads as a quiet one. The node suites load BarVariants.js alone
+# and cannot see this wiring, so it is pinned here twice. The declaration alone
+# is not enough: reverting only the foreground binding to severityColor leaves
+# the property declared and every other suite green, which is how the tint got
+# lost once already.
+check "BarWidget declares the single tint's severity" "1" \
+  "$(grep -c 'BarVariants.soleSeverity(root.segments)' "$ROOT/BarWidget.qml")"
+check "BarWidget guards the single tint on that severity" "1" \
+  "$(grep -c 'root.soleSeverity !== ""' "$ROOT/BarWidget.qml")"
+check "BarWidget tints the single tint with that severity" "1" \
+  "$(grep -c 'root.colorForSeverity(root.soleSeverity)' "$ROOT/BarWidget.qml")"
+
 # ------------------------------------------------------------------ functions
 # Two `function` declarations with the same name in one object collide, and the
 # whole file fails to load rather than the second one losing. Root-scope members
