@@ -189,6 +189,7 @@ Column {
 
       Text {
         width: parent.width
+        wrapMode: Text.WordWrap
         visible: diskCard.detailLine !== ""
         text: diskCard.detailLine
         color: view.panel.dimForeground
@@ -198,6 +199,7 @@ Column {
 
       Text {
         width: parent.width
+        wrapMode: Text.WordWrap
         visible: diskCard.thresholdLine !== ""
         text: diskCard.thresholdLine
         color: view.panel.dimForeground
