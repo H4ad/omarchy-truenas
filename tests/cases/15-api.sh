@@ -78,3 +78,125 @@ rc=$?
 check "exit 2" 2 "$rc"
 check "usage on stderr" 1 "$(grep -c 'truenas-api <verb>' <<<"$out")"
 teardown
+
+# The six service/app control verbs. Each one posts a single name to one exact
+# route; the NAS answers `true` synchronously for a service and a job id for an
+# app, and both are a 2xx, so the caller sees the same {"ok":true} either way.
+api_base="https://nas.example:4433"
+
+test_case "service-start posts the service name to the start route"
+setup; single_instance_config
+respond "/api/v2.0/service/start" 0 200 /dev/null
+out=$(api service-start cifs)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/service/start" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body key is service" cifs "$(jq -r '.service' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" service "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "service-stop posts the service name to the stop route"
+setup; single_instance_config
+respond "/api/v2.0/service/stop" 0 200 /dev/null
+out=$(api service-stop cifs)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/service/stop" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body key is service" cifs "$(jq -r '.service' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "service-restart posts the service name to the restart route"
+setup; single_instance_config
+respond "/api/v2.0/service/restart" 0 200 /dev/null
+out=$(api service-restart cifs)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/service/restart" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body key is service" cifs "$(jq -r '.service' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "app-start posts app_name to the app start route"
+setup; single_instance_config
+respond "/api/v2.0/app/start" 0 200 /dev/null
+out=$(api app-start appc)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/app/start" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body key is app_name" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" app_name "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "app-stop posts app_name to the app stop route"
+setup; single_instance_config
+respond "/api/v2.0/app/stop" 0 200 /dev/null
+out=$(api app-stop appc)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/app/stop" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body key is app_name" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
+teardown
+
+test_case "app-redeploy posts app_name to the redeploy route"
+setup; single_instance_config
+respond "/api/v2.0/app/redeploy" 0 200 /dev/null
+out=$(api app-redeploy appc)
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
+check "the exact route" "$api_base/api/v2.0/app/redeploy" \
+  "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
+check "the body key is app_name" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
+teardown
+
+# The NAS answers an unknown service with the name as a top-level message, not
+# under .error, which is the shape the shared reader does not know about. The
+# verb still has to carry it, or the panel shows a silent failure.
+test_case "a 404 for an unknown service carries the NAS message"
+setup; single_instance_config
+printf '{"message":"nosuchservice"}\n' >"$WORK/notfound.json"
+respond "/api/v2.0/service/restart" 0 404 "$WORK/notfound.json"
+out=$(api service-restart nosuchservice)
+rc=$?
+check "exit non-zero" 1 "$rc"
+check "names the error" not_found "$(jq -r '.error' <<<"$out")"
+check "carries the NAS message" nosuchservice "$(jq -r '.message' <<<"$out")"
+teardown
+
+test_case "a missing argument is a usage error with status 2"
+setup
+out=$(api service-start 2>&1)
+rc=$?
+check "exit 2" 2 "$rc"
+check "names the missing argument" 1 \
+  "$(grep -c 'a service-start needs a service name' <<<"$out")"
+check "usage on stderr" 1 "$(grep -c 'truenas-api <verb>' <<<"$out")"
+teardown
+
+test_case "the key never reaches the logs for a service or app write"
+setup; single_instance_config
+printf 'TRUENAS_API_KEY=%s\n' "$secret_key" >"$TRUENAS_CREDENTIALS_FILE"
+chmod 600 "$TRUENAS_CREDENTIALS_FILE"
+respond "/api/v2.0/service/start" 0 200 /dev/null
+api service-start cifs >/dev/null 2>&1
+respond "/api/v2.0/app/redeploy" 0 200 /dev/null
+api app-redeploy appc >/dev/null 2>&1
+check "not in the method log" 0 "$(grep -c "$secret_key" "$STUB_METHOD_LOG")"
+check "not in the payload log" 0 "$(grep -c "$secret_key" "$STUB_PAYLOAD_LOG")"
+check "not in the curl log" 0 "$(grep -c "$secret_key" "$STUB_CURL_LOG")"
+teardown
