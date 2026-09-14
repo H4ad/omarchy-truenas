@@ -268,6 +268,40 @@ are pinned by structure checks.
 with the glossary, so a keybinding can reach it. The other verbs are `open`,
 `close`, `show`, `hide`, `toggle`, `refresh` and `view <name>`.
 
+## More bar variants
+
+**Fifteen variants.** The bar gains eight, for fifteen total. Four are text,
+through the existing segment renderer. `Severity` prints one segment per non-empty
+alert bucket, worst two, each tinted by its own level, e.g. `2▲ 1●`. `Down`
+counts the services and apps not running. `Protection` counts the failed
+replication, cloud sync, snapshot and scrub jobs. `Uptime` prints the time since
+boot (`up 18h`). Each drops its body when the value is unknown, so a zero is the
+absence of a number, never a `0`.
+
+**Four charts.** They draw with Rectangles in the icon slot, no Canvas.
+`CapacityBar` fills six cells to the fullest pool's used percent and prints the
+percent beside them. `Pools` draws one square per pool, coloured by status rank.
+`DiskHeat` draws one square per disk, coloured by its temperature band.
+`Sparkline` draws a micro column chart of the fullest pool's recent capacity. A
+chart with nothing to draw is empty, and the offline and unconfigured modes still
+replace any variant with a plug or cog.
+
+**Capacity history.** `bin/truenas-poll` appends the fullest pool's used percent
+to `~/.local/state/omarchy/truenas/history.json` on each successful poll, capped
+at sixty samples, with `null` for an unknown capacity so a gap stays a gap rather
+than a fake zero. A failed poll writes nothing at all. The widget reads the file
+through its own `FileView`; a missing or malformed file is an empty sparkline and
+never a crash.
+
+**Where the rules live.** `BarVariants.js` stays free of QML and keeps every
+"what the bar says" decision, so the node suite exercises it alone. The two new
+helpers with a state argument, `protectionFailures` and `downTotal`, plus
+`capacityBarFill`, `sparkColumns` and the pool and disk dot severity maps join
+`Model.js`. The widget passes plain data, `chartKind` names the shape and
+`chartFor` builds the spec, and severity stays the contract: the JS names a level
+and the widget maps it to the theme. The manifest lists all fifteen and the
+variant picker names each one.
+
 ## Screenshot
 
 `preview.png` is a live screenshot of the bar item and the Health popout taken

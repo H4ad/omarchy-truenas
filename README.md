@@ -11,11 +11,17 @@ self-signed certificate handled through `insecureTLS`).
 
 ## What the bar shows
 
-One widget, seven variants: `Default` (the active alert count when anything is
-firing, otherwise the fullest pool's capacity), `Icon`, `Alerts`, `Capacity`,
-`Pool`, `Temp` and `Full`. The item is tinted by the worst state, and an
-unreachable NAS shows a plug while an unconfigured one shows a cog, so "nothing
-is wrong" and "I cannot tell" never look the same.
+One widget, fifteen variants. The text variants are `Default` (the active alert
+count when anything is firing, otherwise the fullest pool's capacity), `Icon`,
+`Alerts`, `Capacity`, `Pool`, `Temp`, `Full`, `Severity` (the worst two alert
+buckets, each tinted by its own level), `Down` (services and apps not running),
+`Protection` (failed protection jobs) and `Uptime`. The charts draw in the icon
+slot: `CapacityBar` (cells filled to the fullest pool's used percent, with the
+percent), `Pools` (one square per pool by status), `DiskHeat` (one square per
+disk by temperature band) and `Sparkline` (the fullest pool's recent capacity).
+The item is tinted by the worst state, and an unreachable NAS shows a plug while
+an unconfigured one shows a cog, so "nothing is wrong" and "I cannot tell" never
+look the same.
 
 ## What the popout shows
 
