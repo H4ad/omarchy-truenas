@@ -4,6 +4,13 @@
 # frame is a human choice, so the region is picked interactively.
 set -euo pipefail
 
+for tool in grim slurp omarchy-shell; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    printf 'screenshot: required command not found on PATH: %s\n' "$tool" >&2
+    exit 1
+  fi
+done
+
 out=${1:-preview.png}
 omarchy-shell io.github.h4ad.truenas open || true
 sleep 1
