@@ -103,6 +103,22 @@ check "the body key is service" cifs "$(jq -r '.service' "$STUB_PAYLOAD_LOG")"
 check "the body is one key" service "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 teardown
 
+# The NAS can accept the request with a 2xx and still answer the JSON boolean
+# `false`, which means the service did not change. That is a failed action, not a
+# landed write, so the verb fails with action_failed and does not echo the body.
+test_case "service-start with a 2xx body false is a failed action"
+setup; single_instance_config
+printf 'false\n' >"$WORK/service-false.json"
+respond "/api/v2.0/service/start" 0 200 "$WORK/service-false.json"
+out=$(api service-start ups)
+rc=$?
+check "exit non-zero" 1 "$rc"
+check "names the error" action_failed "$(jq -r '.error' <<<"$out")"
+check "explains the action did not take effect" \
+  "the NAS reported the action did not take effect" "$(jq -r '.message' <<<"$out")"
+check "does not print the raw body" 0 "$(grep -c '^false$' <<<"$out")"
+teardown
+
 test_case "service-stop posts the service name to the stop route"
 setup; single_instance_config
 respond "/api/v2.0/service/stop" 0 200 /dev/null

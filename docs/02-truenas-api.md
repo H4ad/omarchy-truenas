@@ -241,6 +241,10 @@ otherwise:
   run asynchronously. A forced re-poll after an app write may still show the old
   state until the job lands. That is honest: the panel reads the NAS back and
   the next poll catches up. It never fabricates "starting".
+- A service control `2xx` whose body is the JSON boolean `false` is the NAS
+  accepting the request but the service not changing, so `bin/truenas-api` fails
+  it as `action_failed`. A `null` (alert dismiss/restore), `true` (a landed
+  service write) or a job id (an app write) `2xx` is an accepted write.
 - A service control body missing `service` is `400 {"message":"service attribute
   expected."}`; an unknown service name is `404 {"message":"<name>"}`. An app
   body missing `app_name` is `400 {"message":"app_name attribute expected."}`.
@@ -322,8 +326,10 @@ report a healthy NAS with zero alerts, which is the one lie that matters.
 
 `tn_classify` reads the status code before the body, so an empty-body `401` is
 `unauthenticated` and a `404` is `not_found` rather than "not JSON"; it treats
-`202` as success and keeps `not_json` for a `2xx` with a non-JSON body. `401` →
-`unauthenticated`, `403` → `forbidden`, `5xx` → `server_error`.
+`202` as success and keeps `not_json` for a `2xx` with a non-JSON body. A valid
+JSON value classifies from the status code, so a `2xx` body of `false` or `null`
+is not "not JSON". `401` → `unauthenticated`, `403` → `forbidden`, `5xx` →
+`server_error`.
 
 ### The rate limit and the two cadences
 

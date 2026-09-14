@@ -105,6 +105,29 @@ check "curl was told to skip verification" 1 "$(grep -c '^k$' "$STUB_INSECURE_LO
 cat >"$TRUENAS_CONFIG_FILE" <<JSON
 { "insecureTLS": false, "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
 JSON
-tn_http_request GET "https://nas.example" "/api/v2.0/system/info" test-key 5 >/dev/null
-check "and only when the config asks" 1 "$(grep -c '^k$' "$STUB_INSECURE_LOG")"
+  tn_http_request GET "https://nas.example" "/api/v2.0/system/info" test-key 5 >/dev/null
+  check "and only when the config asks" 1 "$(grep -c '^k$' "$STUB_INSECURE_LOG")"
+  teardown
+
+# `jq -e` exits non-zero for `false`, `null` and a bare number, all valid JSON a
+# 2xx can carry. The classifier must read those from the status code, and only a
+# body that is not JSON at all stays not_json.
+test_case "tn_classify accepts a 2xx body of false, null or a number"
+setup
+printf 'false\n' >"$WORK/false.json"
+TN_BODY=$WORK/false.json; TN_CODE=200; TN_CURL_RC=0
+check "false is a 2xx success" "" "$(tn_classify)"
+printf 'null\n' >"$WORK/null.json"
+TN_BODY=$WORK/null.json
+check "null is a 2xx success" "" "$(tn_classify)"
+printf '12345\n' >"$WORK/job.json"
+TN_BODY=$WORK/job.json
+check "a job id is a 2xx success" "" "$(tn_classify)"
+teardown
+
+test_case "tn_classify keeps not_json for a 200 with an HTML body"
+setup
+printf '<html></html>\n' >"$WORK/notjson.html"
+TN_BODY=$WORK/notjson.html; TN_CODE=200; TN_CURL_RC=0
+check "HTML is not_json" not_json "$(tn_classify)"
 teardown

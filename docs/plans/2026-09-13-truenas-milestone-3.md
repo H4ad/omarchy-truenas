@@ -233,9 +233,13 @@ argument, required by every verb (`exit 2` when missing).
 | `app-redeploy <name>` | `POST /api/v2.0/app/redeploy` | `{"app_name": …}` |
 
 Any 2xx answers `{"ok":true}` whether the NAS answered `true` (services) or a
-job id (apps); a non-2xx answers `{error, message}` and exits `1`. The panel
-calls `refreshAfterWrite()` after every write so the next poll reads the state
-back.
+job id (apps); a non-2xx answers `{error, message}` and exits `1`. A service
+control `2xx` whose body is the JSON boolean `false` is the NAS accepting the
+request but the service not changing, so it is a failed action:
+`{error:"action_failed", message:"…"}` and exit `1`. A `null`, `true` or job-id
+`2xx` is accepted, so an alert dismiss/restore and an app control still succeed.
+The panel calls `refreshAfterWrite()` after every write so the next poll reads
+the state back.
 
 ### `truenasctl`
 
