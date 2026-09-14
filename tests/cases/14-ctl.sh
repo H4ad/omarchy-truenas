@@ -384,6 +384,142 @@ check "names the normalize failure" 1 \
   "$(grep -c 'the response could not be normalized' <<<"$out")"
 teardown
 
+# ------------------------------------------------------------ services/apps
+# `services` and `apps` read state.json like `pools` and `disks`. A flag the
+# poller did not learn is `no`, a version it did not learn is `unknown`, and a
+# failed section is its own sentence rather than an empty table.
+test_case "services prints one row per service with yes or no enabled"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": true, "error": null, "message": null },
+  "system": { "hostname": "nas" },
+  "counts": { "critical": 0, "error": 0, "warning": 0, "notice": 0, "info": 0, "total": 0 },
+  "alerts": [], "pools": [], "disks": [], "apps": [],
+  "services": [
+    { "id": 4, "service": "cifs", "state": "RUNNING", "enable": true },
+    { "id": 5, "service": "ftp",  "state": "STOPPED", "enable": false },
+    { "id": 11, "service": "snmp", "state": "" }
+  ],
+  "warnings": [] }
+JSON
+out=$(ctl services)
+check "services runs" 0 "$(ctl services >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^SERVICE  STATE  ENABLED$' <<<"$out")"
+check "one row per service" 3 "$(grep -c '^\(cifs\|ftp\|snmp\) ' <<<"$out")"
+check "a running enabled service is yes" 1 \
+  "$(grep -c '^cifs  RUNNING  yes$' <<<"$out")"
+check "a stopped disabled service is no" 1 \
+  "$(grep -c '^ftp  STOPPED  no$' <<<"$out")"
+check "a missing enable is no, never yes" 1 \
+  "$(grep -c '^snmp  .*  no$' <<<"$out")"
+check "no row invents yes" 0 "$(grep -c '^snmp.*yes' <<<"$out")"
+teardown
+
+test_case "apps prints name, state, version and update flag"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": true, "error": null, "message": null },
+  "system": { "hostname": "nas" },
+  "counts": { "critical": 0, "error": 0, "warning": 0, "notice": 0, "info": 0, "total": 0 },
+  "alerts": [], "pools": [], "disks": [], "services": [],
+  "apps": [
+    { "name": "appc", "title": "appc", "state": "RUNNING",
+      "version": "16.0.4-rootless_1.2.39", "upgradeAvailable": false },
+    { "name": "appb", "title": "appb", "state": "RUNNING",
+      "version": "1.4.2", "upgradeAvailable": true },
+    { "name": "appd", "title": "appd", "state": "STOPPED",
+      "version": "", "upgradeAvailable": false }
+  ],
+  "warnings": [] }
+JSON
+out=$(ctl apps)
+check "apps runs" 0 "$(ctl apps >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^APP  STATE  VERSION  UPDATE$' <<<"$out")"
+check "one row per app" 3 "$(grep -c '^\(appc\|appb\|appd\) ' <<<"$out")"
+check "the APP column is the name" 1 "$(grep -c '^appc  RUNNING' <<<"$out")"
+check "a known version is printed" 1 \
+  "$(grep -c '^appc  RUNNING  16.0.4-rootless_1.2.39  no$' <<<"$out")"
+check "an available update is yes" 1 \
+  "$(grep -c '^appb  RUNNING  1.4.2  yes$' <<<"$out")"
+check "a missing version is unknown" 1 \
+  "$(grep -c '^appd  STOPPED  unknown  no$' <<<"$out")"
+check "no row invents an update" 0 "$(grep -c '^appc.*yes' <<<"$out")"
+teardown
+
+test_case "services and apps on an empty list print just the header"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": true, "error": null, "message": null },
+  "system": { "hostname": "nas" },
+  "counts": { "critical": 0, "error": 0, "warning": 0, "notice": 0, "info": 0, "total": 0 },
+  "alerts": [], "pools": [], "disks": [], "services": [], "apps": [],
+  "warnings": [] }
+JSON
+out=$(ctl services)
+check "services runs" 0 "$(ctl services >/dev/null 2>&1; echo $?)"
+check "services is exactly the header" 1 "$(wc -l <<<"$out")"
+check "services prints the header" 1 \
+  "$(grep -c '^SERVICE  STATE  ENABLED$' <<<"$out")"
+check "services invents no row" 0 "$(grep -c '^\(cifs\|ftp\|snmp\)' <<<"$out")"
+out=$(ctl apps)
+check "apps runs" 0 "$(ctl apps >/dev/null 2>&1; echo $?)"
+check "apps is exactly the header" 1 "$(wc -l <<<"$out")"
+check "apps prints the header" 1 \
+  "$(grep -c '^APP  STATE  VERSION  UPDATE$' <<<"$out")"
+teardown
+
+test_case "services names a failed service section instead of an empty table"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": true, "error": null, "message": null },
+  "system": { "hostname": "nas" },
+  "counts": { "critical": 0, "error": 0, "warning": 0, "notice": 0, "info": 0, "total": 0 },
+  "alerts": [], "pools": [], "disks": [], "services": [], "apps": [],
+  "warnings": [ { "section": "service", "error": "timeout", "message": "" } ] }
+JSON
+out=$(ctl services)
+check "services still runs" 0 "$(ctl services >/dev/null 2>&1; echo $?)"
+check "says unknown" 1 "$(grep -c '^services unknown:' <<<"$out")"
+check "names the failed section" 1 \
+  "$(grep -c 'the service section did not answer' <<<"$out")"
+check "does not draw a header over an empty table" 0 "$(grep -c '^SERVICE' <<<"$out")"
+out=$(ctl apps)
+check "the app half is unaffected" 0 "$(grep -c '^apps unknown:' <<<"$out")"
+check "apps still prints its header" 1 "$(grep -c '^APP  STATE' <<<"$out")"
+teardown
+
+test_case "apps names a failed app section instead of an empty table"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": true, "error": null, "message": null },
+  "system": { "hostname": "nas" },
+  "counts": { "critical": 0, "error": 0, "warning": 0, "notice": 0, "info": 0, "total": 0 },
+  "alerts": [], "pools": [], "disks": [], "services": [], "apps": [],
+  "warnings": [ { "section": "app", "error": "timeout", "message": "" } ] }
+JSON
+out=$(ctl apps)
+check "apps still runs" 0 "$(ctl apps >/dev/null 2>&1; echo $?)"
+check "says unknown" 1 "$(grep -c '^apps unknown:' <<<"$out")"
+check "names the failed section" 1 \
+  "$(grep -c 'the app section did not answer' <<<"$out")"
+check "does not draw a header over an empty table" 0 "$(grep -c '^APP' <<<"$out")"
+out=$(ctl services)
+check "the service half is unaffected" 0 "$(grep -c '^services unknown:' <<<"$out")"
+check "services still prints its header" 1 "$(grep -c '^SERVICE  STATE' <<<"$out")"
+teardown
+
 # ------------------------------------------------------------ open and purge
 test_case "open builds a url under the base and never launches a real browser"
 setup

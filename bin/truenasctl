@@ -26,6 +26,8 @@ truenasctl <command>
   alerts                     active alerts, one per line
   pools                      each pool and its capacity
   disks                      each disk, its size and temperature
+  services                   each service, its state and whether it is enabled
+  apps                       each app, its state, version and update flag
   poll [--quiet]             run one poll now
   config list                configuration as JSON, never the key value
   config set <key> <value>   write one scalar setting
@@ -258,7 +260,8 @@ cmd_test() {
 }
 
 # Why one half of the state is unknown, or "" when it is not. `$2` is the
-# section name the poller uses: "alert", "pool", "disk" or "diskTemp". A missing
+# section name the poller uses: "alert", "pool", "disk", "diskTemp", "service"
+# or "app". A missing
 # answer (offline), a failed request for that section, and a failed normalize
 # all leave the half unknowable, and each gets a reason rather than a zero. The
 # offline sentence is the same one the `connection` line carries, so the verbs
@@ -396,6 +399,60 @@ cmd_disks() {
   ' "$file"
 }
 
+# One row per service. `ENABLED` is yes only when the row says true, because a
+# service that is not enabled is the wire saying off, not a missing answer. A
+# failed services fetch taints the whole section, so the reason sentence is
+# printed rather than a table that would misstate what the NAS answered.
+cmd_services() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  reason=$(state_unknown_reason "$file" service)
+  if [[ -n $reason ]]; then
+    printf 'services unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "SERVICE  STATE  ENABLED",
+    (.services[]? | [
+        .service,
+        (.state // ""),
+        (if .enable == true then "yes" else "no" end)
+      ] | join("  "))
+  ' "$file"
+}
+
+# One row per app. A version the poller could not learn is the word `unknown`,
+# never a blank, and `UPDATE` is yes only when the row says upgradeAvailable.
+# The APP column is the name, so a missing title is never "undefined".
+cmd_apps() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  reason=$(state_unknown_reason "$file" app)
+  if [[ -n $reason ]]; then
+    printf 'apps unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "APP  STATE  VERSION  UPDATE",
+    (.apps[]? | [
+        .name,
+        (.state // ""),
+        (if (.version // "") == "" then "unknown" else .version end),
+        (if .upgradeAvailable == true then "yes" else "no" end)
+      ] | join("  "))
+  ' "$file"
+}
+
 cmd_poll() { exec "$TN_PLUGIN_DIR/bin/truenas-poll" "$@"; }
 
 cmd_open() {
@@ -520,6 +577,8 @@ case ${1:-} in
   alerts)  cmd_alerts ;;
   pools)   cmd_pools ;;
   disks)   cmd_disks ;;
+  services) cmd_services ;;
+  apps)    cmd_apps ;;
   poll)    shift; cmd_poll "$@" ;;
   config)  shift; cmd_config "$@" ;;
   open)    shift; cmd_open "$@" ;;
