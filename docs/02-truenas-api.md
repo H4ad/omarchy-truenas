@@ -360,6 +360,111 @@ and cloud sync `credentials`, `encryption_password`, `encryption_salt`,
 `meta_is_stale` requires all nine sections, so an older meta without the new
 keys reads as stale once, refetches once and self-heals.
 
+## Milestone 5: shares and network
+
+Four read-only list routes on the meta cadence. Everything below is a live
+measurement against TrueNAS 25.10.6 on 2026-09-14; the raw record is
+`docs/plans/2026-09-14-recon-shares-network.md`. M5 adds no write and no
+notification.
+
+| Purpose | Method | Path | Observed answer |
+| --- | --- | --- | --- |
+| SMB shares | GET | `/api/v2.0/sharing/smb` | JSON array; three shares on this box (`default`, `backup`, `media`) |
+| NFS exports | GET | `/api/v2.0/sharing/nfs` | JSON array; one export; the read-only flag is `ro` |
+| iSCSI targets | GET | `/api/v2.0/iscsi/target` | JSON array; empty on this box |
+| network interfaces | GET | `/api/v2.0/interface` | JSON array; one `PHYSICAL` interface; link and media live under `state` |
+
+Findings that constrain the design, each observed on that box unless marked
+otherwise:
+
+1. **The interface route is `/interface`, not `/network/interface`** (the
+   design's guess is `404`). `link_state`, `media_type` and
+   `active_media_subtype` live under the nested `state` object, so a jq path that
+   asks for `.link_state` on the top-level interface silently yields `null`. The
+   row uses `state.aliases` (the runtime addresses, with `broadcast` dropped and
+   the link-local IPv6 kept), not the top-level configured `aliases`.
+2. **WebDAV is dropped.** `/api/v2.0/sharing/webdav` and `/api/v2.0/webdav` are
+   both `404` `text/plain`, and neither the 25.04 nor the 25.10 reference lists a
+   `webdav` method. The design's `shares.webdav` has no source and is not in
+   `state.json`.
+3. **SMB sessions are dropped.** `/api/v2.0/smb/status` is `404` and the `smb`
+   namespace exposes only `smb.config`, `smb.update`, `smb.bindip_choices` and
+   `smb.unixcharset_choices`. The design's `sessions.smb` is not in `state.json`.
+4. **iSCSI is not a share.** The collection is `/api/v2.0/iscsi/target`, not
+   under `/sharing`. The box has zero targets, so the iSCSI fixture is synthetic
+   from the v25.10.5 `iscsi.target.query` schema and is marked as such; the first
+   box with a target is the first real measurement.
+5. **Two share vocabularies.** SMB calls the read-only flag `readonly`; NFS calls
+   it `ro`. One normalizer row per type: `smb_norm`, `nfs_norm`, `iscsi_norm`.
+   NFS `ro` is written as `readonly` so the two types present one name to the UI,
+   and the iSCSI row carries only `id`, `name`, `alias`, `mode` (a target has no
+   enabled, locked or path field).
+6. **`shares` is rows, not counts.** The design's object of counts is replaced by
+   `{smb:[],nfs:[],iscsi:[]}`; a count is the list's `.length` and is only
+   trusted when no warning names the section.
+
+A create route that fails model validation answers `422` with a JSON document,
+not the M3 `400 {"message": ...}` shape:
+
+```
+POST /api/v2.0/sharing/smb
+{"data": [{"message": "Input should be a valid dictionary or instance of SmbShareCreate", "errno": 22}]}
+```
+
+`tn_error_message` now surfaces the first keyed message from that shape (for
+example `{"null":[{"message":"…"}]}` on a snapshot-task run) instead of rendering
+an empty sentence. M5 is read-only and never sends one.
+
+### The share and network meta cache
+
+`meta.json` gains `smb`, `nfs`, `iscsi` and `network`, beside the earlier keys,
+each `{fetchedAt, rows}`:
+
+```jsonc
+{ "smb":     { "fetchedAt": "...", "rows": [ { "id": 1, "name": "default",
+                                            "path": "/mnt/storage/default",
+                                            "enabled": true, "locked": false,
+                                            "readonly": false,
+                                            "purpose": "DEFAULT_SHARE",
+                                            "comment": "" } ] },
+  "nfs":     { "fetchedAt": "...", "rows": [ { "id": 1, "path": "/mnt/storage/default",
+                                            "enabled": true, "locked": false,
+                                            "ro": false, "comment": "" } ] },
+  "iscsi":   { "fetchedAt": "...", "rows": [ { "id": 1, "name": "iqn.…:target0",
+                                            "alias": "bulk", "mode": "ISCSI" } ] },
+  "network": { "fetchedAt": "...", "rows": [ { "name": "enp4s0", "type": "PHYSICAL",
+                                            "state": { "link_state": "LINK_STATE_UP",
+                                                       "media_type": "Ethernet",
+                                                       "active_media_subtype": "1000Mb/s Twisted Pair",
+                                                       "aliases": [ { "type": "INET",
+                                                                      "address": "192.0.2.10",
+                                                                      "netmask": 24 } ] } } ] } }
+```
+
+The rows keep the consumed wire fields under their wire names. SMB `audit` and
+`options`, NFS `hosts`, `networks` and `security`, iSCSI `groups` and
+`iscsi_parameters`, and every interface MAC (`link_address`,
+`permanent_link_address`, `hardware_link_address`) are dropped before the write
+and never reach disk. The `network` row keeps the nested `state` object reduced
+to the four keys the normalizer reads, because `iface_norm` reads
+`state.link_state` on both the fetch and the reuse path. `meta_is_stale`
+requires all thirteen sections, so an older meta without the new keys reads as
+stale once, refetches once and self-heals.
+
+### Not verified live
+
+- **The iSCSI target row shape.** The live box has zero iSCSI targets, extents,
+  portals, target-extent maps and initiators; the shape comes from the v25.10.5
+  reference, and `tests/fixtures/iscsi-target.json` is synthetic and marked so.
+- **`state.link_state` values other than `LINK_STATE_UP`.** Only `enp4s0` in
+  `LINK_STATE_UP` was observed; `LINK_STATE_DOWN` and `LINK_STATE_UNKNOWN` come
+  from the TrueNAS enum, not a live probe.
+- **Bridge, VLAN and link-aggregation interfaces.** Only one `PHYSICAL` interface
+  exists. The normalizer reads the same nested paths for every type, so an
+  unknown shape degrades to empty strings, not a crash.
+- **A locked share.** No locked dataset exists on the box, so `locked` was only
+  ever seen `false`.
+
 ## Cross-cutting rules
 
 ### A datetime is a string *or* `{$date}`
@@ -381,10 +486,12 @@ zero.
 
 A route that does not exist can still answer `200` with HTML or an empty object.
 `bin/truenas-poll` `expect_shape` checks `alert/list`, `pool` and
-`disk/details` are arrays, `system/info` is a non-empty object and
-`disk/temperatures` an object after the request succeeds, and treats a
-wrong-shaped body as a section failure. Trusting the status code alone would
-report a healthy NAS with zero alerts, which is the one lie that matters.
+`disk/details` are arrays; `system/info` is a non-empty object;
+`disk/temperatures` an object; and the service, app, protection, share and
+interface lists arrays of objects, so a bare `null` entry is a failed section
+rather than a nameless card. A wrong-shaped body is a section failure. Trusting
+the status code alone would report a healthy NAS with zero alerts, which is the
+one lie that matters.
 
 `tn_classify` reads the status code before the body, so an empty-body `401` is
 `unauthenticated` and a `404` is `not_found` rather than "not JSON"; it treats
@@ -405,14 +512,16 @@ never hits every endpoint:
 - every `notify.metaMaxAgeSeconds` (default 300): `system/info`, then
   `disk/details` and `disk/temperatures` (the temperatures request is built from
   the names the details call returned, so a failed details call skips it), then
-  `service`, `app`, `replication`, `cloudsync`, `pool/snapshottask`,
-  `pool/scrub` and the rest as milestones add them.
+  `service`, `app`, `sharing/smb`, `sharing/nfs`, `iscsi/target`, `interface`,
+  `replication`, `cloudsync`, `pool/snapshottask`, `pool/scrub` and the rest as
+  milestones add them.
 
-A cold poll -- no fresh meta, so every section is fetched -- spends eleven
+A cold poll -- no fresh meta, so every section is fetched -- spends fifteen
 requests: `alert/list`, `pool`, `system/info`, `disk/details`,
-`disk/temperatures`, `service`, `app`, `replication`, `cloudsync`,
-`pool/snapshottask` and `pool/scrub`. A warm poll, with a fresh meta cache,
-spends two: `alert/list` and `pool`.
+`disk/temperatures`, `service`, `app`, `sharing/smb`, `sharing/nfs`,
+`iscsi/target`, `interface`, `replication`, `cloudsync`, `pool/snapshottask` and
+`pool/scrub`. A warm poll, with a fresh meta cache, spends two: `alert/list` and
+`pool`.
 
 Results of the slow set are cached in
 `~/.local/state/omarchy/truenas/meta.json` with a `fetchedAt`, and
@@ -442,12 +551,13 @@ lives.
 
 ## Verification status
 
-The endpoint shapes above are taken from the 25.04.2 reference and encoded in
-`share/normalize.jq`, and the test fixtures (`tests/fixtures/`) are sanitized
-snapshots of those shapes plus synthetic failure states (a degraded pool with
-checksum errors and a scrub on record, alert levels across the buckets, `401`,
-`500`, unreachable). The milestone-1 shapes, the milestone-2 disk routes, the
-milestone-3 service and app routes and the milestone-4 protection routes were
-confirmed against a live TrueNAS 25.10.6 on 2026-09-13 and 2026-09-14, and those
-probes are recorded above. A field the live box did not exercise is still a
-claim to re-measure, not a fact to quote.
+The endpoint shapes above are taken from the 25.04.2 and 25.10 references and
+encoded in `share/normalize.jq`, and the test fixtures (`tests/fixtures/`) are
+sanitized snapshots of those shapes plus synthetic failure states (a degraded
+pool with checksum errors and a scrub on record, alert levels across the
+buckets, `401`, `500`, unreachable, and a synthetic iSCSI target row). The
+milestone-1 shapes, the milestone-2 disk routes, the milestone-3 service and app
+routes, the milestone-4 protection routes and the milestone-5 share and
+interface routes were confirmed against a live TrueNAS 25.10.6 on 2026-09-13 and
+2026-09-14, and those probes are recorded above. A field the live box did not
+exercise is still a claim to re-measure, not a fact to quote.

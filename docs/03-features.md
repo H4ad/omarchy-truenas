@@ -1,13 +1,14 @@
 # Features
 
-What milestones 1 to 4 ship, and what the design defers. The split is the
+What milestones 1 to 5 ship, and what the design defers. The split is the
 design's: bar value against cost (API unknowns plus QML work). The design is
 [plans/2026-09-13-truenas-plugin-design.md](plans/2026-09-13-truenas-plugin-design.md);
 the task-by-task versions are
 [plans/2026-09-13-truenas-milestone-1.md](plans/2026-09-13-truenas-milestone-1.md),
 [plans/2026-09-13-truenas-milestone-2.md](plans/2026-09-13-truenas-milestone-2.md),
-[plans/2026-09-13-truenas-milestone-3.md](plans/2026-09-13-truenas-milestone-3.md)
-and [plans/2026-09-14-truenas-milestone-4.md](plans/2026-09-14-truenas-milestone-4.md).
+[plans/2026-09-13-truenas-milestone-3.md](plans/2026-09-13-truenas-milestone-3.md),
+[plans/2026-09-14-truenas-milestone-4.md](plans/2026-09-14-truenas-milestone-4.md)
+and [plans/2026-09-14-truenas-milestone-5.md](plans/2026-09-14-truenas-milestone-5.md).
 The endpoints are in [02-truenas-api.md](02-truenas-api.md), and the traps that
 have already cost time are in [11-pitfalls.md](11-pitfalls.md).
 
@@ -179,12 +180,38 @@ sections.
 `unknown` for a value that was never learned and the section's failure sentence
 instead of an empty table.
 
+## Milestone 5, what ships
+
+**Shares view.** One read-only tab with a Shares block and a Network block. The
+Shares block draws an SMB, an NFS and an iSCSI sub-list; each card shows the
+name (SMB and iSCSI) or the path (NFS), the path, and the `enabled`, `locked`
+and `read-only` markers the type carries. The Network block draws one card per
+interface with the link word from `Model.linkStateText` (tinted by
+`linkStateRank`, so a blank or `LINK_STATE_UNKNOWN` link is dim `unknown` and
+never a dead link), the negotiated media subtype, and every `address/netmask`.
+A failed share type or a failed interface list says why and never renders as a
+NAS that serves nothing over no link. One filter serves all three share types
+(`Search.shares`, matching name, path, comment and purpose) and one filters the
+interfaces (`Search.interfaces`, also matching each address). The Shares block
+links out through `Links.sharesUrl`. M5 ships no share write, no confirmation
+and no bar variant.
+
+**Meta-cadence caching.** `/sharing/smb`, `/sharing/nfs`, `/iscsi/target` and
+`/interface` join the meta cadence: a cold poll spends fifteen requests and a
+warm poll two. The cache holds only the wire fields the plugin consumes, so the
+SMB `audit`/`options` blobs, the NFS `hosts`/`networks`/`security` lists, the
+iSCSI `groups`/`iscsi_parameters` and every interface MAC never reach disk.
+`meta_is_stale` now requires all thirteen sections.
+
+**`truenasctl shares` / `truenasctl network`.** `TYPE  NAME  PATH  ENABLED  RO`
+(one row per share, grouped SMB/NFS/iSCSI) and
+`NAME  TYPE  LINK  MEDIA  ADDRESSES`, with `-` for a field a type does not have
+and `unknown` for one it has but the poll did not learn, and the section's
+failure sentence instead of an empty table.
+
 ## Planned
 
 Each of these is its own milestone and its own plan when it is reached.
-
-**M5 Shares and network.** `/sharing/{smb,nfs,iscsi,webdav}`, `/smb/status`,
-`/network/interface`; counts, sessions, link state.
 
 **M6 Polish.** Menu completeness, the glossary behind the `?`, the preview
 image, and the marketplace submission.

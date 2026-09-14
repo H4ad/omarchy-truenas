@@ -2,12 +2,16 @@
   "schemaVersion": 1,
   "id": "io.github.h4ad.truenas",
   "name": "TrueNAS",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "Vinícius Lourenço",
   "license": "MIT",
   "description": "TrueNAS pool health, disk temperatures, active alerts and protection tasks on the Omarchy bar, with desktop notifications and a popout for disks, pools, alerts, services, apps, protection and system state.",
   "homepage": "https://github.com/h4ad/omarchy-truenas",
-  "kinds": ["bar-widget", "menu", "service"],
+  "kinds": [
+    "bar-widget",
+    "menu",
+    "service"
+  ],
   "keepLoaded": true,
   "entryPoints": {
     "barWidget": "BarWidget.qml",
@@ -18,7 +22,13 @@
     "displayName": "TrueNAS",
     "description": "Pool health, disk temperatures, alerts and capacity, with a popout for pools, disks, services, apps, protection and alerts.",
     "category": "Monitoring",
-    "aliases": ["truenas", "nas", "zfs", "pools", "storage"],
+    "aliases": [
+      "truenas",
+      "nas",
+      "zfs",
+      "pools",
+      "storage"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
@@ -28,20 +38,45 @@
       "configPath": ""
     },
     "schema": [
-      { "key": "variant", "type": "enum",
+      {
+        "key": "variant",
+        "type": "enum",
         "label": "What the bar shows",
-        "options": ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full"],
+        "options": [
+          "Default",
+          "Icon",
+          "Alerts",
+          "Capacity",
+          "Pool",
+          "Temp",
+          "Full"
+        ],
         "defaultValue": "Default",
-        "description": "Default is the active alert count when anything is firing, otherwise the fullest pool's capacity. Icon is the glyph alone, tinted by the worst state. Alerts is the active alert count. Capacity is the fullest pool. Pool is the worst pool status word. Temp is the hottest disk, or nothing when no temperature is known. Full adds alerts and capacity. An unreachable or unconfigured NAS overrides every variant with a plug or cog: a number the plugin cannot vouch for is never printed as one." },
-      { "key": "hideWhenHealthy", "type": "boolean",
+        "description": "Default is the active alert count when anything is firing, otherwise the fullest pool's capacity. Icon is the glyph alone, tinted by the worst state. Alerts is the active alert count. Capacity is the fullest pool. Pool is the worst pool status word. Temp is the hottest disk, or nothing when no temperature is known. Full adds alerts and capacity. An unreachable or unconfigured NAS overrides every variant with a plug or cog: a number the plugin cannot vouch for is never printed as one."
+      },
+      {
+        "key": "hideWhenHealthy",
+        "type": "boolean",
         "label": "Hide the icon when everything is healthy",
         "defaultValue": false,
-        "description": "Off keeps a dimmed glyph on the bar, which is also how you tell the plugin is alive and reaching the NAS." },
-      { "key": "panelWidth", "type": "integer", "label": "Panel width",
-        "min": 360, "max": 900, "step": 20, "defaultValue": 460 },
-      { "key": "configPath", "type": "string", "defaultValue": "",
+        "description": "Off keeps a dimmed glyph on the bar, which is also how you tell the plugin is alive and reaching the NAS."
+      },
+      {
+        "key": "panelWidth",
+        "type": "integer",
+        "label": "Panel width",
+        "min": 360,
+        "max": 900,
+        "step": 20,
+        "defaultValue": 460
+      },
+      {
+        "key": "configPath",
+        "type": "string",
+        "defaultValue": "",
         "label": "Config file",
-        "description": "Leave empty for ~/.config/omarchy/truenas/config.json. The API key is never stored in shell.json: it lives in the credentials file the config names, at mode 600." }
+        "description": "Leave empty for ~/.config/omarchy/truenas/config.json. The API key is never stored in shell.json: it lives in the credentials file the config names, at mode 600."
+      }
     ]
   }
 }
