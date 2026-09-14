@@ -27,6 +27,19 @@ check "the dismiss path was requested" 1 \
   "$(grep -c '/api/v2.0/alert/dismiss' "$STUB_CURL_LOG")"
 teardown
 
+# The dismiss route answers a 2xx with the JSON `null` body on success. That is
+# not the boolean `false`, so it stays a landed write and never action_failed.
+test_case "dismiss with a 2xx null body succeeds and is not action_failed"
+setup; single_instance_config
+printf 'null\n' >"$WORK/dismiss-null.json"
+respond "/api/v2.0/alert/dismiss" 0 200 "$WORK/dismiss-null.json"
+out=$(api dismiss "$alert_uuid")
+rc=$?
+check "exit ok" 0 "$rc"
+check "answers ok" true "$(jq -r '.ok' <<<"$out")"
+check "is not action_failed" "" "$(jq -r '.error // ""' <<<"$out")"
+teardown
+
 test_case "a 400 answers {error, message} and exits non-zero"
 setup; single_instance_config
 respond "/api/v2.0/alert/dismiss" 0 400 "$ROOT/tests/fixtures/err-500.json"

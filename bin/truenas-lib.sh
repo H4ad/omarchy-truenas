@@ -289,10 +289,9 @@ tn_classify() {
       200|201|202|204) printf '' ; return 0 ;;
     esac
   fi
-  # No -e: `jq -e` exits non-zero for the valid JSON values `false` and `null`
-  # (and a bare number), which a 2xx can legitimately carry. Every valid JSON
-  # value classifies from the status code below; only a body that is not JSON at
-  # all is not_json.
+  # No -e: `jq -e` exits non-zero for the valid JSON values `false` and `null`,
+  # which a 2xx can legitimately carry. Every valid JSON value classifies from
+  # the status code below; only a body that is not JSON at all is not_json.
   if ! jq . "$body" >/dev/null 2>&1; then
     # A route that does not exist on the frontend answers 200 with HTML. Trusting
     # the status code here would report a healthy instance with zero alerts,

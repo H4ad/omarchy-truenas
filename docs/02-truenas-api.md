@@ -328,7 +328,8 @@ report a healthy NAS with zero alerts, which is the one lie that matters.
 `unauthenticated` and a `404` is `not_found` rather than "not JSON"; it treats
 `202` as success and keeps `not_json` for a `2xx` with a non-JSON body. A valid
 JSON value classifies from the status code, so a `2xx` body of `false` or `null`
-is not "not JSON". `401` → `unauthenticated`, `403` → `forbidden`, `5xx` →
+is not "not JSON", and an empty non-2xx body is `http_<code>` rather than
+`not_json`. `401` → `unauthenticated`, `403` → `forbidden`, `5xx` →
 `server_error`.
 
 ### The rate limit and the two cadences

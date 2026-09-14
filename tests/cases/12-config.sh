@@ -109,7 +109,7 @@ JSON
   check "and only when the config asks" 1 "$(grep -c '^k$' "$STUB_INSECURE_LOG")"
   teardown
 
-# `jq -e` exits non-zero for `false`, `null` and a bare number, all valid JSON a
+# `jq -e` exits non-zero for the valid JSON values `false` and `null`, which a
 # 2xx can carry. The classifier must read those from the status code, and only a
 # body that is not JSON at all stays not_json.
 test_case "tn_classify accepts a 2xx body of false, null or a number"
@@ -130,4 +130,14 @@ setup
 printf '<html></html>\n' >"$WORK/notjson.html"
 TN_BODY=$WORK/notjson.html; TN_CODE=200; TN_CURL_RC=0
 check "HTML is not_json" not_json "$(tn_classify)"
+teardown
+
+# `jq -e` reported no valid result for an empty body, so a non-2xx with no body
+# used to read not_json. `jq .` accepts the empty input and the status code names
+# the failure instead.
+test_case "tn_classify reads an empty non-2xx body from the status code"
+setup
+: >"$WORK/empty.json"
+TN_BODY=$WORK/empty.json; TN_CODE=400; TN_CURL_RC=0
+check "an empty 400 is http_400, not not_json" http_400 "$(tn_classify)"
 teardown
