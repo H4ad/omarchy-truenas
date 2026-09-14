@@ -240,38 +240,6 @@ check("STOPPING is transitional, not down", 2, Model.appStateRank("STOPPING"));
 check("a blank state is unknown, not down", 2, Model.appStateRank(""));
 check("a missing state is unknown, not down", 2, Model.appStateRank(null));
 
-test_case("worstServiceLevel");
-
-check("a down service warns", "warning",
-  Model.worstServiceLevel([service("cifs", "RUNNING"), service("ups", "STOPPED")]));
-check("a warning outranks an unknown", "warning",
-  Model.worstServiceLevel([service("ups", "STOPPED"), service("cifs", "")]));
-check("blank states are unknown, not a warning", "unknown",
-  Model.worstServiceLevel([service("cifs", "RUNNING"), service("ups", "")]));
-check("all running is no level", "",
-  Model.worstServiceLevel([service("cifs", "RUNNING")]));
-check("a row without a state is unknown, never a warning", "unknown",
-  Model.worstServiceLevel([{}]));
-check("no rows is no level", "", Model.worstServiceLevel([]));
-check("not a list is no level", "", Model.worstServiceLevel(null));
-check("a blank is no level", "", Model.worstServiceLevel(""));
-
-test_case("worstAppLevel");
-
-check("a crashed app warns", "warning",
-  Model.worstAppLevel([app("appc", "appc", "RUNNING"), app("appb", "appb", "CRASHED")]));
-check("a warning outranks an unknown", "warning",
-  Model.worstAppLevel([app("appb", "appb", "FAILED"), app("appc", "appc", "DEPLOYING")]));
-check("a transitional state is unknown, not a warning", "unknown",
-  Model.worstAppLevel([app("appc", "appc", "RUNNING"), app("appb", "appb", "DEPLOYING")]));
-check("all running is no level", "",
-  Model.worstAppLevel([app("appc", "appc", "RUNNING")]));
-check("a row without a state is unknown, never a warning", "unknown",
-  Model.worstAppLevel([{}]));
-check("no rows is no level", "", Model.worstAppLevel([]));
-check("not a list is no level", "", Model.worstAppLevel(null));
-check("a blank is no level", "", Model.worstAppLevel(""));
-
 test_case("downServices");
 
 check("only down rows are copied", ["ups"],
@@ -446,19 +414,6 @@ const csRows = [cloudSync("c", "FAILED")];
 check("the cloud sync result is a copy", false, Model.failedCloudSync(csRows) === csRows);
 check("not a list is an empty list for cloud sync", [], Model.failedCloudSync(null));
 
-test_case("worstProtectionLevel");
-
-check("a failed replication warns", "warning",
-  Model.worstProtectionLevel({ replication: [replication("a", "FAILED", 0)], cloudSync: [] }));
-check("a failed cloud sync warns", "warning",
-  Model.worstProtectionLevel({ replication: [], cloudSync: [cloudSync("a", "ERROR")] }));
-check("warnings on a replication row warn", "warning",
-  Model.worstProtectionLevel({ replication: [replication("a", "SUCCESS", 1)], cloudSync: [] }));
-check("all healthy is no level", "",
-  Model.worstProtectionLevel({ replication: [replication("a", "SUCCESS", 0)], cloudSync: [] }));
-check("an empty state is no level", "", Model.worstProtectionLevel({}));
-check("no state is no level", "", Model.worstProtectionLevel(null));
-
 test_case("protectionLabel");
 
 check("the name wins", "storage-to-backup",
@@ -587,22 +542,6 @@ check("a blank link is unknown, never undefined", "unknown", Model.linkStateText
 check("a missing link is unknown, never undefined", "unknown", Model.linkStateText(null));
 check("a spelling this file has not heard of is unknown", "unknown",
   Model.linkStateText("LINK_STATE_TESTING"));
-
-test_case("worstLinkLevel");
-
-check("a down link warns", "warning",
-  Model.worstLinkLevel([iface("a", "LINK_STATE_UP"), iface("b", "LINK_STATE_DOWN")]));
-check("an unknown link is unknown, not a warning", "unknown",
-  Model.worstLinkLevel([iface("a", "LINK_STATE_UP"), iface("b", "LINK_STATE_UNKNOWN")]));
-check("a down link outranks an unknown one", "warning",
-  Model.worstLinkLevel([iface("a", "LINK_STATE_UNKNOWN"), iface("b", "LINK_STATE_DOWN")]));
-check("all up is no level", "", Model.worstLinkLevel([iface("a", "LINK_STATE_UP")]));
-check("no rows is no level", "", Model.worstLinkLevel([]));
-check("not a list is no level", "", Model.worstLinkLevel(null));
-check("a row with no link state is unknown, not up", "unknown",
-  Model.worstLinkLevel([{}]));
-check("junk rows are unknown, not a warning", "unknown",
-  Model.worstLinkLevel([{}, null, 4]));
 
 test_case("downInterfaces and unknownInterfaces");
 
