@@ -124,6 +124,7 @@ check("unknown ranks below ok",
   true, Model.tempStateRank("unknown") < Model.tempStateRank("ok"));
 check("a state this file does not know ranks with unknown",
   0, Model.tempStateRank("toasty"));
+check("a blank state ranks with unknown", 0, Model.tempStateRank(""));
 check("a missing state ranks with unknown", 0, Model.tempStateRank(null));
 
 test_case("tempLevel");
@@ -151,10 +152,13 @@ check("a NaN temperature is skipped",
   38, Model.hottestTempC([disk("sda", NaN, 60, "unknown"), disk("sdb", 38, 60, "ok")]));
 check("no known temperature is null, never 0", null,
   Model.hottestTempC([disk("sda", null, 60, "unknown")]));
+check("only blank temperatures is null, never 0", null,
+  Model.hottestTempC([disk("sda", "", 60, "unknown")]));
 check("a real zero is a real zero", 0,
   Model.hottestTempC([disk("sda", 0, 60, "ok")]));
 check("no rows is null", null, Model.hottestTempC([]));
 check("not a list is null", null, Model.hottestTempC(null));
+check("a blank is null", null, Model.hottestTempC(""));
 
 test_case("hotTempLabel");
 
@@ -164,7 +168,10 @@ check("a whole degree stays whole", "54\u00B0",
   Model.hotTempLabel([disk("sda", 54, 60, "warning")]));
 check("no known temperature is blank", "",
   Model.hotTempLabel([disk("sda", null, 60, "unknown")]));
+check("only blank temperatures is blank, never 0\u00B0", "",
+  Model.hotTempLabel([disk("sda", "", 60, "unknown")]));
 check("not a list is blank", "", Model.hotTempLabel(null));
+check("a blank is blank", "", Model.hotTempLabel(""));
 
 test_case("formatTemp");
 
