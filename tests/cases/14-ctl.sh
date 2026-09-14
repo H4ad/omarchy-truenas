@@ -229,6 +229,50 @@ out=$(ctl pools)
 check "storage with its capacity" 1 "$(grep -c 'storage.*ONLINE.*71' <<<"$out")"
 teardown
 
+test_case "status and alerts call an offline state unknown, not zero"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": false, "error": "unreachable", "message": "connection refused" },
+  "system": null, "counts": null, "alerts": null, "pools": null, "warnings": [] }
+JSON
+out=$(ctl status)
+check "status still runs" 0 "$(ctl status >/dev/null 2>&1; echo $?)"
+check "pools are unknown" 1 "$(grep -c '^pools: unknown' <<<"$out")"
+check "alerts are unknown" 1 "$(grep -c '^alerts: unknown' <<<"$out")"
+check "the reason is named" 1 "$(grep -q 'connection refused' <<<"$out" && echo 1 || echo 0)"
+check "no alert zero is printed" 0 "$(grep -c 'alerts: 0 active' <<<"$out")"
+check "no pool zero is printed" 0 "$(grep -c '^pools: 0 ' <<<"$out")"
+out=$(ctl alerts)
+check "alerts says unknown" 1 "$(grep -c '^alerts unknown:' <<<"$out")"
+check "alerts names the reason" 1 "$(grep -q 'connection refused' <<<"$out" && echo 1 || echo 0)"
+check "alerts does not claim no active alerts" 0 "$(grep -c 'no active alerts' <<<"$out")"
+teardown
+
+test_case "alerts says a failed alert section did not answer"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": true, "error": null, "message": null },
+  "system": { "hostname": "nas" },
+  "counts": { "critical": 0, "error": 0, "warning": 0, "notice": 0, "info": 0, "total": 0 },
+  "alerts": [], "pools": [],
+  "warnings": [ { "section": "alert", "error": "timeout", "message": "" } ] }
+JSON
+out=$(ctl alerts)
+check "says the section did not answer" 1 \
+  "$(grep -c 'the alert section did not answer' <<<"$out")"
+check "says unknown" 1 "$(grep -c '^alerts unknown:' <<<"$out")"
+check "does not claim no active alerts" 0 "$(grep -c 'no active alerts' <<<"$out")"
+out=$(ctl status)
+check "status marks only the alert half unknown" 1 \
+  "$(grep -c '^alerts: unknown' <<<"$out")"
+check "status prints the pool count" 1 \
+  "$(grep -c '^pools: 0 (worst none)' <<<"$out")"
+teardown
+
 # ------------------------------------------------------------ open and purge
 test_case "open builds a url under the base and never launches a real browser"
 setup

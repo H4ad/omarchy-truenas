@@ -22,9 +22,10 @@ Column {
   property string keyError: ""
   property string keyNotice: ""
 
+  // The panel owns config loading: it calls loadConfig() from showView("config")
+  // (and from the refresh and key-save paths), so this view must not issue a
+  // second `config list` of its own.
   readonly property var config: view.panel.configData
-
-  Component.onCompleted: view.panel.loadConfig()
 
   function keyStatusText() {
     if (!view.config) return "reading config…"

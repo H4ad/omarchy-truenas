@@ -40,9 +40,12 @@ says "no scrub on record" rather than inventing a date.
 dismiss behind a confirmation, restore straight out. The panel re-polls with
 `--force-meta` before it believes them.
 
-**Config view.** The bar settings plus the credentials flow: `pollSeconds`,
-`timeoutSeconds`, `insecureTLS` and the API key, the key entered through a
-masked `SecretField` and written on stdin, never shown back.
+**Config view.** The bar settings plus a read-out of the NAS setup. Only two
+fields are writable in the panel: `variant`, written back to `shell.json`, and
+the API key, entered through a masked `SecretField`, written on stdin and never
+shown back. `pollSeconds`, `timeoutSeconds` and `insecureTLS` are displayed but
+not editable here; change them in `~/.config/omarchy/truenas/config.json` or with
+`truenasctl config set`.
 
 **Notifications.** A toast when an alert starts firing, one when it clears, and
 one when a pool leaves or returns to `ONLINE`. Deduped in `seen.json` by a

@@ -256,8 +256,28 @@ cmd_test() {
   return 0
 }
 
+# Why one half of the state is unknown, or "" when it is not. `$2` is the
+# section name the poller uses: "alert" or "pool". A missing answer (offline), a
+# failed request for that section, and a failed normalize all leave the half
+# unknowable, and each gets a reason rather than a zero. The offline sentence is
+# the same one the `connection` line carries, so the verbs name the same cause.
+state_unknown_reason() {
+  jq -r --arg section "$2" '
+    def down:
+      (.connection.error // "unreachable")
+      + (if (.connection.message // "") != "" then ": " + .connection.message else "" end);
+    (.warnings // []) as $w
+    | if (.connection.ok != true) then down
+      elif ([$w[] | select(.section == $section)] | length) > 0
+        then "the \($section) section did not answer"
+      elif ([$w[] | select(.section == "normalize")] | length) > 0
+        then "the response could not be normalized"
+      else "" end
+  ' "$1"
+}
+
 cmd_status() {
-  local file updated poll_s then_epoch now_epoch age stale=""
+  local file updated poll_s then_epoch now_epoch age stale="" alert_unknown pool_unknown
   file="$TN_STATE_FILE"
   if [[ ! -s $file ]]; then
     printf 'no state yet; run: truenasctl poll\n'
@@ -275,7 +295,12 @@ cmd_status() {
     (( age > poll_s * 2 )) && stale=" (stale, ${age}s old)"
   fi
 
-  jq -r --arg stale "$stale" '
+  # Computed before the render so the count lines and the reason never disagree,
+  # and so the same helper answers `cmd_alerts`.
+  alert_unknown=$(state_unknown_reason "$file" alert)
+  pool_unknown=$(state_unknown_reason "$file" pool)
+
+  jq -r --arg stale "$stale" --arg alert_unknown "$alert_unknown" --arg pool_unknown "$pool_unknown" '
     def human:
       (. | floor) as $d
       | ($d / 86400 | floor) as $days
@@ -291,15 +316,30 @@ cmd_status() {
       "dialect: \(.connection.dialect // "unknown")",
       "version: \(.connection.version // .system.version // "unknown")",
       "uptime: " + (if (.system.uptimeSeconds // null) == null then "unknown" else (.system.uptimeSeconds | human) end),
-      "pools: \(.pools | length) (worst \(.pools | map(.status) | sort_by(prank) | last // "none"))",
-      "alerts: \($c.total // 0) active (critical \($c.critical // 0), error \($c.error // 0), warning \($c.warning // 0), notice \($c.notice // 0), info \($c.info // 0), dismissed \($c.dismissed // 0))"
+      "pools: " + (if $pool_unknown == ""
+        then "\(.pools | length) (worst \(.pools | map(.status) | sort_by(prank) | last // "none"))"
+        else "unknown (\($pool_unknown))" end),
+      "alerts: " + (if $alert_unknown == ""
+        then "\($c.total // 0) active (critical \($c.critical // 0), error \($c.error // 0), warning \($c.warning // 0), notice \($c.notice // 0), info \($c.info // 0), dismissed \($c.dismissed // 0))"
+        else "unknown (\($alert_unknown))" end)
   ' "$file"
 }
 
 cmd_alerts() {
-  local file rows
+  local file reason rows
   file="$TN_STATE_FILE"
   [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  # An unread alert list and an empty one are different facts; the empty line is
+  # only ever reached when the alert request itself answered.
+  reason=$(state_unknown_reason "$file" alert)
+  if [[ -n $reason ]]; then
+    printf 'alerts unknown: %s\n' "$reason"
+    return 0
+  fi
   rows=$(jq -r '.alerts[]? | select(.dismissed != true)
     | "\(.level | ascii_upcase)  \(.text // .formatted // "")"' "$file")
   if [[ -z $rows ]]; then printf 'no active alerts\n'; else printf '%s\n' "$rows"; fi
