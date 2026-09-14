@@ -26,6 +26,8 @@ truenasctl <command>
   alerts                     active alerts, one per line
   pools                      each pool and its capacity
   disks                      each disk, its size and temperature
+  services                   each service, its state and whether it is enabled
+  apps                       each app, its state, version and update flag
   poll [--quiet]             run one poll now
   config list                configuration as JSON, never the key value
   config set <key> <value>   write one scalar setting
@@ -258,11 +260,11 @@ cmd_test() {
 }
 
 # Why one half of the state is unknown, or "" when it is not. `$2` is the
-# section name the poller uses: "alert", "pool", "disk" or "diskTemp". A missing
-# answer (offline), a failed request for that section, and a failed normalize
-# all leave the half unknowable, and each gets a reason rather than a zero. The
-# offline sentence is the same one the `connection` line carries, so the verbs
-# name the same cause.
+# section name the poller uses: "alert", "pool", "disk", "diskTemp", "service"
+# or "app". A missing answer (offline), a failed request for that section, and a
+# failed normalize all leave the half unknowable, and each gets a reason rather
+# than a zero. The offline sentence is the same one the `connection` line
+# carries, so the verbs name the same cause.
 state_unknown_reason() {
   jq -r --arg section "$2" '
     def down:
@@ -396,6 +398,70 @@ cmd_disks() {
   ' "$file"
 }
 
+# One row per service. `ENABLED` is yes/no only when the row carries a boolean,
+# because a service whose flag was never learned is `unknown`, not off. A
+# missing or non-array `services` key, and a failed services fetch, taint the
+# whole section, so the reason sentence is printed rather than a table that
+# would misstate what the NAS answered.
+cmd_services() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.services | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'services unknown: the service section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" service)
+  if [[ -n $reason ]]; then
+    printf 'services unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "SERVICE  STATE  ENABLED",
+    (.services[] | [
+        (if (.service // "") == "" then "unknown" else .service end),
+        (.state // ""),
+        (if (.enable | type) == "boolean" then (if .enable then "yes" else "no" end) else "unknown" end)
+      ] | join("  "))
+  ' "$file"
+}
+
+# One row per app. A version the poller could not learn is the word `unknown`,
+# never a blank, and `UPDATE` is yes/no only when the row carries a boolean, so
+# a flag that was never learned is `unknown`. The APP column is the name, so a
+# missing name or title is never a blank or "undefined".
+cmd_apps() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.apps | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'apps unknown: the app section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" app)
+  if [[ -n $reason ]]; then
+    printf 'apps unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "APP  STATE  VERSION  UPDATE",
+    (.apps[] | [
+        (if (.name // "") == "" then "unknown" else .name end),
+        (.state // ""),
+        (if (.version // "") == "" then "unknown" else .version end),
+        (if (.upgradeAvailable | type) == "boolean" then (if .upgradeAvailable then "yes" else "no" end) else "unknown" end)
+      ] | join("  "))
+  ' "$file"
+}
+
 cmd_poll() { exec "$TN_PLUGIN_DIR/bin/truenas-poll" "$@"; }
 
 cmd_open() {
@@ -520,6 +586,8 @@ case ${1:-} in
   alerts)  cmd_alerts ;;
   pools)   cmd_pools ;;
   disks)   cmd_disks ;;
+  services) cmd_services ;;
+  apps)    cmd_apps ;;
   poll)    shift; cmd_poll "$@" ;;
   config)  shift; cmd_config "$@" ;;
   open)    shift; cmd_open "$@" ;;
