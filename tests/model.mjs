@@ -90,6 +90,11 @@ function cloudSync(name, jobState) {
   return { name: name, job: jobState === null ? null : { state: jobState } };
 }
 
+function iface(name, linkState, mediaType, mediaSubtype, addresses) {
+  return { name: name, linkState: linkState, mediaType: mediaType,
+           mediaSubtype: mediaSubtype, addresses: addresses || [] };
+}
+
 const ok = { ok: true };
 
 // A QVariantList reaches a plain JS function as an object with indexed members
@@ -559,6 +564,85 @@ check("never", "never", Model.ageText(-1));
 const noon = Date.parse("2026-01-01T12:00:00Z");
 check("an hour and twelve minutes", "1h12m", Model.durationText("2026-01-01T10:48:00Z", noon));
 check("a missing start is blank", "", Model.durationText(null, noon));
+
+test_case("linkStateRank");
+
+check("up ranks best", 0, Model.linkStateRank("LINK_STATE_UP"));
+check("down ranks worse than up",
+  true, Model.linkStateRank("LINK_STATE_DOWN") > Model.linkStateRank("LINK_STATE_UP"));
+check("down ranks worse than unknown",
+  true, Model.linkStateRank("LINK_STATE_DOWN") < Model.linkStateRank("LINK_STATE_UNKNOWN"));
+check("a blank link is unknown, not 0", 2, Model.linkStateRank(""));
+check("a missing link is unknown, not 0", 2, Model.linkStateRank(null));
+check("LINK_STATE_UNKNOWN is unknown", 2, Model.linkStateRank("LINK_STATE_UNKNOWN"));
+check("an unknown spelling is a real down state",
+  1, Model.linkStateRank("LINK_STATE_TESTING"));
+
+test_case("linkStateText");
+
+check("up", "up", Model.linkStateText("LINK_STATE_UP"));
+check("down", "down", Model.linkStateText("LINK_STATE_DOWN"));
+check("unknown", "unknown", Model.linkStateText("LINK_STATE_UNKNOWN"));
+check("a blank link is unknown, never undefined", "unknown", Model.linkStateText(""));
+check("a missing link is unknown, never undefined", "unknown", Model.linkStateText(null));
+check("a spelling this file has not heard of is unknown", "unknown",
+  Model.linkStateText("LINK_STATE_TESTING"));
+
+test_case("worstLinkLevel");
+
+check("a down link warns", "warning",
+  Model.worstLinkLevel([iface("a", "LINK_STATE_UP"), iface("b", "LINK_STATE_DOWN")]));
+check("an unknown link is unknown, not a warning", "unknown",
+  Model.worstLinkLevel([iface("a", "LINK_STATE_UP"), iface("b", "LINK_STATE_UNKNOWN")]));
+check("a down link outranks an unknown one", "warning",
+  Model.worstLinkLevel([iface("a", "LINK_STATE_UNKNOWN"), iface("b", "LINK_STATE_DOWN")]));
+check("all up is no level", "", Model.worstLinkLevel([iface("a", "LINK_STATE_UP")]));
+check("no rows is no level", "", Model.worstLinkLevel([]));
+check("not a list is no level", "", Model.worstLinkLevel(null));
+check("a row with no link state is unknown, not up", "unknown",
+  Model.worstLinkLevel([{}]));
+check("junk rows are unknown, not a warning", "unknown",
+  Model.worstLinkLevel([{}, null, 4]));
+
+test_case("downInterfaces and unknownInterfaces");
+
+check("only the down rows are copied", ["b"],
+  Model.downInterfaces([iface("a", "LINK_STATE_UP"), iface("b", "LINK_STATE_DOWN")])
+    .map(function (r) { return r.name; }));
+check("input order survives", ["c", "a"],
+  Model.downInterfaces([iface("c", "LINK_STATE_DOWN"), iface("a", "LINK_STATE_DOWN")])
+    .map(function (r) { return r.name; }));
+check("an unknown link is not down", 0,
+  Model.downInterfaces([iface("a", "LINK_STATE_UNKNOWN"), iface("b", "")]).length);
+check("only the unknown rows are copied", ["a", "b"],
+  Model.unknownInterfaces([iface("a", "LINK_STATE_UNKNOWN"), iface("b", ""),
+    iface("c", "LINK_STATE_UP")]).map(function (r) { return r.name; }));
+const ifaceRows = [iface("a", "LINK_STATE_DOWN")];
+check("the down result is a copy, not the input", false,
+  Model.downInterfaces(ifaceRows) === ifaceRows);
+check("the input is untouched", 1, ifaceRows.length);
+check("not a list is an empty list", [], Model.downInterfaces(null));
+check("not a list is an empty list for unknown", [], Model.unknownInterfaces(null));
+check("junk rows are skipped", 0, Model.downInterfaces([{}, null, 4]).length);
+
+test_case("shareCounts");
+
+check("counts each type and the total",
+  { smb: 3, nfs: 1, iscsi: 2, total: 6 },
+  Model.shareCounts({ smb: [{}, {}, {}], nfs: [{}], iscsi: [{}, {}] }));
+check("an absent key is zero",
+  { smb: 0, nfs: 1, iscsi: 0, total: 1 },
+  Model.shareCounts({ nfs: [{}] }));
+check("a real empty list is a real zero",
+  { smb: 0, nfs: 0, iscsi: 0, total: 0 },
+  Model.shareCounts({ smb: [], nfs: [], iscsi: [] }));
+check("a non-list key is zero",
+  { smb: 0, nfs: 0, iscsi: 0, total: 0 },
+  Model.shareCounts({ smb: "junk", nfs: 4, iscsi: null }));
+check("a junk shares argument is all zeroes",
+  { smb: 0, nfs: 0, iscsi: 0, total: 0 }, Model.shareCounts(null));
+check("a string shares argument is all zeroes",
+  { smb: 0, nfs: 0, iscsi: 0, total: 0 }, Model.shareCounts("junk"));
 
 test_case("tooltipFor");
 

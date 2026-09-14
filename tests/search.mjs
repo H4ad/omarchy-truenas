@@ -368,5 +368,89 @@ check("a bare string is not walked", [], Search.scrubs("storage", "x"));
 check("a row without fields does not throw", 0, Search.scrubs([{}], "x").length);
 check("null rows are skipped, not fatal", 0, Search.scrubs([null, undefined, 4], "x").length);
 
+const shareRows = [
+  { name: "default", path: "/mnt/storage/default", comment: "", purpose: "DEFAULT_SHARE" },
+  { name: "backups", path: "/mnt/storage/backup", comment: "nightly copies", purpose: "SMB_PRESET" },
+  { path: "/mnt/Backup/media", comment: "", purpose: "" }
+];
+
+test_case("shares matches name, path, comment and purpose");
+
+check("name, case-insensitively", ["backups"],
+  Search.shares(shareRows, "BACKUPS").map(function (s) { return s.name || s.path; }));
+check("path", ["backups"],
+  Search.shares(shareRows, "storage/backup").map(function (s) { return s.name || s.path; }));
+check("comment", ["backups"],
+  Search.shares(shareRows, "nightly").map(function (s) { return s.name || s.path; }));
+check("purpose", ["default"],
+  Search.shares(shareRows, "default_share").map(function (s) { return s.name || s.path; }));
+check("a row with no name still matches on its path", ["/mnt/Backup/media"],
+  Search.shares(shareRows, "media").map(function (s) { return s.name || s.path; }));
+check("a needle nothing carries", 0, Search.shares(shareRows, "archive").length);
+
+test_case("shares preserves order, copies and survives junk");
+
+check("an empty needle returns every share", ["default", "backups", "/mnt/Backup/media"],
+  Search.shares(shareRows, "").map(function (s) { return s.name || s.path; }));
+check("matching order is input order", ["backups", "/mnt/Backup/media"],
+  Search.shares(shareRows, "backup").map(function (s) { return s.name || s.path; }));
+const sharesBefore = JSON.stringify(shareRows);
+Search.shares(shareRows, "backup");
+check("the input list is untouched", sharesBefore, JSON.stringify(shareRows));
+check("the empty-needle result is a copy", false, Search.shares(shareRows, "") === shareRows);
+check("a non-list is an empty list", [], Search.shares(null, "x"));
+check("a bare string is not walked", [], Search.shares("default", "x"));
+check("a row without fields does not throw", 0, Search.shares([{}], "x").length);
+check("null rows are skipped, not fatal", 0,
+  Search.shares([null, undefined, 4], "x").length);
+check("an empty field never matches a needle", 0,
+  Search.shares([{ name: null, path: "", comment: undefined, purpose: null }], "x").length);
+
+const interfaceRows = [
+  { name: "enp4s0", type: "PHYSICAL", linkState: "LINK_STATE_UP",
+    mediaType: "Ethernet", mediaSubtype: "1000Mb/s Twisted Pair",
+    addresses: [{ type: "INET", address: "192.0.2.10", netmask: 24 }] },
+  { name: "br0", type: "BRIDGE", linkState: "LINK_STATE_DOWN",
+    mediaType: "Ethernet", mediaSubtype: "",
+    addresses: [{ type: "INET6", address: "2001:db8::20", netmask: 64 }] }
+];
+
+test_case("interfaces matches name, type, link, media and addresses");
+
+check("name, case-insensitively", ["enp4s0"],
+  Search.interfaces(interfaceRows, "ENP4S0").map(function (n) { return n.name; }));
+check("type", ["br0"],
+  Search.interfaces(interfaceRows, "bridge").map(function (n) { return n.name; }));
+check("link state", ["enp4s0"],
+  Search.interfaces(interfaceRows, "LINK_STATE_UP").map(function (n) { return n.name; }));
+check("media type", ["enp4s0", "br0"],
+  Search.interfaces(interfaceRows, "ethernet").map(function (n) { return n.name; }));
+check("media subtype", ["enp4s0"],
+  Search.interfaces(interfaceRows, "twisted pair").map(function (n) { return n.name; }));
+check("an address match", ["enp4s0"],
+  Search.interfaces(interfaceRows, "192.0.2.10").map(function (n) { return n.name; }));
+check("an IPv6 address match", ["br0"],
+  Search.interfaces(interfaceRows, "2001:db8").map(function (n) { return n.name; }));
+check("a needle nothing carries", 0,
+  Search.interfaces(interfaceRows, "archive").length);
+
+test_case("interfaces preserves order, copies and survives junk");
+
+check("an empty needle returns every interface", ["enp4s0", "br0"],
+  Search.interfaces(interfaceRows, "").map(function (n) { return n.name; }));
+const interfacesBefore = JSON.stringify(interfaceRows);
+Search.interfaces(interfaceRows, "bridge");
+check("the input list is untouched", interfacesBefore, JSON.stringify(interfaceRows));
+check("the empty-needle result is a copy", false,
+  Search.interfaces(interfaceRows, "") === interfaceRows);
+check("a non-list is an empty list", [], Search.interfaces(null, "x"));
+check("a bare string is not walked", [], Search.interfaces("enp4s0", "x"));
+check("a row without fields does not throw", 0, Search.interfaces([{}], "x").length);
+check("null rows are skipped, not fatal", 0,
+  Search.interfaces([null, undefined, 4], "x").length);
+check("a row with no addresses still matches on its name", ["lo"],
+  Search.interfaces([{ name: "lo", type: "PHYSICAL", linkState: "LINK_STATE_UP",
+    mediaType: "", mediaSubtype: "" }], "lo").map(function (n) { return n.name; }));
+
 console.log("\nsearch: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
