@@ -47,6 +47,8 @@ Ui.Panel {
   readonly property var counts: (snapshot && snapshot.counts) || ({})
   readonly property var pools: (snapshot && Model.arrayLike(snapshot.pools)) ? snapshot.pools : []
   readonly property var disks: (snapshot && Model.arrayLike(snapshot.disks)) ? snapshot.disks : []
+  readonly property var services: (snapshot && Model.arrayLike(snapshot.services)) ? snapshot.services : []
+  readonly property var apps: (snapshot && Model.arrayLike(snapshot.apps)) ? snapshot.apps : []
   readonly property string mode: Model.mode(snapshot)
   readonly property var connection: (snapshot && snapshot.connection) || null
   readonly property bool connected: !!(connection && connection.ok)
@@ -79,6 +81,20 @@ Ui.Panel {
   readonly property var diskTempWarning: {
     for (var i = 0; i < root.warnings.length; i++) {
       if (String(root.warnings[i] && root.warnings[i].section || "") === "diskTemp")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var serviceWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "service")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var appWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "app")
         return root.warnings[i]
     }
     return null
@@ -154,6 +170,46 @@ Ui.Panel {
     return root.disks.length + (root.disks.length === 1 ? " disk" : " disks")
   }
 
+  // A failed services request leaves the list empty too, so the counts print
+  // only when the service section warned about nothing. Down and unknown are
+  // reported apart: an unknown is a service mid-transition, never "nothing
+  // down", and a zero count is a phrase rather than the number "0".
+  readonly property string servicesText: {
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
+    if (root.serviceWarning) return "the service list could not be read"
+    if (!root.services.length) return "no services reported"
+    var down = Model.downServices(root.services).length
+    var unknown = Model.unknownServices(root.services).length
+    if (down > 0 && unknown > 0) return down + " down, " + unknown + " unknown"
+    if (down > 0) return down + " down"
+    if (unknown > 0) return unknown + " unknown"
+    return "nothing down"
+  }
+
+  // The same rule for apps: a failed app request prints why, never a count, and
+  // a transitional state is unknown rather than down.
+  readonly property string appsText: {
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
+    if (root.appWarning) return "the app list could not be read"
+    if (!root.apps.length) return "no apps reported"
+    var down = Model.downApps(root.apps).length
+    var unknown = Model.unknownApps(root.apps).length
+    if (down > 0 && unknown > 0) return down + " down, " + unknown + " unknown"
+    if (down > 0) return down + " down"
+    if (unknown > 0) return unknown + " unknown"
+    return "nothing down"
+  }
+
   // "Nothing firing" is only true of a connected NAS whose alert request
   // answered; an offline or failed-alert state prints why, never the phrase.
   readonly property string alertsText: {
@@ -186,6 +242,8 @@ Ui.Panel {
       { kind: "view", args: ["health"], label: "Health", detail: root.statusText },
       { kind: "view", args: ["pools"], label: "Pools", detail: root.poolsText },
       { kind: "view", args: ["disks"], label: "Disks", detail: root.disksText },
+      { kind: "view", args: ["services"], label: "Services", detail: root.servicesText },
+      { kind: "view", args: ["apps"], label: "Apps", detail: root.appsText },
       { kind: "view", args: ["alerts"], label: "Alerts", detail: root.alertsText },
       { kind: "view", args: ["config"], label: "Config", detail: root.configText },
       { kind: "poll", args: [], label: "Poll now", detail: root.pollText }

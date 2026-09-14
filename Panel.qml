@@ -8,7 +8,7 @@ import "Ui" as Local
 import "Model.js" as Model
 import "Links.js" as Links
 
-// The popout. A shell and a write queue, plus the five views.
+// The popout. A shell and a write queue, plus the seven views.
 //
 // The panel owns every write: views ask it to run a verb, it serialises the
 // argv through one Process (apiQueue/pumpApi), then refreshes the state with a
@@ -75,6 +75,8 @@ Panel {
     { key: "health", label: "Health" },
     { key: "pools", label: "Pools" },
     { key: "disks", label: "Disks" },
+    { key: "services", label: "Services" },
+    { key: "apps", label: "Apps" },
     { key: "alerts", label: "Alerts" },
     { key: "config", label: "Config" }
   ]
@@ -83,6 +85,8 @@ Panel {
     "health": healthView,
     "pools": poolsView,
     "disks": disksView,
+    "services": servicesView,
+    "apps": appsView,
     "alerts": alertsView,
     "config": configView
   })
@@ -570,6 +574,8 @@ Panel {
   Component { id: healthView; Views.Health { panel: root } }
   Component { id: poolsView; Views.Pools { panel: root } }
   Component { id: disksView; Views.Disks { panel: root } }
+  Component { id: servicesView; Views.Services { panel: root } }
+  Component { id: appsView; Views.Apps { panel: root } }
   Component { id: alertsView; Views.Alerts { panel: root } }
   Component { id: configView; Views.Config { panel: root } }
 }
