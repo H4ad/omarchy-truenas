@@ -18,11 +18,13 @@ JSON
   printf '%s' "$WORK/alert-one.json"
 }
 
-# The eleven endpoints every notification case needs. system carries no
+# The fifteen endpoints every notification case needs. system carries no
 # notification and is canned throughout; the temperatures default to the cool
 # fixture so an alert or pool case cannot grow a disk toast by accident, and the
 # service and app lists default to the all-running fixtures so only a case that
-# asks for a down row can grow a service or app toast.
+# asks for a down row can grow a service or app toast. The shares and interfaces
+# are quiet and canned too: they only need to answer so the meta cache reaches
+# the warm path, and M5 adds no share or network notification.
 notify_endpoints() {
   local alerts=$1 pool=$2 temps=${3:-"$ROOT/tests/fixtures/disk-temperatures.json"}
   local services=${4:-"$ROOT/tests/fixtures/services.json"}
@@ -42,6 +44,10 @@ notify_endpoints() {
   respond_add "/api/v2.0/app"         0 200 "$apps"
   respond_add "/api/v2.0/replication" 0 200 "$replication"
   respond_add "/api/v2.0/cloudsync"   0 200 "$cloudsync"
+  respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
+  respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+  respond_add "/api/v2.0/iscsi/target" 0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+  respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 }
 
 # The protection half of the map on its own: quiet alerts and pools, the real

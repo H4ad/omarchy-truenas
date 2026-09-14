@@ -2,7 +2,8 @@
 # state.json carries. Input: --slurpfile system, --slurpfile alerts,
 # --slurpfile pools, --slurpfile disks, --slurpfile diskTemps, --slurpfile
 # services, --slurpfile apps, --slurpfile replication, --slurpfile cloudSync,
-# --slurpfile snapshotTasks and --slurpfile scrubs, each holding one response
+# --slurpfile snapshotTasks, --slurpfile scrubs, --slurpfile smb, --slurpfile
+# nfs, --slurpfile iscsi and --slurpfile network, each holding one response
 # body (or null when that request failed), plus --arg now.
 # `connection` is built by the poll, not here, because it is about the poll's
 # own reachability rather than the NAS's contents.
@@ -315,6 +316,68 @@ def scrub_norm:
     schedule:    ((.schedule? // null) | schedule_norm)
   };
 
+# The SMB share row. The wire calls the read-only flag `readonly`; the audit and
+# options blobs are never read, so naming only what is consumed is what keeps
+# them off disk. An absent id is null, never 0; the three flags default false
+# only because a missing flag is the wire saying off.
+def smb_norm:
+  {
+    id:       ((.id? // null) | num),
+    name:     (.name // ""),
+    path:     (.path // ""),
+    enabled:  (.enabled == true),
+    locked:   (.locked == true),
+    readonly: (.readonly == true),
+    purpose:  (.purpose // ""),
+    comment:  (.comment // "")
+  };
+
+# The NFS export row. `ro` is the wire's read-only flag; it is written as
+# `readonly` so the two share types present one name to the UI. There is no
+# `name` on the wire, only the path.
+def nfs_norm:
+  {
+    id:       ((.id? // null) | num),
+    path:     (.path // ""),
+    enabled:  (.enabled == true),
+    locked:   (.locked == true),
+    readonly: (.ro == true),
+    comment:  (.comment // "")
+  };
+
+# The iSCSI target row. A target has no enabled, locked or path field in the
+# schema, so the row does not invent one; `groups`, `rel_tgt_id` and
+# `iscsi_parameters` are dropped.
+def iscsi_norm:
+  {
+    id:    ((.id? // null) | num),
+    name:  (.name // ""),
+    alias: (.alias // ""),
+    mode:  (.mode // "")
+  };
+
+# The network interface row. `link_state`, `media_type` and
+# `active_media_subtype` live under the nested `state` object, not at the top
+# level, so the whole row reads `state.` and a missing state is an empty object
+# rather than an error. The addresses come from the runtime `state.aliases`
+# (what the interface actually has); `broadcast` is dropped and the link-local
+# IPv6 is kept. `netmask` is the CIDR prefix as a number, never a dotted quad.
+def iface_norm:
+  ((.state? // {}) | if type == "object" then . else {} end) as $st
+  | {
+      name:         (.name // ""),
+      type:         (.type // ""),
+      linkState:    ($st.link_state // ""),
+      mediaType:    ($st.media_type // ""),
+      mediaSubtype: ($st.active_media_subtype // ""),
+      addresses: [ ($st.aliases? // [])[]?
+                   | if type == "object" then
+                       { type:    (.type // ""),
+                         address: (.address // ""),
+                         netmask: ((.netmask? // null) | num) }
+                     else empty end ]
+    };
+
 ($system[0]) as $sys
 | ($alerts[0] // []) as $alerts_raw
 | ($pools[0]  // []) as $pools_raw
@@ -326,6 +389,10 @@ def scrub_norm:
 | ($cloudSync[0]     // []) as $cloudsync_raw
 | ($snapshotTasks[0] // []) as $snapshot_raw
 | ($scrubs[0]        // []) as $scrub_raw
+| ($smb[0]           // []) as $smb_raw
+| ($nfs[0]           // []) as $nfs_raw
+| ($iscsi[0]         // []) as $iscsi_raw
+| ($network[0]       // []) as $network_raw
 | ([ $alerts_raw[]? | alert_norm ]) as $alert_rows
 | ([ $pools_raw[]?  | pool_norm  ]) as $pool_rows
 | ([ $disks_raw[]?  | disk_norm($temps) ]) as $disk_rows
@@ -335,6 +402,10 @@ def scrub_norm:
 | ([ $cloudsync_raw[]?   | cloud_sync_norm  ]) as $cloudsync_rows
 | ([ $snapshot_raw[]?     | snapshot_task_norm ]) as $snapshot_rows
 | ([ $scrub_raw[]?        | scrub_norm       ]) as $scrub_rows
+| ([ $smb_raw[]?          | smb_norm         ]) as $smb_rows
+| ([ $nfs_raw[]?          | nfs_norm         ]) as $nfs_rows
+| ([ $iscsi_raw[]?        | iscsi_norm       ]) as $iscsi_rows
+| ([ $network_raw[]?      | iface_norm       ]) as $iface_rows
 # Dismissed alerts stay in `alerts`, flagged, because a row that disappears when
 # it is dismissed is how a person loses track of what they silenced. They leave
 # `counts`, which is what the bar reads, and are counted as `dismissed` there.
@@ -364,5 +435,15 @@ def scrub_norm:
     replication:   ($replication_rows | sort_by(.name)),
     cloudSync:     ($cloudsync_rows   | sort_by(.name)),
     snapshotTasks: ($snapshot_rows    | sort_by(.dataset)),
-    scrubs:        ($scrub_rows       | sort_by(.pool))
+    scrubs:        ($scrub_rows       | sort_by(.pool)),
+    # Shares and interfaces. The three share types do not share a field
+    # vocabulary, so each has its own row function; the three lists present one
+    # `readonly` name to the UI even though the NFS wire calls it `ro`. A failed
+    # section is an empty list plus a warning, never an empty-but-healthy list.
+    shares: {
+      smb:   ($smb_rows   | sort_by(.name)),
+      nfs:   ($nfs_rows   | sort_by(.path)),
+      iscsi: ($iscsi_rows | sort_by(.name))
+    },
+    network: ($iface_rows | sort_by(.name))
   }

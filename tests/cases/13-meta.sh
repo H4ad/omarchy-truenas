@@ -21,6 +21,10 @@ replication_requests() { grep -c '/api/v2.0/replication '    "$STUB_CURL_LOG" ||
 cloudsync_requests()   { grep -c '/api/v2.0/cloudsync '      "$STUB_CURL_LOG" || true; }
 snapshot_requests()    { grep -c '/api/v2.0/pool/snapshottask' "$STUB_CURL_LOG" || true; }
 scrub_requests()       { grep -c '/api/v2.0/pool/scrub'      "$STUB_CURL_LOG" || true; }
+smb_requests()         { grep -c '/api/v2.0/sharing/smb'     "$STUB_CURL_LOG" || true; }
+nfs_requests()         { grep -c '/api/v2.0/sharing/nfs'     "$STUB_CURL_LOG" || true; }
+iscsi_requests()       { grep -c '/api/v2.0/iscsi/target'    "$STUB_CURL_LOG" || true; }
+network_requests()     { grep -c '/api/v2.0/interface'       "$STUB_CURL_LOG" || true; }
 meta_file()          { jq -r "$1" "$XDG_STATE_HOME/omarchy/truenas/meta.json"; }
 
 # The whole map every poll needs, with the system response variable so a case
@@ -39,6 +43,10 @@ meta_responses() {
   respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
   respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
   respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
+  respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
+  respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+  respond_add "/api/v2.0/iscsi/target" 0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+  respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 }
 
 # A system/info body whose version is the one field a case varies.
@@ -72,6 +80,10 @@ check "and the replication tasks once" 1 "$(replication_requests)"
 check "and the cloud sync tasks once" 1 "$(cloudsync_requests)"
 check "and the snapshot tasks once" 1 "$(snapshot_requests)"
 check "and the scrub tasks once" 1 "$(scrub_requests)"
+check "and the SMB shares once" 1 "$(smb_requests)"
+check "and the NFS exports once" 1 "$(nfs_requests)"
+check "and the iSCSI targets once" 1 "$(iscsi_requests)"
+check "and the interfaces once" 1 "$(network_requests)"
 poll
 check "the second poll stays inside the window" 1 "$(system_requests)"
 check "the system still reaches state from the cache" 25.04.2 "$(state '.system.version')"
@@ -85,7 +97,11 @@ check "nor a replication request" 1 "$(replication_requests)"
 check "nor a cloud sync request" 1 "$(cloudsync_requests)"
 check "nor a snapshot task request" 1 "$(snapshot_requests)"
 check "nor a scrub request" 1 "$(scrub_requests)"
-check "a warm poll is two fast requests" 13 "$(requests)"
+check "nor a share request" 1 "$(smb_requests)"
+check "nor an NFS request" 1 "$(nfs_requests)"
+check "nor an iSCSI request" 1 "$(iscsi_requests)"
+check "nor an interface request" 1 "$(network_requests)"
+check "a warm poll is two fast requests" 17 "$(requests)"
 check "the disk rows still reach state from the cache" 5 "$(state '.disks | length')"
 check "with their temperature normalized" 38 \
   "$(state '.disks[] | select(.name=="sda") | .tempC')"
@@ -94,6 +110,10 @@ check "so do the cached apps" 5 "$(state '.apps | length')"
 check "so do the cached replication tasks" 2 "$(state '.replication | length')"
 check "and the cached snapshot tasks" 3 "$(state '.snapshotTasks | length')"
 check "and the cached scrub tasks" 2 "$(state '.scrubs | length')"
+check "and the cached SMB shares" 3 "$(state '.shares.smb | length')"
+check "and the cached NFS exports" 1 "$(state '.shares.nfs | length')"
+check "and the cached iSCSI targets" 2 "$(state '.shares.iscsi | length')"
+check "and the cached interfaces" 1 "$(state '.network | length')"
 teardown
 
 test_case "a cold and a warm poll render the same services and apps"
@@ -135,6 +155,10 @@ check "and one more replication fetch" 2 "$(replication_requests)"
 check "and one more cloud sync fetch" 2 "$(cloudsync_requests)"
 check "and one more snapshot task fetch" 2 "$(snapshot_requests)"
 check "and one more scrub fetch" 2 "$(scrub_requests)"
+check "and one more SMB fetch" 2 "$(smb_requests)"
+check "and one more NFS fetch" 2 "$(nfs_requests)"
+check "and one more iSCSI fetch" 2 "$(iscsi_requests)"
+check "and one more interface fetch" 2 "$(network_requests)"
 check "and reports the new version" 25.10.0 "$(state '.system.version')"
 check "the alerts are still polled every time" 3 "$(alert_requests)"
 teardown
@@ -275,13 +299,13 @@ poll
 # A cache from before this milestone: a usable system section, a fresh fetch
 # time, and one slow-section key at a time missing. The fresh age must not save
 # it; each presence predicate has to stand on its own.
-for missing in disks diskTemps services apps replication cloudSync snapshotTasks scrubs; do
+for missing in disks diskTemps services apps replication cloudSync snapshotTasks scrubs smb nfs iscsi network; do
   jq -c --arg k "$missing" 'del(.[$k])' \
     "$XDG_STATE_HOME/omarchy/truenas/meta.json" >"$WORK/meta-m1.json"
   cp "$WORK/meta-m1.json" "$XDG_STATE_HOME/omarchy/truenas/meta.json"
   : >"$STUB_CURL_LOG"
   poll
-  check "a cache missing $missing is stale and refetches all eleven" 11 "$(requests)"
+  check "a cache missing $missing is stale and refetches all fifteen" 15 "$(requests)"
   check "and $missing is written again" true "$(meta_file "has(\"$missing\")")"
 done
 check "the disk rows are cached again" 5 "$(meta_file '.disks.rows | length')"
@@ -291,6 +315,10 @@ check "and the app rows too" 5 "$(meta_file '.apps.rows | length')"
 check "and the replication rows too" 2 "$(meta_file '.replication.rows | length')"
 check "and the snapshot task rows too" 3 "$(meta_file '.snapshotTasks.rows | length')"
 check "and the scrub rows too" 2 "$(meta_file '.scrubs.rows | length')"
+check "and the SMB rows too" 3 "$(meta_file '.smb.rows | length')"
+check "and the NFS rows too" 1 "$(meta_file '.nfs.rows | length')"
+check "and the iSCSI rows too" 2 "$(meta_file '.iscsi.rows | length')"
+check "and the network rows too" 1 "$(meta_file '.network.rows | length')"
 check "the old system data was not lost" 25.04.2 "$(state '.system.version')"
 teardown
 
@@ -309,6 +337,10 @@ respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
 respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
 respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
 respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
+respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
+respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+respond_add "/api/v2.0/iscsi/target" 0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 poll
 check "no cached row carries a serial, identifier or lunid" 0 \
   "$(meta_file '[.disks.rows[] | select(has("serial") or has("identifier") or has("lunid"))] | length')"
@@ -359,6 +391,10 @@ respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
 respond_add "/api/v2.0/app"         0 200 "$WORK/apps-junk-meta.json"
 respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
 respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
+respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
+respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+respond_add "/api/v2.0/iscsi/target" 0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 poll
 check "the meta cache advanced anyway" true "$(meta_file 'has("apps")')"
 check "the junk metadata is cached as an empty object" null \
@@ -404,6 +440,10 @@ respond_add "/api/v2.0/service" 0 200 "$ROOT/tests/fixtures/services.json"
 respond_add "/api/v2.0/app" 0 200 "$ROOT/tests/fixtures/apps.json"
 respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
 respond_add "/api/v2.0/cloudsync" 0 200 "$WORK/cloudsync-row.json"
+respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
+respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+respond_add "/api/v2.0/iscsi/target" 0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 poll
 check "the cloud sync row is cached" 1 "$(meta_file '.cloudSync.rows | length')"
 check "and it normalizes from the cache" clouda "$(state '.cloudSync[0].name')"
@@ -420,4 +460,72 @@ check "no secret reaches the meta file" 0 \
   "$(grep -c -e 'FAKE-SECRET' -e 'FAKE-PW' -e 'FAKE-SALT' -e 'SECRET-LOGS' -e 'SECRET-STACK' "$XDG_STATE_HOME/omarchy/truenas/meta.json" || true)"
 check "nor the state file" 0 \
   "$(grep -c -e 'FAKE-SECRET' -e 'SECRET-LOGS' "$STATE" || true)"
+teardown
+
+test_case "the meta cache keeps the consumed share fields and drops the blobs"
+setup; single_instance_config
+# Poison every share and network row with the fields the cache must not keep,
+# under a sentinel no other text contains, so a stray write is unmistakable.
+jq -c '[ .[] | .audit = { enable: true, watch_list: ["FAKE-AUDIT"], ignore_list: [] }
+         | .options = { aapl_name_mangling: true, hostsallow: ["FAKE-OPT"],
+                        hostsdeny: [] } ]' \
+  "$ROOT/tests/fixtures/shares-smb.json" >"$WORK/smb-poison.json"
+jq -c '[ .[] | .hosts = ["FAKE-HOST"]
+         | .networks = ["FAKE-NET"] | .security = ["FAKE-SEC"] ]' \
+  "$ROOT/tests/fixtures/shares-nfs.json" >"$WORK/nfs-poison.json"
+jq -c '[ .[] | .groups = [{ portal: 1, auth: 9 }]
+         | .iscsi_parameters = { QueuedCommands: 32 } ]' \
+  "$ROOT/tests/fixtures/iscsi-target.json" >"$WORK/iscsi-poison.json"
+jq -c '[ .[] | .state.link_address = "FAKE-MAC-1"
+         | .state.permanent_link_address = "FAKE-MAC-2"
+         | .state.hardware_link_address = "FAKE-MAC-3" ]' \
+  "$ROOT/tests/fixtures/interfaces.json" >"$WORK/network-poison.json"
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+respond_add "/api/v2.0/pool/scrub" 0 200 "$ROOT/tests/fixtures/scrubs.json"
+respond_add "/api/v2.0/pool" 0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service" 0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app" 0 200 "$ROOT/tests/fixtures/apps.json"
+respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+respond_add "/api/v2.0/cloudsync" 0 200 "$ROOT/tests/fixtures/cloudsync.json"
+respond_add "/api/v2.0/sharing/smb" 0 200 "$WORK/smb-poison.json"
+respond_add "/api/v2.0/sharing/nfs" 0 200 "$WORK/nfs-poison.json"
+respond_add "/api/v2.0/iscsi/target" 0 200 "$WORK/iscsi-poison.json"
+respond_add "/api/v2.0/interface" 0 200 "$WORK/network-poison.json"
+poll
+check "the SMB rows are cached" 3 "$(meta_file '.smb.rows | length')"
+check "no cached SMB row carries an audit or options blob" 0 \
+  "$(meta_file '[.smb.rows[] | select(has("audit") or has("options"))] | length')"
+check "the consumed SMB purpose survives" DEFAULT_SHARE \
+  "$(meta_file '.smb.rows[] | select(.name=="default") | .purpose')"
+check "the NFS rows are cached" 1 "$(meta_file '.nfs.rows | length')"
+check "no cached NFS row carries hosts, networks or security" 0 \
+  "$(meta_file '[.nfs.rows[] | select(has("hosts") or has("networks") or has("security"))] | length')"
+check "the consumed NFS ro flag survives under its wire name" false \
+  "$(meta_file '.nfs.rows[0].ro')"
+check "the iSCSI rows are cached" 2 "$(meta_file '.iscsi.rows | length')"
+check "no cached iSCSI row carries groups or iscsi_parameters" 0 \
+  "$(meta_file '[.iscsi.rows[] | select(has("groups") or has("iscsi_parameters"))] | length')"
+check "the consumed iSCSI alias survives" bulk \
+  "$(meta_file '.iscsi.rows[] | select(.id==1) | .alias')"
+check "the network row is cached" 1 "$(meta_file '.network.rows | length')"
+check "no cached interface carries a MAC" 0 \
+  "$(meta_file '[.network.rows[] | select(.state | type == "object" and (has("link_address") or has("permanent_link_address") or has("hardware_link_address")))] | length')"
+check "the link state survives the cache" LINK_STATE_UP \
+  "$(meta_file '.network.rows[0].state.link_state')"
+check "and the negotiated media subtype" "1000Mb/s Twisted Pair" \
+  "$(meta_file '.network.rows[0].state.active_media_subtype')"
+check "the cached alias keeps its netmask" 24 \
+  "$(meta_file '.network.rows[0].state.aliases[0].netmask')"
+check "and drops the broadcast" false \
+  "$(meta_file '.network.rows[0].state.aliases[0] | has("broadcast")')"
+check "no poisoned field reaches the meta file" 0 \
+  "$(grep -c -e 'FAKE-AUDIT' -e 'FAKE-OPT' -e 'FAKE-HOST' -e 'FAKE-NET' -e 'FAKE-SEC' -e 'FAKE-MAC' "$XDG_STATE_HOME/omarchy/truenas/meta.json" || true)"
+check "nor the state file" 0 \
+  "$(grep -c -e 'FAKE-AUDIT' -e 'FAKE-HOST' -e 'FAKE-MAC' "$STATE" || true)"
+check "the filtered share rows still normalize" 3 "$(state '.shares.smb | length')"
+check "and the filtered interface still normalizes" 1 "$(state '.network | length')"
 teardown

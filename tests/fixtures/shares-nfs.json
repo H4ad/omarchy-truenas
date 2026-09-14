@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "path": "/mnt/storage/default",
+    "aliases": [],
+    "comment": "",
+    "networks": [],
+    "hosts": [],
+    "ro": false,
+    "maproot_user": "nobody",
+    "maproot_group": "nobody",
+    "mapall_user": null,
+    "mapall_group": null,
+    "security": [],
+    "enabled": true,
+    "locked": false,
+    "expose_snapshots": false
+  }
+]

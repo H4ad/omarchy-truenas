@@ -6,6 +6,7 @@
 # starts from an empty state dir, so the first poll still fetches all three. The
 # other endpoints are canned here rather than repeated in each case.
 all_healthy() {
+  local iscsi=${1:-"$ROOT/tests/fixtures/iscsi-target.json"}
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
   # The specific pool sub-routes come before /api/v2.0/pool: the stub matches on
   # a substring, so a scrub request would otherwise be served the pool list.
@@ -19,6 +20,10 @@ all_healthy() {
   respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
   respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
   respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
+  respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
+  respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+  respond_add "/api/v2.0/iscsi/target" 0 200 "$iscsi"
+  respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 }
 
 # The same map with one protection route failing. The failing route is written
@@ -37,6 +42,32 @@ protection_route_fails() {
   respond_add "/api/v2.0/app"               0 200 "$ROOT/tests/fixtures/apps.json"
   respond_add "/api/v2.0/replication"       0 200 "$ROOT/tests/fixtures/replication.json"
   respond_add "/api/v2.0/cloudsync"         0 200 "$ROOT/tests/fixtures/cloudsync.json"
+  respond_add "/api/v2.0/sharing/smb"       0 200 "$ROOT/tests/fixtures/shares-smb.json"
+  respond_add "/api/v2.0/sharing/nfs"       0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+  respond_add "/api/v2.0/iscsi/target"      0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+  respond_add "/api/v2.0/interface"         0 200 "$ROOT/tests/fixtures/interfaces.json"
+}
+
+# The same map with one share or network route failing, so the isolation between
+# the four new sections can be driven one at a time.
+share_route_fails() {
+  local route=$1
+  respond     "$route" 0 500 "$ROOT/tests/fixtures/err-500.json"
+  respond_add "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
+  respond_add "/api/v2.0/pool"              0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+  respond_add "/api/v2.0/system/info"       0 200 "$ROOT/tests/fixtures/system-info.json"
+  respond_add "/api/v2.0/disk/details"      0 200 "$ROOT/tests/fixtures/disks.json"
+  respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+  respond_add "/api/v2.0/service"           0 200 "$ROOT/tests/fixtures/services.json"
+  respond_add "/api/v2.0/app"               0 200 "$ROOT/tests/fixtures/apps.json"
+  respond_add "/api/v2.0/replication"       0 200 "$ROOT/tests/fixtures/replication.json"
+  respond_add "/api/v2.0/cloudsync"         0 200 "$ROOT/tests/fixtures/cloudsync.json"
+  respond_add "/api/v2.0/sharing/smb"       0 200 "$ROOT/tests/fixtures/shares-smb.json"
+  respond_add "/api/v2.0/sharing/nfs"       0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+  respond_add "/api/v2.0/iscsi/target"      0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+  respond_add "/api/v2.0/interface"         0 200 "$ROOT/tests/fixtures/interfaces.json"
 }
 
 test_case "a healthy NAS reports the pools and a quiet count"
@@ -134,6 +165,49 @@ check "the details request is a POST" 2 "$(grep -o 'POST' "$STUB_METHOD_LOG" | w
 check "with the USED type" 1 "$(grep -c '"type":"USED"' "$STUB_PAYLOAD_LOG" || true)"
 check "and temperatures asked per disk, with thresholds" 1 \
   "$(grep -c '"name":\["nvme0n1","sda","sdb","sdc","sdd"\],"include_thresholds":true' "$STUB_PAYLOAD_LOG" || true)"
+check "three SMB shares" 3 "$(state '.shares.smb | length')"
+check "SMB sorted by name" "backup,default,media" \
+  "$(state '.shares.smb | map(.name) | join(",")')"
+check "a disabled share is false" false \
+  "$(state '.shares.smb[] | select(.name=="media") | .enabled')"
+check "a read-only share is true" true \
+  "$(state '.shares.smb[] | select(.name=="media") | .readonly')"
+check "locked defaults false" false \
+  "$(state '.shares.smb[] | select(.name=="default") | .locked')"
+check "the purpose is carried" DEFAULT_SHARE \
+  "$(state '.shares.smb[] | select(.name=="default") | .purpose')"
+check "the comment is carried" backups \
+  "$(state '.shares.smb[] | select(.name=="backup") | .comment')"
+check "no SMB audit or options blob reaches a row" 0 \
+  "$(state '[.shares.smb[] | select(has("audit") or has("options"))] | length')"
+check "one NFS export" 1 "$(state '.shares.nfs | length')"
+check "the NFS read-only flag is renamed" false "$(state '.shares.nfs[0].readonly')"
+check "and the wire ro key is gone" false "$(state '.shares.nfs[0] | has("ro")')"
+check "an NFS export carries no name" false "$(state '.shares.nfs[0] | has("name")')"
+check "no NFS hosts, networks or security list reaches a row" 0 \
+  "$(state '[.shares.nfs[] | select(has("hosts") or has("networks") or has("security"))] | length')"
+check "two synthetic iSCSI targets" 2 "$(state '.shares.iscsi | length')"
+check "iSCSI sorted by name" \
+  "iqn.2005-10.org.freenas.ctl:target0,iqn.2005-10.org.freenas.ctl:target1" \
+  "$(state '.shares.iscsi | map(.name) | join(",")')"
+check "an iSCSI alias is carried" bulk "$(state '.shares.iscsi[0].alias')"
+check "the iSCSI mode is carried" ISCSI "$(state '.shares.iscsi[0].mode')"
+check "no iscsi groups or parameters reach a row" 0 \
+  "$(state '[.shares.iscsi[] | select(has("groups") or has("iscsi_parameters"))] | length')"
+check "one interface" 1 "$(state '.network | length')"
+check "the link state is the raw enum" LINK_STATE_UP "$(state '.network[0].linkState')"
+check "the media subtype is the negotiated speed" "1000Mb/s Twisted Pair" \
+  "$(state '.network[0].mediaSubtype')"
+check "the media type is carried" Ethernet "$(state '.network[0].mediaType')"
+check "two runtime addresses" 2 "$(state '.network[0].addresses | length')"
+check "the IPv4 address keeps its CIDR prefix" "192.0.2.10/24" \
+  "$(state '.network[0].addresses[0] | "\(.address)/\(.netmask)"')"
+check "the link-local IPv6 is kept" "2001:db8::10/64" \
+  "$(state '.network[0].addresses[1] | "\(.address)/\(.netmask)"')"
+check "no broadcast survives" false \
+  "$(state '.network[0].addresses | any(has("broadcast"))')"
+check "no MAC reaches an interface row" 0 \
+  "$(state '[.network[] | select(has("link_address") or has("permanent_link_address") or has("hardware_link_address"))] | length')"
 check "no warnings on a clean poll" 0 "$(state '.warnings | length')"
 teardown
 
@@ -543,7 +617,7 @@ setup; single_instance_config
 all_healthy
 "$ROOT/bin/truenas-poll" --quiet --force-meta
 check "connected" true "$(state '.connection.ok')"
-check "eleven requests on a cold poll" 11 "$(requests)"
+check "fifteen requests on a cold poll" 15 "$(requests)"
 teardown
 
 test_case "failures accumulate, hold lastOkAt, and reset on recovery"
@@ -600,4 +674,52 @@ check "the un-reported read count is null, not a partial 3" null \
   "$(state '.pools[0].vdevErrors.read')"
 check "the fully reported writes are summed" 1 "$(state '.pools[0].vdevErrors.write')"
 check "so are the checksums" 10 "$(state '.pools[0].vdevErrors.checksum')"
+teardown
+
+test_case "a failed SMB fetch leaves smb empty while the other shares render"
+setup; single_instance_config
+share_route_fails "/api/v2.0/sharing/smb"
+poll
+check "smb is empty, not fabricated rows" "[]" "$(state '.shares.smb')"
+check "a warning names the smb section" smb \
+  "$(state '.warnings[] | select(.section=="smb") | .section')"
+check "the NFS export still renders" 1 "$(state '.shares.nfs | length')"
+check "the iSCSI targets still render" 2 "$(state '.shares.iscsi | length')"
+check "the interface still renders" 1 "$(state '.network | length')"
+teardown
+
+test_case "a failed interface fetch leaves network empty while the shares render"
+setup; single_instance_config
+share_route_fails "/api/v2.0/interface"
+poll
+check "network is empty, not fabricated rows" "[]" "$(state '.network')"
+check "a warning names the network section" network \
+  "$(state '.warnings[] | select(.section=="network") | .section')"
+check "the SMB shares still render" 3 "$(state '.shares.smb | length')"
+check "the NFS export still renders" 1 "$(state '.shares.nfs | length')"
+teardown
+
+test_case "an empty iSCSI target list is a real zero with no warning"
+setup; single_instance_config
+# The live box has zero iSCSI targets, so the route answers [] and that is a
+# real zero, not a failed section.
+printf '[]\n' >"$WORK/iscsi-empty.json"
+all_healthy "$WORK/iscsi-empty.json"
+poll
+check "iscsi is an empty list" "[]" "$(state '.shares.iscsi')"
+check "and no warning names it" 0 \
+  "$(state '[.warnings[] | select(.section=="iscsi")] | length')"
+teardown
+
+test_case "a 200 with a non-object share row fails the section, not fabricates a card"
+setup; single_instance_config
+printf '[{}, null]\n' >"$WORK/bad-shares.json"
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"       0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/sharing/smb" 0 200 "$WORK/bad-shares.json"
+poll
+check "smb is empty, not a nameless card" "[]" "$(state '.shares.smb')"
+check "and a warning names the smb section" smb \
+  "$(state '.warnings[] | select(.section=="smb") | .section')"
 teardown
