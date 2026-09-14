@@ -38,6 +38,7 @@ BarWidget {
 
   readonly property var counts: (state && state.counts) || ({})
   readonly property var pools: (state && Model.arrayLike(state.pools)) ? state.pools : []
+  readonly property var disks: (state && Model.arrayLike(state.disks)) ? state.disks : []
   readonly property string mode: Model.mode(state)
   readonly property string worstLevel: Model.worstLevel(counts)
   readonly property var worstPool: Model.worstPool(pools)
@@ -68,7 +69,9 @@ BarWidget {
     alertCount: root.alertCount,
     capacityText: root.capacityText,
     worstPool: root.worstPoolStatus,
-    worstLevel: root.worstLevel
+    worstLevel: root.worstLevel,
+    tempText: Model.hotTempLabel(root.disks),
+    tempLevel: Model.tempLevel(root.disks)
   })
   readonly property var segments: BarVariants.segmentsFor(root.variantChoice, root.barView, root.glyphs)
 

@@ -21,6 +21,10 @@
 //                 are no pools to speak of.
 //   worstLevel    the severity word to tint the body with, e.g. "warning".
 //                 "" when everything is healthy or nothing is known.
+//   tempText      the hottest disk's label, e.g. "54°". "" when no disk answered
+//                 with a temperature; never "0°".
+//   tempLevel     "critical" | "warning", or "" for the item's own tint, which
+//                 includes a reading that is merely ok.
 //
 // An unreachable or unconfigured NAS overrides every variant with one glyph and
 // no numbers: a value the plugin cannot vouch for is never printed as one.
@@ -31,7 +35,7 @@
 // back to the next, then to "", because a mark a caller can forget to pass is a
 // mark that can silently go missing.
 
-var VARIANTS = ["Default", "Icon", "Alerts", "Capacity", "Pool", "Full"];
+var VARIANTS = ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full"];
 var DEFAULT_VARIANT = "Default";
 var SEPARATOR = "·";
 
@@ -110,6 +114,15 @@ function poolSegments(view) {
   return [segment(word, view.worstLevel)];
 }
 
+// The hottest disk's label, tinted by its own level rather than the alert
+// level. Unknown is "", never a fabricated zero: a disk that did not answer is
+// not a disk at 0°.
+function tempSegments(view) {
+  var text = textOf(view.tempText);
+  if (text === "") return [];
+  return [segment(text, view.tempLevel)];
+}
+
 // Alerts then capacity, each half dropped when unknown. The separator appears
 // only between two halves that both printed.
 function fullSegments(view) {
@@ -141,6 +154,8 @@ function bodySegments(variant, view) {
       return capacitySegments(view);
     case "Pool":
       return poolSegments(view);
+    case "Temp":
+      return tempSegments(view);
     case "Full":
       return fullSegments(view);
     default:
