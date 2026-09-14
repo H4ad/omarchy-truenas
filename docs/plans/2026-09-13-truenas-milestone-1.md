@@ -652,6 +652,8 @@ in another.
 
 - **M2 Disks:** `/api/v2.0/disk`, `/disk/temperatures`, `/smart/test/results`;
   Disks view; temp/SMART notifications.
+  *Superseded by `2026-09-13-truenas-milestone-2.md` (temperature only; SMART
+  left the API after 24.10).*
 - **M3 Apps + Services:** `/service`, `/app`; state, start/stop/restart writes
   and confirmations.
 - **M4 Protection:** `/replication`, `/cloudsync`, `/pool/snapshottask`,
