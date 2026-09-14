@@ -1,0 +1,105 @@
+[
+  {
+    "name": "appe",
+    "id": "appe",
+    "state": "RUNNING",
+    "custom_app": false,
+    "upgrade_available": false,
+    "migrated": false,
+    "human_version": "1.80.0_1.0.0",
+    "version": "1.80.0",
+    "metadata": {
+      "app_version": "1.80.0",
+      "train": "community",
+      "home": "https://appe.com/",
+      "icon": "https://example.test/icons/appe.png"
+    },
+    "portals": { "Admin": "http://nas.example:8091/" },
+    "active_workloads": { "containers": 1 }
+  },
+  {
+    "name": "appb",
+    "id": "appb",
+    "state": "RUNNING",
+    "custom_app": false,
+    "upgrade_available": true,
+    "migrated": true,
+    "human_version": "1.4.2_1.4.2",
+    "version": "1.4.2",
+    "metadata": {
+      "title": "appb",
+      "app_version": "1.4.2",
+      "train": "community",
+      "home": "https://example.test/appb",
+      "icon": "https://example.test/icons/appb.png"
+    },
+    "portals": {
+      "Web UI": "http://nas.example:8080/",
+      "API": "http://nas.example:8080/api"
+    },
+    "active_workloads": { "containers": 2 }
+  },
+  {
+    "name": "appc",
+    "id": "appc",
+    "state": "RUNNING",
+    "custom_app": false,
+    "upgrade_available": false,
+    "migrated": false,
+    "human_version": "16.0.4-rootless_1.2.39",
+    "version": "1.2.39",
+    "metadata": {
+      "title": "appc",
+      "app_version": "16.0.4-rootless",
+      "train": "community",
+      "home": "https://appc.org/",
+      "icon": "https://example.test/icons/appc.png"
+    },
+    "portals": { "Web UI": "http://nas.example:30142/" },
+    "active_workloads": {
+      "containers": 1,
+      "used_ports": [30142],
+      "container_details": [
+        { "image": "codeberg.org/appc/appc:16", "image_id": "sha256:forgedbeef" }
+      ]
+    },
+    "image": "codeberg.org/appc/appc:16",
+    "image_id": "sha256:forgedbeef",
+    "notes": "DEPRECATION NOTICE: this app is a test double. It carries a notes field of several hundred characters so a regression that caches the whole raw row is caught by the meta cache assertions. The normalizer consumes only name, id, state, custom_app, upgrade_available, migrated, human_version, version, metadata, portals and active_workloads.containers; every other wire field, including this one, must be dropped before the row reaches meta.json. DEPRECATION NOTICE: this app is a test double. It carries a notes field of several hundred characters so a regression that caches the whole raw row is caught by the meta cache assertions. The normalizer consumes only name, id, state, custom_app, upgrade_available, migrated, human_version, version, metadata, portals and active_workloads.containers; every other wire field, including this one, must be dropped before the row reaches meta.json. DEPRECATION NOTICE: this app is a test double. It carries a notes field of several hundred characters so a regression that caches the whole raw row is caught by the meta cache assertions. The normalizer consumes only name, id, state, custom_app, upgrade_available, migrated, human_version, version, metadata, portals and active_workloads.containers; every other wire field, including this one, must be dropped before the row reaches meta.json. DEPRECATION NOTICE: this app is a test double. It carries a notes field of several hundred characters so a regression that caches the whole raw row is caught by the meta cache assertions. The normalizer consumes only name, id, state, custom_app, upgrade_available, migrated, human_version, version, metadata, portals and active_workloads.containers; every other wire field, including this one, must be dropped before the row reaches meta.json. DEPRECATION NOTICE: this app is a test double. It carries a notes field of several hundred characters so a regression that caches the whole raw row is caught by the meta cache assertions. The normalizer consumes only name, id, state, custom_app, upgrade_available, migrated, human_version, version, metadata, portals and active_workloads.containers; every other wire field, including this one, must be dropped before the row reaches meta.json. DEPRECATION NOTICE: this app is a test double. It carries a notes field of several hundred characters so a regression that caches the whole raw row is caught by the meta cache assertions. The normalizer consumes only name, id, state, custom_app, upgrade_available, migrated, human_version, version, metadata, portals and active_workloads.containers; every other wire field, including this one, must be dropped before the row reaches meta.json."
+  },
+  {
+    "name": "appa",
+    "id": "appa",
+    "state": "RUNNING",
+    "custom_app": true,
+    "upgrade_available": false,
+    "migrated": false,
+    "human_version": "1.0.0_1.0.0",
+    "version": "1.0.0",
+    "metadata": {
+      "app_version": "1.0.0",
+      "train": "community",
+      "home": "https://example.test/appa",
+      "icon": null
+    },
+    "portals": {},
+    "active_workloads": {}
+  },
+  {
+    "name": "appd",
+    "id": "appd",
+    "custom_app": false,
+    "upgrade_available": false,
+    "migrated": false,
+    "version": "10.9.0",
+    "metadata": {
+      "title": "appd",
+      "app_version": "10.9.0",
+      "train": "community",
+      "home": "https://appd.org/",
+      "icon": "https://example.test/icons/appd.png"
+    },
+    "portals": { "Web UI": "http://nas.example:8096/" },
+    "active_workloads": { "containers": 1 }
+  }
+]
