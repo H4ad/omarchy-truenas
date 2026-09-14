@@ -42,7 +42,11 @@ check "with an ISO fetch time" true "$(meta_file '.system.fetchedAt | test("^[0-
 check "the raw disk rows are cached" 5 "$(meta_file '.disks.rows | length')"
 check "with an ISO fetch time of their own" true \
   "$(meta_file '.disks.fetchedAt | test("^[0-9]{4}-")')"
+check "the cache keeps the wire key, not a normalized row" boot-pool \
+  "$(meta_file '.disks.rows[] | select(.name=="sda") | .imported_zpool')"
 check "the raw temperatures are cached" 5 "$(meta_file '.diskTemps.map | length')"
+check "and the wire pair, not the normalized row" true \
+  "$(meta_file '.diskTemps.map.sda == [38,60]')"
 check "with an ISO fetch time of their own" true \
   "$(meta_file '.diskTemps.fetchedAt | test("^[0-9]{4}-")')"
 check "the cold poll fetched the details once" 1 "$(disk_requests)"
@@ -149,6 +153,23 @@ check "a warning names the disk section" disk \
   "$(state '.warnings[] | select(.section=="disk") | .section')"
 check "the meta file is byte-for-byte the previous one" "$before" \
   "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
+teardown
+
+test_case "an M1 meta.json without the disk keys self-heals on the next poll"
+setup; single_instance_config
+meta_responses
+poll
+# A cache from before this milestone: a usable system section and no disk
+# keys at all. The fresh fetch time must not save it; presence is checked too.
+jq -c 'del(.disks, .diskTemps)' \
+  "$XDG_STATE_HOME/omarchy/truenas/meta.json" >"$WORK/meta-m1.json"
+cp "$WORK/meta-m1.json" "$XDG_STATE_HOME/omarchy/truenas/meta.json"
+: >"$STUB_CURL_LOG"
+poll
+check "the incomplete cache is stale, so the poll refetches all five" 5 "$(requests)"
+check "the disk rows are cached again" 5 "$(meta_file '.disks.rows | length')"
+check "and the temperature map too" 5 "$(meta_file '.diskTemps.map | length')"
+check "the old system data was not lost" 25.04.2 "$(state '.system.version')"
 teardown
 
 test_case "the meta cache round-trips a null system field"

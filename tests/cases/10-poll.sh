@@ -45,6 +45,19 @@ check "and temperatures asked per disk, with thresholds" 1 \
 check "no warnings on a clean poll" 0 "$(state '.warnings | length')"
 teardown
 
+test_case "disk rows are sorted by name even when the wire order is reversed"
+setup; single_instance_config
+jq -c 'reverse' "$ROOT/tests/fixtures/disks.json" >"$WORK/disks-reversed.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$WORK/disks-reversed.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+poll
+check "the wire order is not the state order" "nvme0n1,sda,sdb,sdc,sdd" \
+  "$(state '.disks | map(.name) | join(",")')"
+teardown
+
 test_case "a failed disk details call leaves disks empty and skips temperatures"
 setup; single_instance_config
 respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
