@@ -71,8 +71,15 @@ Ui.Panel {
   }
   readonly property var diskWarning: {
     for (var i = 0; i < root.warnings.length; i++) {
-      var section = String(root.warnings[i] && root.warnings[i].section || "")
-      if (section === "disk" || section === "diskTemp") return root.warnings[i]
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "disk")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var diskTempWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "diskTemp")
+        return root.warnings[i]
     }
     return null
   }
@@ -141,7 +148,8 @@ Ui.Panel {
       var reason = Model.errorSentence(root.connection)
       return "unreachable" + (reason !== "" ? ": " + reason : "")
     }
-    if (root.diskWarning) return "the disk state could not be read"
+    if (root.diskWarning) return "the disk list could not be read"
+    if (root.diskTempWarning) return "the disk temperatures could not be read"
     if (!root.disks.length) return "no disks reported"
     return root.disks.length + (root.disks.length === 1 ? " disk" : " disks")
   }

@@ -1,6 +1,6 @@
 .pragma library
 
-// List filtering for the panel's alert and pool rows. Pure functions only: no
+// List filtering for the panel's alert, pool and disk rows. Pure functions only: no
 // QML types, so the whole thing runs under node in tests/search.mjs. Every
 // filter returns a new array and never touches the one it was given.
 
