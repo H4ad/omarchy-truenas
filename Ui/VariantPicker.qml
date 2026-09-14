@@ -36,7 +36,8 @@ Column {
 
   readonly property var sampleView: ({
     mode: "firing", alertCount: 3, capacityText: "71%",
-    worstPool: "DEGRADED", worstLevel: "warning"
+    worstPool: "DEGRADED", worstLevel: "warning",
+    tempText: "54\u00B0", tempLevel: "warning"
   })
   readonly property var sampleGlyphs: ({
     main: Model.glyphFor("firing", ({ warning: 1 })),
@@ -70,6 +71,7 @@ Column {
       case "Alerts":   return "alert count"
       case "Capacity": return "fullest pool"
       case "Pool":     return "worst pool status"
+      case "Temp":     return "hottest disk"
       case "Full":     return "alerts + capacity"
       default:         return "alerts, else capacity"
     }
