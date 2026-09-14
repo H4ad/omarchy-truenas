@@ -78,6 +78,18 @@ function app(name, title, state, upgradeAvailable) {
   return { name: name, title: title, state: state, upgradeAvailable: upgradeAvailable };
 }
 
+function replication(name, jobState, warnCount) {
+  var warnings = [];
+  for (var i = 0; i < (warnCount || 0); i++) warnings.push("w");
+  return { name: name,
+           job: jobState === null ? null : { state: jobState },
+           state: { state: "FINISHED", warnings: warnings } };
+}
+
+function cloudSync(name, jobState) {
+  return { name: name, job: jobState === null ? null : { state: jobState } };
+}
+
 const ok = { ok: true };
 
 // A QVariantList reaches a plain JS function as an object with indexed members
@@ -355,6 +367,117 @@ check("undefined fields are blank, never the word undefined", "",
   Model.appLabel({ name: undefined, title: undefined }));
 check("no app is blank", "", Model.appLabel(null));
 check("a blank app is blank", "", Model.appLabel(""));
+
+test_case("protectionStateRank");
+
+check("SUCCESS is healthy", 0, Model.protectionStateRank("SUCCESS"));
+check("FINISHED is healthy", 0, Model.protectionStateRank("FINISHED"));
+check("the state is case-insensitive", 0, Model.protectionStateRank("success"));
+check("FAILED is a failure", 1, Model.protectionStateRank("FAILED"));
+check("ERROR is a failure", 1, Model.protectionStateRank("ERROR"));
+check("ABORTED is a failure", 1, Model.protectionStateRank("ABORTED"));
+check("PENDING is unknown, not a failure", 2, Model.protectionStateRank("PENDING"));
+check("a blank state is unknown", 2, Model.protectionStateRank(""));
+check("a missing state is unknown", 2, Model.protectionStateRank(null));
+check("an unknown word is unknown, not a failure", 2, Model.protectionStateRank("RUNNING"));
+
+test_case("protectionState");
+
+check("the job state wins", "SUCCESS",
+  Model.protectionState({ job: { state: "SUCCESS" }, state: { state: "FINISHED" } }));
+check("the task state is the fallback when there is no job", "FINISHED",
+  Model.protectionState({ job: null, state: { state: "FINISHED" } }));
+check("a job with no state falls back to the task", "PENDING",
+  Model.protectionState({ job: {}, state: { state: "PENDING" } }));
+check("an empty row is blank", "", Model.protectionState({}));
+check("no row is blank", "", Model.protectionState(null));
+
+test_case("replicationFailed");
+
+check("a failed job is a failure", true,
+  Model.replicationFailed(replication("a", "FAILED", 0)));
+check("a successful job with no warnings is not", false,
+  Model.replicationFailed(replication("a", "SUCCESS", 0)));
+check("warnings on a successful job are a failure", true,
+  Model.replicationFailed(replication("a", "SUCCESS", 2)));
+check("a jobless task with no warnings is not", false,
+  Model.replicationFailed(replication("a", null, 0)));
+check("a jobless task with warnings is", true,
+  Model.replicationFailed(replication("a", null, 1)));
+check("a blind row is not a failure", false, Model.replicationFailed({}));
+check("no row is not a failure", false, Model.replicationFailed(null));
+
+test_case("cloudSyncFailed");
+
+check("a failed job is a failure", true,
+  Model.cloudSyncFailed(cloudSync("a", "FAILED")));
+check("a successful job is not", false,
+  Model.cloudSyncFailed(cloudSync("a", "SUCCESS")));
+check("a running job is not a failure", false,
+  Model.cloudSyncFailed(cloudSync("a", "RUNNING")));
+check("a jobless task is not", false, Model.cloudSyncFailed(cloudSync("a", null)));
+check("a blind row is not", false, Model.cloudSyncFailed({}));
+check("no row is not", false, Model.cloudSyncFailed(null));
+
+test_case("failedReplications and failedCloudSync");
+
+check("only failed rows are copied", ["b"],
+  Model.failedReplications([replication("a", "SUCCESS", 0), replication("b", "FAILED", 0)])
+    .map(function (r) { return r.name; }));
+check("input order survives", ["a", "b"],
+  Model.failedReplications([replication("a", "ERROR", 0), replication("b", "ABORTED", 0)])
+    .map(function (r) { return r.name; }));
+const repRows = [replication("a", "FAILED", 0)];
+check("the result is a copy, not the input", false,
+  Model.failedReplications(repRows) === repRows);
+check("the input is untouched", 1, repRows.length);
+check("not a list is an empty list", [], Model.failedReplications(null));
+check("a blank is an empty list", [], Model.failedReplications(""));
+check("blind rows are skipped", 0, Model.failedReplications([{}, null, 4]).length);
+check("cloud sync only failed rows", ["c"],
+  Model.failedCloudSync([cloudSync("c", "FAILED"), cloudSync("d", "SUCCESS")])
+    .map(function (r) { return r.name; }));
+const csRows = [cloudSync("c", "FAILED")];
+check("the cloud sync result is a copy", false, Model.failedCloudSync(csRows) === csRows);
+check("not a list is an empty list for cloud sync", [], Model.failedCloudSync(null));
+
+test_case("worstProtectionLevel");
+
+check("a failed replication warns", "warning",
+  Model.worstProtectionLevel({ replication: [replication("a", "FAILED", 0)], cloudSync: [] }));
+check("a failed cloud sync warns", "warning",
+  Model.worstProtectionLevel({ replication: [], cloudSync: [cloudSync("a", "ERROR")] }));
+check("warnings on a replication row warn", "warning",
+  Model.worstProtectionLevel({ replication: [replication("a", "SUCCESS", 1)], cloudSync: [] }));
+check("all healthy is no level", "",
+  Model.worstProtectionLevel({ replication: [replication("a", "SUCCESS", 0)], cloudSync: [] }));
+check("an empty state is no level", "", Model.worstProtectionLevel({}));
+check("no state is no level", "", Model.worstProtectionLevel(null));
+
+test_case("protectionLabel");
+
+check("the name wins", "storage-to-backup",
+  Model.protectionLabel({ name: "storage-to-backup", dataset: "storage", pool: "storage" }));
+check("the dataset is the fallback", "Backup",
+  Model.protectionLabel({ name: "", dataset: "Backup", pool: "Backup" }));
+check("the pool is the last fallback", "storage",
+  Model.protectionLabel({ name: "", dataset: "", pool: "storage" }));
+check("an empty row is blank", "", Model.protectionLabel({}));
+check("undefined fields are blank, never the word undefined", "",
+  Model.protectionLabel({ name: undefined, dataset: undefined, pool: undefined }));
+check("no row is blank", "", Model.protectionLabel(null));
+
+test_case("scheduleText");
+
+check("a scrub schedule is dow hour minute", "7 00 00",
+  Model.scheduleText({ minute: "00", hour: "00", dow: "7" }));
+check("a replication schedule keeps its fields", "* 3 0",
+  Model.scheduleText({ minute: "0", hour: "3", dow: "*" }));
+check("a missing field is skipped", "3 0",
+  Model.scheduleText({ minute: "0", hour: "3" }));
+check("a null schedule is blank", "", Model.scheduleText(null));
+check("an empty object is blank", "", Model.scheduleText({}));
+check("a non-object is blank", "", Model.scheduleText("daily"));
 
 test_case("mode");
 

@@ -124,3 +124,83 @@ function apps(list, needle) {
   }
   return out;
 }
+
+// A replication task matches on its name, direction, transport, target dataset
+// and either the task state or the job state. The nested state and job are
+// guarded, so a row whose job is null still matches on the task state.
+function replication(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var task = items[i];
+    if (!task || typeof task !== "object") continue;
+    if (contains(task.name, needle)
+        || contains(task.direction, needle)
+        || contains(task.transport, needle)
+        || contains(task.targetDataset, needle)
+        || contains(task.state && task.state.state, needle)
+        || contains(task.job && task.job.state, needle)) {
+      out.push(task);
+    }
+  }
+  return out;
+}
+
+// A cloud sync task matches on its name, path, direction, transfer mode and job
+// state.
+function cloudSync(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var task = items[i];
+    if (!task || typeof task !== "object") continue;
+    if (contains(task.name, needle)
+        || contains(task.path, needle)
+        || contains(task.direction, needle)
+        || contains(task.transferMode, needle)
+        || contains(task.job && task.job.state, needle)) {
+      out.push(task);
+    }
+  }
+  return out;
+}
+
+// A periodic snapshot task matches on its dataset, naming schema, task state
+// and last snapshot.
+function snapshotTasks(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var task = items[i];
+    if (!task || typeof task !== "object") continue;
+    if (contains(task.dataset, needle)
+        || contains(task.namingSchema, needle)
+        || contains(task.state && task.state.state, needle)
+        || contains(task.state && task.state.lastSnapshot, needle)) {
+      out.push(task);
+    }
+  }
+  return out;
+}
+
+// A scrub task matches on its pool name, description, threshold and enabled
+// flag. The threshold is a number and contains stringifies it.
+function scrubs(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var task = items[i];
+    if (!task || typeof task !== "object") continue;
+    if (contains(task.pool, needle)
+        || contains(task.description, needle)
+        || contains(task.threshold, needle)
+        || contains(task.enabled, needle)) {
+      out.push(task);
+    }
+  }
+  return out;
+}
