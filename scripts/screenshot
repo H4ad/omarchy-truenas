@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Captures the bar item and popout into preview.png. Run it on the desk with the
+# plugin installed and a live NAS: the panel is a layer-shell surface and the
+# frame is a human choice, so the region is picked interactively.
+set -euo pipefail
+
+out=${1:-preview.png}
+omarchy-shell io.github.h4ad.truenas open || true
+sleep 1
+grim -g "$(slurp)" "$out"
+printf 'wrote %s\n' "$out"
