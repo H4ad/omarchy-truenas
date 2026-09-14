@@ -28,6 +28,10 @@ truenasctl <command>
   disks                      each disk, its size and temperature
   services                   each service, its state and whether it is enabled
   apps                       each app, its state, version and update flag
+  replication                each replication task, direction, state and last run
+  cloudsync                  each cloud sync task, direction, state and last run
+  snapshots                  each periodic snapshot task, state and last snapshot
+  scrubs                     each scrub task, its enabled flag and schedule
   poll [--quiet]             run one poll now
   config list                configuration as JSON, never the key value
   config set <key> <value>   write one scalar setting
@@ -462,6 +466,131 @@ cmd_apps() {
   ' "$file"
 }
 
+# One row per replication task. STATE is the job state when the last run has
+# one, else the task state, else `unknown`; LAST RUN is the job's finish time,
+# or `unknown`. A missing, non-array or failed section is its own sentence
+# rather than an empty table.
+cmd_replication() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.replication | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'replication unknown: the replication section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" replication)
+  if [[ -n $reason ]]; then
+    printf 'replication unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "NAME  DIRECTION  STATE  LAST RUN",
+    (.replication[] | [
+        (if (.name // "") == "" then "unknown" else .name end),
+        (if (.direction // "") == "" then "unknown" else .direction end),
+        ((.job.state // "") as $j | (.state.state // "") as $s
+         | if $j != "" then $j elif $s != "" then $s else "unknown" end),
+        (if (.job.timeFinished // "") == "" then "unknown" else .job.timeFinished end)
+      ] | join("  "))
+  ' "$file"
+}
+
+# The same for cloud sync, which has no task state: only the job.
+cmd_cloudsync() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.cloudSync | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'cloudsync unknown: the cloudSync section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" cloudSync)
+  if [[ -n $reason ]]; then
+    printf 'cloudsync unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "NAME  DIRECTION  STATE  LAST RUN",
+    (.cloudSync[] | [
+        (if (.name // "") == "" then "unknown" else .name end),
+        (if (.direction // "") == "" then "unknown" else .direction end),
+        (if (.job.state // "") == "" then "unknown" else .job.state end),
+        (if (.job.timeFinished // "") == "" then "unknown" else .job.timeFinished end)
+      ] | join("  "))
+  ' "$file"
+}
+
+# One row per periodic snapshot task. A `PENDING` task has no last snapshot, so
+# that column is `unknown`, never an empty one.
+cmd_snapshots() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.snapshotTasks | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'snapshots unknown: the snapshotTasks section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" snapshotTasks)
+  if [[ -n $reason ]]; then
+    printf 'snapshots unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "DATASET  STATE  LAST SNAPSHOT",
+    (.snapshotTasks[] | [
+        (if (.dataset // "") == "" then "unknown" else .dataset end),
+        (if (.state.state // "") == "" then "unknown" else .state.state end),
+        (if (.state.lastSnapshot // "") == "" then "unknown" else .state.lastSnapshot end)
+      ] | join("  "))
+  ' "$file"
+}
+
+# One row per scrub task. ENABLED is yes/no only when the row carries a
+# boolean; SCHEDULE is a `dow hour minute` line, or `unknown`.
+cmd_scrubs() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.scrubs | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'scrubs unknown: the scrubs section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" scrubs)
+  if [[ -n $reason ]]; then
+    printf 'scrubs unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    "POOL  ENABLED  THRESHOLD  SCHEDULE",
+    (.scrubs[] | [
+        (if (.pool // "") == "" then "unknown" else .pool end),
+        (if (.enabled | type) == "boolean" then (if .enabled then "yes" else "no" end) else "unknown" end),
+        (if (.threshold | type) == "number" then (.threshold | tostring) else "unknown" end),
+        (if (.schedule | type) == "object" then
+           ([.schedule.dow, .schedule.hour, .schedule.minute]
+            | map(select(. != null and . != "")) | join(" ")) as $s
+           | if $s == "" then "unknown" else $s end
+         else "unknown" end)
+      ] | join("  "))
+  ' "$file"
+}
+
 cmd_poll() { exec "$TN_PLUGIN_DIR/bin/truenas-poll" "$@"; }
 
 cmd_open() {
@@ -588,6 +717,10 @@ case ${1:-} in
   disks)   cmd_disks ;;
   services) cmd_services ;;
   apps)    cmd_apps ;;
+  replication) cmd_replication ;;
+  cloudsync)   cmd_cloudsync ;;
+  snapshots)   cmd_snapshots ;;
+  scrubs)      cmd_scrubs ;;
   poll)    shift; cmd_poll "$@" ;;
   config)  shift; cmd_config "$@" ;;
   open)    shift; cmd_open "$@" ;;
