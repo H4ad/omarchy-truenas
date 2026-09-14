@@ -22,6 +22,7 @@ setup() {
   : >"$STUB_MAP"; : >"$STUB_NOTIFY_LOG"; : >"$STUB_CURL_LOG"
   : >"$STUB_METHOD_LOG"; : >"$STUB_PAYLOAD_LOG"
   STATE="$WORK/state/omarchy/truenas/state.json"
+  HISTORY="$WORK/state/omarchy/truenas/history.json"
   printf 'TRUENAS_API_KEY=test-key\n' >"$TRUENAS_CREDENTIALS_FILE"
   chmod 600 "$TRUENAS_CREDENTIALS_FILE"
 }
@@ -44,6 +45,7 @@ respond_add() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$STUB_MAP"; }
 
 poll() { "$ROOT/bin/truenas-poll" --quiet; }
 state() { jq -r "$1" "$STATE"; }
+history() { jq -r "$1" "$HISTORY"; }
 notifications() { awk 'END { print NR + 0 }' "$STUB_NOTIFY_LOG"; }
 requests() { awk 'END { print NR + 0 }' "$STUB_CURL_LOG"; }
 

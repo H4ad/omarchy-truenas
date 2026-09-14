@@ -723,3 +723,59 @@ check "smb is empty, not a nameless card" "[]" "$(state '.shares.smb')"
 check "and a warning names the smb section" smb \
   "$(state '.warnings[] | select(.section=="smb") | .section')"
 teardown
+
+test_case "a successful poll appends the fullest pool's capacity"
+setup; single_instance_config
+all_healthy
+poll
+check "one sample" 1 "$(history '.capacityPct | length')"
+check "the fullest pool's percent" 71 "$(history '.capacityPct[0]')"
+check "and a timestamp beside it" 1 \
+  "$(history '[.at[]? | select(test("^[0-9]{4}-"))] | length')"
+poll
+check "the next poll appends too" 2 "$(history '.capacityPct | length')"
+check "newest last" "71,71" "$(history '.capacityPct | join(",")')"
+teardown
+
+test_case "an unknown capacity records a null gap, never a fake zero"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"       0 500 "$ROOT/tests/fixtures/err-500.json"
+poll
+check "the poll still wrote state" 1 "$(state '.schema')"
+check "one sample" 1 "$(history '.capacityPct | length')"
+check "the gap is null, not a fake zero" null "$(history '.capacityPct[0]')"
+teardown
+
+test_case "the history is capped at sixty, oldest dropped"
+setup; single_instance_config
+mkdir -p "$(dirname "$HISTORY")"
+jq -n '{capacityPct: [range(1; 61)], at: [range(60) | "2026-01-01T00:00:00Z"]}' >"$HISTORY"
+all_healthy
+poll
+check "still sixty samples" 60 "$(history '.capacityPct | length')"
+check "the oldest is gone" 2 "$(history '.capacityPct[0]')"
+check "the newest is this poll's" 71 "$(history '.capacityPct[59]')"
+check "the timestamps stay paired" 60 "$(history '.at | length')"
+teardown
+
+test_case "a failed poll leaves the history untouched"
+setup; single_instance_config
+mkdir -p "$(dirname "$HISTORY")"
+printf '{"capacityPct":[42],"at":["2026-01-01T00:00:00Z"]}\n' >"$HISTORY"
+cp "$HISTORY" "$WORK/history.before"
+respond "/api/v2.0/alert/list" 7 0 /dev/null
+poll
+check "the poll failed" false "$(state '.connection.ok')"
+check "the history file is unchanged" "$(cat "$WORK/history.before")" "$(cat "$HISTORY")"
+check "no sample was appended" 1 "$(history '.capacityPct | length')"
+check "and the value is untouched" 42 "$(history '.capacityPct[0]')"
+teardown
+
+test_case "a failed first poll never creates a history file"
+setup; single_instance_config
+respond "/api/v2.0/alert/list" 7 0 /dev/null
+poll
+check "no history file was created" false \
+  "$(test -e "$HISTORY" && echo true || echo false)"
+teardown

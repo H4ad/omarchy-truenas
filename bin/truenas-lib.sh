@@ -9,6 +9,7 @@ TN_CREDENTIALS_FILE="${TRUENAS_CREDENTIALS_FILE:-$TN_CONFIG_HOME/credentials}"
 TN_STATE_FILE="$TN_STATE_HOME/state.json"
 TN_SEEN_FILE="$TN_STATE_HOME/seen.json"
 TN_META_FILE="$TN_STATE_HOME/meta.json"
+TN_HISTORY_FILE="$TN_STATE_HOME/history.json"
 TN_PLUGIN_DIR="${TN_PLUGIN_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 tn_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
