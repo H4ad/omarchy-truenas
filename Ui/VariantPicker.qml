@@ -15,7 +15,7 @@ import "../BarVariants.js" as BarVariants
 //   }
 //
 // The preview is drawn against sample numbers when the caller passes none, so
-// five rows never read the same glyph. `view` is the same object BarVariants
+// seven rows never read the same glyph. `view` is the same object BarVariants
 // documents, so the preview goes through the exact code the bar does and cannot
 // disagree with it.
 Column {

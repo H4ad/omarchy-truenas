@@ -115,7 +115,8 @@ Column {
     value: view.panel.setting("variant", "Default")
     view: ({
       mode: "firing", alertCount: 3, capacityText: "71%",
-      worstPool: "DEGRADED", worstLevel: "warning"
+      worstPool: "DEGRADED", worstLevel: "warning",
+      tempText: "54\u00B0", tempLevel: "warning"
     })
     glyphs: ({
       main: Model.glyphFor("firing", ({ warning: 1 })),
