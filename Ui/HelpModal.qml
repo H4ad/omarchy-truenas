@@ -176,9 +176,13 @@ Item {
       id: sheet
       anchors.centerIn: parent
       width: Math.min(parent.width - Style.space(16), Style.space(440))
+      // body.contentHeight, never body.height: body is anchored top-to-bottom
+      // inside the sheet, so its height comes from the sheet and reading it
+      // here is a layout cycle that collapses the sheet to a one-line box. The
+      // content height is the intrinsic size, which the Flickable then clips.
       height: Math.min(parent.height - Style.space(16),
                        sheet.contentTopInset + sheet.contentBottomInset
-                       + head.implicitHeight + Style.space(10) + body.height)
+                       + head.implicitHeight + Style.space(10) + body.contentHeight)
       color: root.background
       borderSpec: Border.flat(Color.accent, Style.normalBorderWidth)
       padding: Style.space(16)

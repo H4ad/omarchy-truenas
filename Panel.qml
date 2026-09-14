@@ -51,7 +51,7 @@ Panel {
   readonly property color dimForeground: Qt.darker(root.contentForeground, 1.5)
   readonly property color urgentColor: bar ? bar.urgent : Color.urgent
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property int panelWidth: Style.space(Number(root.setting("panelWidth", 460)) || 460)
+  readonly property int panelWidth: Style.space(Number(root.setting("panelWidth", 520)) || 520)
 
   readonly property bool identityKnown: {
     var connection = (root.state && root.state.connection) || {}
@@ -458,9 +458,13 @@ Panel {
           }
         }
 
-        Row {
+        // Flow, not Row: nine tabs do not fit one line at the default width, and
+        // a Row clips the last one instead of wrapping. The flow wraps to a
+        // second line, and the header grows with it because the panel height is
+        // measured from header.implicitHeight.
+        Flow {
           width: parent.width
-          spacing: Style.space(14)
+          spacing: Style.space(10)
 
           Repeater {
             model: root.tabs

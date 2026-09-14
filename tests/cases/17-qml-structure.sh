@@ -175,6 +175,21 @@ check "the help sheet reserves it too" "1" \
 check "the help scrim swallows the wheel" "1" \
   "$(grep -c 'WheelHandler {' "$ROOT/Ui/HelpModal.qml")"
 
+# body is anchored top-to-bottom inside the sheet, so its height comes from the
+# sheet. Sizing the sheet from body.height is a layout cycle that leaves the
+# glossary a one-line box; only the intrinsic content height is safe to read.
+check "the help sheet sizes from the content height, not the viewport" "1" \
+  "$(grep -c '+ body.contentHeight)' "$ROOT/Ui/HelpModal.qml")"
+check "the help sheet does not size from body.height" "" \
+  "$(grep -n '+ body.height)' "$ROOT/Ui/HelpModal.qml")"
+
+# Nine tabs do not fit one line at the default width. The strip must be a
+# wrapping Flow: a Row clips the last tab ("Config") with no visual hint.
+check "the panel tab strip wraps instead of clipping" "1" \
+  "$(grep -c '^        Flow {' "$ROOT/Panel.qml")"
+check "the tab strip no longer clips in a Row" "" \
+  "$(grep -n 'spacing: Style.space(14)' "$ROOT/Panel.qml")"
+
 # Every write to contentY goes through jumpTo, which cancels a running flick and
 # clamps into range; a raw assignment elsewhere could rest outside it until
 # StopAtBounds walked it back.

@@ -24,7 +24,7 @@
     "defaults": {
       "variant": "Default",
       "hideWhenHealthy": false,
-      "panelWidth": 460,
+      "panelWidth": 520,
       "configPath": ""
     },
     "schema": [
@@ -50,7 +50,7 @@
         "min": 360,
         "max": 900,
         "step": 20,
-        "defaultValue": 460
+        "defaultValue": 520
       },
       {
         "key": "configPath",
