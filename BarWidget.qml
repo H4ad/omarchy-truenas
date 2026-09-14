@@ -74,6 +74,10 @@ BarWidget {
     tempLevel: Model.tempLevel(root.disks)
   })
   readonly property var segments: BarVariants.segmentsFor(root.variantChoice, root.barView, root.glyphs)
+  // The one severity the segments carry, or "" when they disagree or carry
+  // none. The single-tint path below paints the whole item one colour, and a
+  // lone hot disk has to paint its own rather than the alert count's.
+  readonly property string soleSeverity: BarVariants.soleSeverity(root.segments)
 
   // One glyph paints one colour, so per-severity segments go through the icon
   // slot as a Row of separately tinted Text items. A vertical bar has no
@@ -281,7 +285,9 @@ BarWidget {
     iconComponent: root.tintedSegments ? segmentRow : null
     foreground: root.degraded
       ? (root.bar ? root.bar.foreground : Color.foreground)
-      : root.severityColor
+      : (root.soleSeverity !== ""
+          ? root.colorForSeverity(root.soleSeverity)
+          : root.severityColor)
     dimmed: root.quiet || root.degraded
     fontSize: Style.font.caption
     fixedWidth: root.tintedSegments

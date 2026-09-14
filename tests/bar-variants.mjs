@@ -343,6 +343,26 @@ check("nothing tinted is one colour", false,
 check("no segments at all", false, BarVariants.isMultiColour([]));
 check("a null list", false, BarVariants.isMultiColour(null));
 
+// ----------------------------------------------------------------- soleSeverity
+
+test_case("soleSeverity is the one colour a single tint can paint");
+// The widget's single-tint path cannot carry two colours, and it must not lose
+// the one colour it has: a lone hot disk prints "61°" in critical, and only
+// this tells the widget to use the temperature's severity rather than the
+// alert count's.
+check("one tinted segment beside the glyph", "critical",
+  BarVariants.soleSeverity([{ text: "G", severity: "" }, { text: "61\u00B0", severity: "critical" }]));
+check("two segments of one severity", "warning",
+  BarVariants.soleSeverity([{ text: "3", severity: "warning" }, { text: "51\u00B0", severity: "warning" }]));
+check("two distinct severities need the row", "",
+  BarVariants.soleSeverity([{ text: "3", severity: "critical" }, { text: "51\u00B0", severity: "warning" }]));
+check("nothing tinted at all", "",
+  BarVariants.soleSeverity([{ text: "G", severity: "" }]));
+check("no segments", "", BarVariants.soleSeverity([]));
+check("a null list", "", BarVariants.soleSeverity(null));
+check("a missing severity key is untinted", "info",
+  BarVariants.soleSeverity([{ text: "G" }, { text: "i", severity: "info" }]));
+
 // ------------------------------------------------------------- the segment shape
 
 test_case("every segment is { text, severity } with a known severity");

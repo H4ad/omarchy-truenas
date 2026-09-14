@@ -2,7 +2,6 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../Ui" as Local
-import "../Model.js" as Model
 
 // Configuration for this bar item. Two different things live here and the view
 // keeps them apart:
@@ -113,16 +112,6 @@ Column {
   Local.VariantPicker {
     width: parent.width
     value: view.panel.setting("variant", "Default")
-    view: ({
-      mode: "firing", alertCount: 3, capacityText: "71%",
-      worstPool: "DEGRADED", worstLevel: "warning",
-      tempText: "54\u00B0", tempLevel: "warning"
-    })
-    glyphs: ({
-      main: Model.glyphFor("firing", ({ warning: 1 })),
-      offline: Model.GLYPH.offline,
-      unconfigured: Model.GLYPH.unconfigured
-    })
     foreground: view.panel.contentForeground
     dimForeground: view.panel.dimForeground
     urgentColor: view.panel.urgentColor

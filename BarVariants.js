@@ -205,3 +205,18 @@ function isMultiColour(segments) {
   }
   return seen.length > 1;
 }
+
+// The one severity the whole list carries, or "" when there are none or they
+// disagree. The single-tint path paints one colour, so this is what that
+// colour is: without it a lone hot disk would fall back to the alert counts'
+// tint and look quiet when the disk is not.
+function soleSeverity(segments) {
+  var found = "";
+  for (var i = 0; i < (segments || []).length; i++) {
+    var severity = String((segments[i] || {}).severity || "");
+    if (severity === "") continue;
+    if (found === "") found = severity;
+    else if (found !== severity) return "";
+  }
+  return found;
+}

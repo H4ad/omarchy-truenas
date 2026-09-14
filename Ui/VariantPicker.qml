@@ -14,10 +14,10 @@ import "../BarVariants.js" as BarVariants
 //     onPicked: function(variant) { panel.setWidgetSetting("variant", variant) }
 //   }
 //
-// The preview is drawn against sample numbers when the caller passes none, so
-// seven rows never read the same glyph. `view` is the same object BarVariants
-// documents, so the preview goes through the exact code the bar does and cannot
-// disagree with it.
+// The preview is drawn against one sample view when the caller passes none, so
+// every row has something to read and the caller does not repeat the sample.
+// `view` is the same object BarVariants documents, so the preview goes through
+// the exact code the bar does and cannot disagree with it.
 Column {
   id: root
 

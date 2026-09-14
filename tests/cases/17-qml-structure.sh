@@ -29,6 +29,14 @@ for script in Model.js Links.js Search.js BarVariants.js; do
     ".pragma library" "$(head -n 1 "$ROOT/$script")"
 done
 
+# --------------------------------------------------------------- bar tint path
+# The single-tint path paints the whole item one colour. It has to come from
+# the segments' own severity, or a lone hot disk keeps the alert count's colour
+# and a hot bar reads as a quiet one. The node suites load BarVariants.js alone
+# and cannot see this wiring, so the call has to be pinned here.
+check "BarWidget routes the single tint through BarVariants.soleSeverity" "1" \
+  "$(grep -c 'BarVariants.soleSeverity(root.segments)' "$ROOT/BarWidget.qml")"
+
 # ------------------------------------------------------------------ functions
 # Two `function` declarations with the same name in one object collide, and the
 # whole file fails to load rather than the second one losing. Root-scope members
