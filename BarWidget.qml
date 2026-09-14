@@ -130,6 +130,14 @@ BarWidget {
     panelLoader.item.open()
   }
 
+  // The menu's Help row lands here: open the glossary sheet, then the panel
+  // that draws it.
+  function openHelp() {
+    if (!panelLoader.item) return
+    panelLoader.item.showHelp()
+    panelLoader.item.open()
+  }
+
   function openDashboard() {
     var url = Links.dashboardUrl(root.configuredBase())
     if (url === "") return

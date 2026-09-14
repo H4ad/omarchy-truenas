@@ -137,6 +137,13 @@ Panel {
     else root.open()
   }
 
+  // The glossary is a sheet inside the visible panel window, opened from the
+  // header `?` and from the menu's Help row.
+  function showHelp() { helpModal.opened = true }
+  function hideHelp() { helpModal.opened = false }
+
+  readonly property bool helpOpen: helpModal.opened
+
   function showView(name) {
     var next = String(name || "health")
     root.actionError = ""
@@ -336,18 +343,25 @@ Panel {
       anchors.fill: parent
 
       onCloseRequested: {
-        if (confirmAction.opened) confirmAction.canceled()
+        if (root.helpOpen) root.hideHelp()
+        else if (confirmAction.opened) confirmAction.canceled()
         else root.close()
       }
       onTabRequested: function(direction) {
+        if (root.helpOpen) return
         if (confirmAction.opened) return
         root.switchPanel(direction)
       }
       onMoveRequested: function(dx, dy) {
+        if (root.helpOpen) {
+          helpModal.scrollBy(dy)
+          return
+        }
         if (confirmAction.opened && dx !== 0)
           confirmAction.selectedIndex = confirmAction.selectedIndex === 0 ? 1 : 0
       }
       onReturnRequested: {
+        if (root.helpOpen) return
         if (!confirmAction.opened) return
         if (confirmAction.selectedIndex === 0) confirmAction.canceled()
         else confirmAction.confirmed()
@@ -414,8 +428,19 @@ Panel {
           }
 
           PanelActionButton {
-            id: refreshButton
+            id: helpButton
             anchors.right: gearButton.left
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "?"
+            tooltipText: "What the words mean"
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.showHelp()
+          }
+
+          PanelActionButton {
+            id: refreshButton
+            anchors.right: helpButton.left
             anchors.verticalCenter: parent.verticalCenter
             iconText: Model.GLYPH.refresh
             tooltipText: "Poll now"
@@ -546,6 +571,19 @@ Panel {
             }
           }
         }
+      }
+
+      // Inside the key catcher for the same reason as the confirmation below:
+      // a visual child at Panel.qml's root scope renders nowhere, because the
+      // visible panel is a separate layer-shell window. z 9 keeps it under the
+      // confirmation, which is the only sheet that can sit on top of it.
+      Local.HelpModal {
+        id: helpModal
+        anchors.fill: parent
+        z: 9
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onClosed: helpModal.opened = false
       }
 
       // Inside the key catcher and raised, because a dialog at Panel.qml's root
