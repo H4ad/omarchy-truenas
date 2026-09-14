@@ -298,6 +298,68 @@ services, apps and normalization all succeeded, and `meta_is_stale` requires all
 five sections, so an older meta without the new keys reads as stale once,
 refetches once and self-heals.
 
+## Milestone 4: protection
+
+Four list routes and four run verbs. Everything below is a live measurement
+against TrueNAS 25.10.6 on 2026-09-14; the raw record is
+`docs/plans/2026-09-14-recon-protection.md`.
+
+| Purpose | Method | Path | Body | Observed answer |
+| --- | --- | --- | --- | --- |
+| replication list | GET | `/api/v2.0/replication` | -- | JSON array; row has nested `state{state,datetime,warnings,last_snapshot}`, `job|null`, `schedule|null` |
+| cloud sync list | GET | `/api/v2.0/cloudsync` | -- | JSON array (empty on this box); **no top-level `state`**, the last run is `job` |
+| snapshot task list | GET | `/api/v2.0/pool/snapshottask` | -- | JSON array; row has `state{state,datetime,last_snapshot}` and `naming_schema`; `PENDING` has no `datetime` |
+| scrub task list | GET | `/api/v2.0/pool/scrub` | -- | JSON array; rows `{id,pool,pool_name,threshold,enabled,schedule}` and **no run state** |
+| run replication | POST | `/api/v2.0/replication/run` | **bare integer id** | async job id |
+| run cloud sync | POST | `/api/v2.0/cloudsync/id/{id}/sync` | none or `{}` | async job id |
+| run snapshot task | POST | `/api/v2.0/pool/snapshottask/id/{id}/run` | **none** | `null` (sync) |
+| scrub action | POST | `/api/v2.0/pool/scrub/scrub` | `{"name":<pool>,"action":"START"}` | async job id |
+
+Findings that constrain the design, each observed on that box:
+
+1. `POST /replication/run` with `{"id":1}` fails `[EINVAL] id: Input should be a
+   valid integer`; the wire body is the bare integer, so this is the one write
+   whose body is not a one-key object.
+2. A body on `cloudsync/id/{id}/sync` leaks into the options object
+   (`{"id":…}` fails `cloud_sync_sync_options.id: Extra inputs are not
+   permitted`), so the sync verb sends no body with the id in the path.
+3. `pool/snapshottask/id/{id}/run` rejects an empty object (`Too many arguments
+   (expected 1, found 2)`), so the snapshot verb sends no body at all, with the
+   id in the path. An invalid id answers `422` synchronously rather than a job
+   id, which is how the route is told from the async ones.
+4. `pool/scrub/run {"name":…}` is **due-gated**: it starts a scrub only when the
+   last one was more than `threshold` days ago, and may quietly do nothing.
+   M4 uses `pool/scrub/scrub {"name":…,"action":"START"}` instead, which returns
+   a job id the panel can watch. A missing `name` is `400 {"message":"name
+   attribute expected."}`; an unknown pool is `404 {"message":""}`.
+5. The scrub row carries no run state. A pool's scrub progress and last result
+   live on `pool.scan`, which milestone 1 already normalizes; M4 adds no second
+   scrub state field.
+6. `GET /pool/snapshot` is not read. The full list is 298 heavy rows with a
+   `properties` blob each, and a per-poll `?count=true` would spend a request for
+   a figure no view needs. The periodic snapshot tasks are the snapshot section;
+   the design's raw `snapshots` list is dropped.
+7. Dates inside `state` and `job` are Mongo `{$date: epoch_ms}` objects;
+   `share/normalize.jq` `to_iso` already accepts them. `state.datetime` and
+   `job.time_finished` become ISO strings.
+8. The replication `state` is a nested object, not a string; its `warnings` list
+   is a failure signal even when the job state is `SUCCESS`. Cloud sync has no
+   task state at all, only `job`.
+
+### The protection meta cache
+
+`meta.json` gains `replication`, `cloudSync`, `snapshotTasks` and `scrubs`,
+beside the M1/M2/M3 keys, each `{fetchedAt, rows}`. The rows keep the consumed
+wire fields under their wire names, with the nested `state`/`job` reduced to the
+keys the normalizer reads (`state` as `{state, datetime, warnings,
+last_snapshot}` or `null`; `job` as `{state, time_finished, error}` or `null`)
+and the schedule whitelisted to the seven cron keys. `ssh_credentials`,
+`encryption_key`, `job.logs_excerpt` and `job.exception` on a replication row,
+and cloud sync `credentials`, `encryption_password`, `encryption_salt`,
+`pre_script`, `post_script`, are dropped before the write and never reach disk.
+`meta_is_stale` requires all nine sections, so an older meta without the new
+keys reads as stale once, refetches once and self-heals.
+
 ## Cross-cutting rules
 
 ### A datetime is a string *or* `{$date}`
@@ -343,11 +405,13 @@ never hits every endpoint:
 - every `notify.metaMaxAgeSeconds` (default 300): `system/info`, then
   `disk/details` and `disk/temperatures` (the temperatures request is built from
   the names the details call returned, so a failed details call skips it), then
-  `service`, `app` and the rest as milestones add them.
+  `service`, `app`, `replication`, `cloudsync`, `pool/snapshottask`,
+  `pool/scrub` and the rest as milestones add them.
 
-A cold poll -- no fresh meta, so every section is fetched -- spends seven
+A cold poll -- no fresh meta, so every section is fetched -- spends eleven
 requests: `alert/list`, `pool`, `system/info`, `disk/details`,
-`disk/temperatures`, `service` and `app`. A warm poll, with a fresh meta cache,
+`disk/temperatures`, `service`, `app`, `replication`, `cloudsync`,
+`pool/snapshottask` and `pool/scrub`. A warm poll, with a fresh meta cache,
 spends two: `alert/list` and `pool`.
 
 Results of the slow set are cached in
@@ -382,7 +446,8 @@ The endpoint shapes above are taken from the 25.04.2 reference and encoded in
 `share/normalize.jq`, and the test fixtures (`tests/fixtures/`) are sanitized
 snapshots of those shapes plus synthetic failure states (a degraded pool with
 checksum errors and a scrub on record, alert levels across the buckets, `401`,
-`500`, unreachable). The milestone-1 shapes, the milestone-2 disk routes and the
-milestone-3 service and app routes were confirmed against a live TrueNAS 25.10.6
-on 2026-09-13, and those probes are recorded above. A field the live box did not
-exercise is still a claim to re-measure, not a fact to quote.
+`500`, unreachable). The milestone-1 shapes, the milestone-2 disk routes, the
+milestone-3 service and app routes and the milestone-4 protection routes were
+confirmed against a live TrueNAS 25.10.6 on 2026-09-13 and 2026-09-14, and those
+probes are recorded above. A field the live box did not exercise is still a
+claim to re-measure, not a fact to quote.
