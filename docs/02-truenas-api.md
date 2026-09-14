@@ -1,10 +1,10 @@
-# TrueNAS API surface (milestone 1)
+# TrueNAS API surface
 
 Sources: the versioned API reference at <https://api.truenas.com/v25.04.2/>
-(method names, parameter shapes and the REST deprecation note), and the
-installed TrueNAS SCALE 25.04.2 the plugin was pointed at. The REST paths below
-are the ones a milestone-1 poll reads; the JSON-RPC method in brackets is the
-same operation under the new API, and the migration target.
+(method names, parameter shapes and the REST deprecation note), and live probes
+against the installed TrueNAS SCALE 25.10.6 on 2026-09-13. The REST paths below
+are the ones a poll reads; for the milestone-1 routes the JSON-RPC method in
+brackets is the same operation under the new API, and the migration target.
 
 ## Transport and auth
 
@@ -37,7 +37,7 @@ generation a poll used -- `rest-v2.0` today -- and the poll records it in
 `state.connection.dialect`. Migrating to the websocket API is a change to that
 one function and a websocket client, not a rewrite of every endpoint.
 
-## Endpoints this milestone uses
+## Endpoints milestone 1 uses
 
 | Purpose | Method | REST path | JSON-RPC method |
 | --- | --- | --- | --- |
@@ -158,6 +158,66 @@ methods require `ALERT_LIST_WRITE`. The panel re-polls with `--force-meta` and
 reads the state back rather than trusting the verb's stdout. Every write is one
 queued process, behind a `ConfirmAction` for dismiss; see the design doc.
 
+## Milestone 2: disks and temperatures
+
+Both disk routes are POST-only. Verified against the live 25.10.6 on
+2026-09-13:
+
+| Purpose | Method | Path | Body | Observed answer |
+| --- | --- | --- | --- | --- |
+| disk inventory + pool mapping | POST | `/api/v2.0/disk/details` | `{"type":"USED"}` | JSON array, one object per disk; `imported_zpool` names the pool |
+| temperatures (+ critical) | POST | `/api/v2.0/disk/temperatures` | `{"name":["sda",…],"include_thresholds":true}` | JSON object `{"sda":[38.0,60.0],…}` |
+
+Traps, each one observed on that box:
+
+- `GET /api/v2.0/disk/temperatures` is `405 Method Not Allowed`; the route is
+  POST-only.
+- The parameter is **`name`** (singular, an array), not `names`: an object
+  carrying `names` is rejected with `not expected: names`.
+- A bare-array body is rejected with `Endpoint accepts multiple params`; the
+  names have to be wrapped in an object.
+- `{"type":"BOTH"}` on `disk/details` answers a **`{used,unused}`** object
+  instead of an array. M2 uses `USED`: the array shape is simpler, and on the
+  live box every disk is in use.
+- With `include_thresholds:true` each value is normally `[tempC, criticalC]`,
+  but a disk that reports no threshold answers a bare number even when
+  thresholds were asked for. `share/normalize.jq` normalizes both shapes; the
+  missing threshold stays `null`, never `0`.
+- The pool mapping is `imported_zpool` on `disk/details` (the plain `/disk`
+  route has `"pool":null` on every row and is not used). Observed:
+  `nvme0n1→storage`, `sda,sdb→boot-pool`, `sdc,sdd→Backup`.
+- The rows also carry serials, identifiers and lunids; the plugin never stores
+  them (see the meta cache below).
+
+**SMART test results are not available on 25.04+.** `GET
+/api/v2.0/smart/test/results` answers `404` on the live 25.10.6, and the 25.04
+and 25.10 API references list no `smart.*` method at all -- SMART tests were
+removed after 24.10. Milestone 2 therefore ships temperature notifications only
+(the design's `smartHealth`/`lastTest` disk fields are dropped), and a later
+milestone that wants drive health has to find another signal.
+
+### The disk meta cache
+
+`meta.json` gains `disks` and `diskTemps` beside milestone 1's `system`:
+
+```jsonc
+{ "disks":     { "fetchedAt": "...",
+                 "rows": [ { "name": "sda", "model": "SATA_HDD_500G",
+                             "type": "HDD", "size": 500107862016,
+                             "imported_zpool": "boot-pool", "bus": "ATA" }, … ] },
+  "diskTemps": { "fetchedAt": "...", "map": { "sda": [38.0, 60.0], … } } }
+```
+
+The cached disk rows are exactly the wire fields a poll consumes, under their
+wire names: `name`, `model`, `type`, `size`, `imported_zpool`, `bus`. Serials,
+identifiers and lunids are dropped before the write and never reach the local
+file, which is the point: the cache holds only what the normalizer needs, and
+the normalizer stays the one owner of the row shape on both the fetch and the
+reuse path. The temperatures map is cached as the wire wrote it. Meta advances
+only when system, disks, temperatures and normalization all succeeded; a failed
+section leaves the previous `meta.json` byte-for-byte intact, and an older meta
+without the new keys reads as stale once, refetches once and self-heals.
+
 ## Cross-cutting rules
 
 ### A datetime is a string *or* `{$date}`
@@ -196,8 +256,15 @@ never hits every endpoint:
 
 - every poll (`pollSeconds`, floor 15, default 30): `alert/list`, `pool`
   (and `core/get_jobs` in later milestones);
-- every `notify.metaMaxAgeSeconds` (default 300): `system/info`, then `disk`,
+- every `notify.metaMaxAgeSeconds` (default 300): `system/info`, then
+  `disk/details` and `disk/temperatures` (the temperatures request is built from
+  the names the details call returned, so a failed details call skips it), then
   `service`, `app` and the rest as milestones add them.
+
+A cold poll -- no fresh meta, so every section is fetched -- spends five
+requests: `alert/list`, `pool`, `system/info`, `disk/details` and
+`disk/temperatures`. A warm poll, with a fresh meta cache, spends two:
+`alert/list` and `pool`.
 
 Results of the slow set are cached in
 `~/.local/state/omarchy/truenas/meta.json` with a `fetchedAt`, and
@@ -231,7 +298,7 @@ The endpoint shapes above are taken from the 25.04.2 reference and encoded in
 `share/normalize.jq`, and the test fixtures (`tests/fixtures/`) are sanitized
 snapshots of those shapes plus synthetic failure states (a degraded pool with
 checksum errors and a scrub on record, alert levels across the buckets, `401`,
-`500`, unreachable). They have **not** yet been confirmed
-against the live NAS: milestone 1 ends with `truenasctl test -v` against
-`https://nas.example:4433`, which is blocked on an API key. Until then every
-field is a claim to re-measure, not a fact to quote.
+`500`, unreachable). The milestone-1 shapes and the milestone-2 disk routes
+were confirmed against a live TrueNAS 25.10.6 on 2026-09-13, and the disk probes
+are recorded above. A field the live box did not exercise is still a claim to
+re-measure, not a fact to quote.

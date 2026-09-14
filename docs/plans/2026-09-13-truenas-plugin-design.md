@@ -150,7 +150,8 @@ scripts/dev-install    Copy the tree into ~/.config/omarchy/plugins and restart.
                   "allocated": 0, "free": 0, "usedPct": 0,
                   "scan": { }, "vdevErrors": { } } ],
   "disks":    [ { "name": "", "model": "", "type": "", "size": 0, "pool": "",
-                  "tempC": null, "smartHealth": "", "lastTest": { } } ],
+                  "bus": "", "tempC": null, "tempCriticalC": null,
+                  "tempState": "unknown" } ],
   "services": [ { "id": "", "service": "", "state": "", "enable": false } ],
   "apps":     [ { "id": "", "name": "", "state": "" } ],
   "replication": [ ], "cloudsync": [ ], "snapshots": [ ],
@@ -162,6 +163,11 @@ scripts/dev-install    Copy the tree into ~/.config/omarchy/plugins and restart.
   "warnings": [ { "section": "", "error": "", "message": "" } ]
 }
 ```
+
+`disks[].tempState` is computed once, in `share/normalize.jq`, and read by both
+the bash notifier and the QML views: `unknown` when either the temperature or
+its critical threshold is missing, `critical` at `tempC >= tempCriticalC`,
+`warning` from ten degrees below critical, otherwise `ok`.
 
 `warnings` is the partial-failure channel: if the disk call failed and pools
 succeeded, pools render and the Disks view prints the reason. `connection.error`
@@ -179,8 +185,9 @@ Full        alerts + capacity
 Quiet       dimmed when all green (the "I am alive" proof)
 ```
 
-M1 subset: `Default`, `Icon`, `Alerts`, `Capacity`, `Pool` and `Full`. `Temp` and
-`Quiet` are deferred, and the manifest carries no option for them yet.
+M1 shipped `Default`, `Icon`, `Alerts`, `Capacity`, `Pool` and `Full`; M2 adds
+`Temp`, the hottest disk's temperature (blank when no disk reports one). `Quiet`
+remains deferred, and the manifest carries no option for it yet.
 
 Offline / unconfigured still overrides every variant with a plug or cog glyph,
 so "nothing is wrong" and "I cannot tell" never look the same.
@@ -205,9 +212,14 @@ Deduped in `seen.json`, namespaced by stable key:
 | Alert new / cleared | `alert:<uuid>` | critical/error urgent, warning normal |
 | Pool state change | `pool:<name>:<status>` | worsening urgent, recovery low |
 | Scrub / replication / cloudsync finished | `scrub:<pool>:<start>`, `<task>:<id>:<state>` | failure urgent, success low |
-| Disk temp / SMART | `disk:<name>:temp`, `disk:<name>:smart` | urgent |
+| Disk temp | `disk:<name>:temp` | warning/critical normal, cooled low |
 | App / service down | `app:<id>:state`, `service:<id>:state` | normal |
 | Update available | `update:<version>` | low |
+
+There is no `disk:<name>:smart` row: SMART test results are not available on
+25.04+ (`GET /api/v2.0/smart/test/results` is `404` on the live 25.10.6, and the
+API reference lists no `smart.*` method at all -- SMART tests were dropped after
+24.10), so M2 ships temperature toasts only.
 
 A failed poll leaves `seen.json` untouched, so a network blip does not replay
 every alert as new on recovery. Notification levels map the way SigNoz maps
@@ -271,7 +283,10 @@ Each milestone ends usable and is committed on its own.
 
 - Exact endpoint shapes vary by version; every shape is normalized in
   `share/normalize.jq` and probed by `truenasctl test` rather than assumed.
-- `disk/temperatures` may need a names parameter; normalize both.
+- `disk/temperatures` — resolved: POST-only, the parameter is `name` (singular,
+  an array), and the answer is `[tempC, criticalC]` per disk, or a bare number
+  when the disk reports no threshold; normalize both. Verified on the live
+  25.10.6, see `docs/02-truenas-api.md`.
 - REST removal: mitigated by the `tn_call` shim.
 - Full-control writes: a misclick restarts a service. Mitigated by confirmation,
   a single-write queue, and read-after-write. No bulk destructive action without
