@@ -293,6 +293,9 @@ cat >"$STATE" <<'JSON'
     { "name": "sda", "model": "SATA_HDD_500G", "type": "HDD",
       "size": 500107862016, "pool": "boot-pool", "bus": "ATA",
       "tempC": 38.0, "tempCriticalC": 60.0, "tempState": "ok" },
+    { "name": "sdb", "model": "SATA_HDD_500G", "type": "HDD",
+      "size": 500107862016, "pool": "boot-pool", "bus": "ATA",
+      "tempC": "n/a", "tempCriticalC": 60.0, "tempState": "unknown" },
     { "name": "sdc", "model": "SATA_HDD_4T", "type": "HDD",
       "size": null, "pool": "Backup", "bus": "ATA",
       "tempC": null, "tempCriticalC": null, "tempState": "unknown" }
@@ -303,7 +306,7 @@ out=$(ctl disks)
 check "disks runs" 0 "$(ctl disks >/dev/null 2>&1; echo $?)"
 check "the header names every column" 1 \
   "$(grep -c '^NAME.*TYPE.*SIZE.*POOL.*TEMP' <<<"$out")"
-check "one row per disk" 3 "$(grep -c '^\(nvme0n1\|sda\|sdc\)' <<<"$out")"
+check "one row per disk" 4 "$(grep -c '^\(nvme0n1\|sda\|sdb\|sdc\)' <<<"$out")"
 check "a cool disk shows its rounded temperature" 1 \
   "$(grep -c '^sda.*38 °C' <<<"$out")"
 check "the hot disk renders its temperature" 1 \
@@ -313,10 +316,12 @@ check "the pool is on the row" 1 \
 check "the size is human" 1 "$(grep -c '^sda.*465.8 GiB' <<<"$out")"
 check "an unknown temperature is the word unknown" 1 \
   "$(grep -c '^sdc.*unknown' <<<"$out")"
+check "a non-numeric temperature is the word unknown" 1 \
+  "$(grep -c '^sdb.*unknown' <<<"$out")"
 check "an unknown size is the word unknown" 1 \
   "$(grep -c '^sdc.*unknown.*unknown' <<<"$out")"
-check "no invented zero temperature" 0 "$(grep -c '0 °C' <<<"$out")"
-check "no invented zero size" 0 "$(grep -c '0 B' <<<"$out")"
+check "no invented zero temperature" 0 "$(grep -cE '(^| )0 °C' <<<"$out")"
+check "no invented zero size" 0 "$(grep -cE '(^| )0 B' <<<"$out")"
 teardown
 
 test_case "disks names a failed disk section instead of an empty table"
@@ -336,7 +341,7 @@ check "says unknown" 1 "$(grep -c '^disks unknown:' <<<"$out")"
 check "names the failed section" 1 \
   "$(grep -c 'the disk section did not answer' <<<"$out")"
 check "does not draw a header over an empty table" 0 "$(grep -c '^NAME' <<<"$out")"
-check "invents no temperature" 0 "$(grep -c '0 °C' <<<"$out")"
+check "invents no temperature" 0 "$(grep -cE '(^| )0 °C' <<<"$out")"
 teardown
 
 test_case "disks trusts no row when the temperatures did not answer"

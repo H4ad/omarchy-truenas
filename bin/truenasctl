@@ -375,7 +375,7 @@ cmd_disks() {
     return 0
   fi
   jq -r '
-    def human:
+    def human_bytes:
       if type == "number" and . >= 0 then
         if . == 0 then "0 B"
         else
@@ -389,9 +389,9 @@ cmd_disks() {
     (.disks[]? | [
         .name,
         (.type // ""),
-        (.size | human),
+        (.size | human_bytes),
         (.pool // ""),
-        (if .tempC == null then "unknown" else "\(.tempC | round) °C" end)
+        (if (.tempC | type) == "number" then "\(.tempC | round) °C" else "unknown" end)
       ] | join("  "))
   ' "$file"
 }
