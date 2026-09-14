@@ -153,7 +153,11 @@ scripts/dev-install    Copy the tree into ~/.config/omarchy/plugins and restart.
                   "bus": "", "tempC": null, "tempCriticalC": null,
                   "tempState": "unknown" } ],
   "services": [ { "id": "", "service": "", "state": "", "enable": false } ],
-  "apps":     [ { "id": "", "name": "", "state": "" } ],
+  "apps":     [ { "id": "", "name": "", "title": "", "state": "",
+                  "version": "", "appVersion": "", "train": "",
+                  "custom": false, "upgradeAvailable": false, "migrated": false,
+                  "containers": null,
+                  "webui": { "label": "", "url": "" } } ],
   "replication": [ ], "cloudsync": [ ], "snapshots": [ ],
   "shares":   { "smb": 0, "nfs": 0, "iscsi": 0, "webdav": 0 },
   "sessions": { "smb": [ ] },
@@ -186,8 +190,9 @@ Quiet       dimmed when all green (the "I am alive" proof)
 ```
 
 M1 shipped `Default`, `Icon`, `Alerts`, `Capacity`, `Pool` and `Full`; M2 adds
-`Temp`, the hottest disk's temperature (blank when no disk reports one). `Quiet`
-remains deferred, and the manifest carries no option for it yet.
+`Temp`, the hottest disk's temperature (blank when no disk reports one). M3 adds
+no variant; the seven options above stand. `Quiet` remains deferred, and the
+manifest carries no option for it yet.
 
 Offline / unconfigured still overrides every variant with a plug or cog glyph,
 so "nothing is wrong" and "I cannot tell" never look the same.
@@ -195,7 +200,8 @@ so "nothing is wrong" and "I cannot tell" never look the same.
 ## Writes (full control)
 
 Dismiss alert · restore alert · start/stop/restart service · start/stop/redeploy
-app · run scrub · run replication · run cloud-sync · run snapshot task.
+app (redeploy is the restart-like verb; the API has no `app/restart` route) ·
+run scrub · run replication · run cloud-sync · run snapshot task.
 
 Guardrails: every write is one queued `Process`; destructive ones pass through a
 `ConfirmAction` declared inside `PanelKeyCatcher` (a dialog at root scope
@@ -213,8 +219,13 @@ Deduped in `seen.json`, namespaced by stable key:
 | Pool state change | `pool:<name>:<status>` | worsening urgent, recovery low |
 | Scrub / replication / cloudsync finished | `scrub:<pool>:<start>`, `<task>:<id>:<state>` | failure urgent, success low |
 | Disk temp | `.disks.<name>` | warning/critical normal, cooled low |
-| App / service down | `app:<id>:state`, `service:<id>:state` | normal |
+| App / service down | `.services.<name>`, `.apps.<name>` (the design's `service:<id>:state` / `app:<id>:state`) | normal |
 | Update available | `update:<version>` | low |
+
+M3 ships the app and service rows. The seen entry is keyed by the service or app
+name under `seen.services` / `seen.apps` and records the last decisive state, a
+stable `down` boolean and `lastNotifiedAt`, so a blank or transitional poll
+carries the signal forward instead of erasing it.
 
 There is no SMART entry: SMART test results are not available on 25.04+ (`GET
 /api/v2.0/smart/test/results` is `404` on the live 25.10.6, and the API

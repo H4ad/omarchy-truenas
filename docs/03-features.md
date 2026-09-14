@@ -1,11 +1,12 @@
 # Features
 
-What milestones 1 and 2 ship, and what the design defers. The split is the
+What milestones 1 to 3 ship, and what the design defers. The split is the
 design's: bar value against cost (API unknowns plus QML work). The design is
 [plans/2026-09-13-truenas-plugin-design.md](plans/2026-09-13-truenas-plugin-design.md);
 the task-by-task versions are
-[plans/2026-09-13-truenas-milestone-1.md](plans/2026-09-13-truenas-milestone-1.md)
-and [plans/2026-09-13-truenas-milestone-2.md](plans/2026-09-13-truenas-milestone-2.md).
+[plans/2026-09-13-truenas-milestone-1.md](plans/2026-09-13-truenas-milestone-1.md),
+[plans/2026-09-13-truenas-milestone-2.md](plans/2026-09-13-truenas-milestone-2.md)
+and [plans/2026-09-13-truenas-milestone-3.md](plans/2026-09-13-truenas-milestone-3.md).
 The endpoints are in [02-truenas-api.md](02-truenas-api.md), and the traps that
 have already cost time are in [11-pitfalls.md](11-pitfalls.md).
 
@@ -88,12 +89,52 @@ dropped SMART tests after 24.10 and `smart/test/results` is `404` on 25.10.6.
 `38 °C` or `unknown`; a failed disk or temperatures section prints the
 unknown-reason sentence instead of an empty table.
 
+## Milestone 3, what ships
+
+**Services view.** One card per service: the name and its state, tinted by
+`serviceStateRank` so a blank state is dim `unknown` and never a stopped
+service, and the enabled flag. Start, stop and restart each go through the
+panel's single confirmation because a misclick drops connections; the
+inapplicable verb is not offered, and restart is always available. A failed
+services request says why and never renders as a NAS that runs nothing. The
+filter matches name, state and id.
+
+**Apps view.** One card per app: `appLabel`, state tinted by `appStateRank` so a
+transitional deploy is dim and not down, the version and train, and an update
+marker when the NAS reports one. Start, stop and redeploy are each confirmed,
+redeploy being the restart-like verb because the API has no app restart route. A
+portal the poll reported opens through `Links.safeUrl`; otherwise the card falls
+back to the apps page. The filter matches name, title, state, train, appVersion
+and version.
+
+**Control writes.** Six verbs behind confirmation: `service-start`,
+`service-stop`, `service-restart`, `app-start`, `app-stop` and `app-redeploy`.
+Each is one queued `bin/truenas-api` call followed by a forced re-poll, so the
+panel reads the NAS back rather than trusting the verb's own answer. A service
+control answers `true` synchronously; an app control answers a job id and lands
+asynchronously, and the next poll catches up rather than fabricating a state.
+
+**Down and recovery notifications.** A toast when a service or app leaves its
+running state and one when it returns, deduped in `seen.json` under
+`.services.<name>` / `.apps.<name>` by the last decisive state and a stable
+`down` boolean. A blank or transitional poll carries both forward, so it cannot
+erase the signal, and a failed services or apps fetch leaves that half of
+`seen.json` untouched.
+
+**Meta-cadence caching.** `/service` and `/app` join `/system/info`,
+`disk/details` and `disk/temperatures` on the meta cadence: a cold poll spends
+seven requests and a warm poll two. The cache holds only the wire fields the
+plugin consumes; service `pids`, app `notes` and the workload details are
+dropped before the write.
+
+**`truenasctl services` / `truenasctl apps`.** `SERVICE  STATE  ENABLED` and
+`APP  STATE  VERSION  UPDATE`, with `unknown` for an `ENABLED` or `UPDATE` flag
+that was never learned, and the section's failure sentence instead of an empty
+table.
+
 ## Planned
 
 Each of these is its own milestone and its own plan when it is reached.
-
-**M3 Apps and services.** `/api/v2.0/service`, `/app`; state, and
-start/stop/restart writes behind confirmation.
 
 **M4 Protection.** `/api/v2.0/replication`, `/cloudsync`, `/pool/snapshottask`,
 `/pool/scrub`; states, last run, and run-now writes.
