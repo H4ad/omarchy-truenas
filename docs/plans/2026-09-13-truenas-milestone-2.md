@@ -96,18 +96,25 @@ Findings that constrain the design:
 
 ### `meta.json`
 
-M1's `.system` object is unchanged. Two raw caches are added and always written
+M1's `.system` object is unchanged. Two disk caches are added and always written
 together with it on a successful meta refresh:
 
 ```jsonc
 { "system": { "fetchedAt": "...", "data": { …normalized… } },
-  "disks":     { "fetchedAt": "...", "rows": [ …raw disk/details array… ] },
+  "disks":     { "fetchedAt": "...",
+                 "rows": [ { "name": "sda", "model": "SATA_HDD_500G",
+                             "type": "HDD", "size": 500107862016,
+                             "imported_zpool": "boot-pool", "bus": "ATA" }, … ] },
   "diskTemps": { "fetchedAt": "...", "map": { "sda": [38.0, 60.0], … } } }
 ```
 
-Raw bodies are cached here (not normalized rows) so exactly one normalizer owns
-the wire shape on both the fetch and the reuse path. An existing meta.json
-without the new keys reads as stale once, refetches once, and self-heals.
+The cached disk rows are the raw wire fields the plugin consumes, under their
+wire names (`name, model, type, size, imported_zpool, bus`); serials,
+identifiers and lunids are dropped before the write and never reach disk. The
+temperatures map is cached exactly as the wire wrote it. Caching wire fields
+rather than normalized rows keeps exactly one normalizer owning the shape on
+both the fetch and the reuse path. An existing meta.json without the new keys
+reads as stale once, refetches once, and self-heals.
 `meta_is_stale` is true unless all three are present and the `.system.fetchedAt`
 age is below `META_MAX_AGE` (or `--force-meta`). Meta advances only when system,
 disks, temperatures and normalization all succeeded; otherwise the previous meta

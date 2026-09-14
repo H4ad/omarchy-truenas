@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Polls the one configured TrueNAS once: alerts, pools and system info, then
-# rewrites state.json. Safe to run by hand; it is the whole read path of the
-# plugin. `connection` describes the alert request, because alerts are the
-# thing the bar exists to report, and the other sections fail independently.
+# Polls the one configured TrueNAS once: alerts, pools, system info, disks and
+# their temperatures, then rewrites state.json. Safe to run by hand; it is the
+# whole read path of the plugin. `connection` describes the alert request,
+# because alerts are the thing the bar exists to report, and the other sections
+# fail independently.
 set -uo pipefail
 
 TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -85,13 +86,16 @@ previous=$(tn_read_json "$TN_STATE_FILE" '{}')
 seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
 meta=$(tn_read_json "$TN_META_FILE" '{}')
 
-# A cache entry is reusable only when it names a fetch time and carries data.
-# A missing, empty, or unparsable meta.json reads as `{}` here and is always
-# stale, so the system is fetched rather than silently reported as null.
-# --force-meta short-circuits the age check on top of a normal poll.
+# A cache entry is reusable only when all three sections are present and the
+# system fetch time is fresh. A missing, empty, or unparsable meta.json reads
+# as `{}` here and is always stale, so nothing is silently reported as null.
+# An older meta.json without the disk keys is stale once, refetches once, and
+# self-heals. --force-meta short-circuits the age check on top of a normal
+# poll.
 meta_is_stale() {
   ((FORCE_META)) && return 0
-  jq -e '.system.data != null' <<<"$meta" >/dev/null 2>&1 || return 0
+  jq -e '(.system.data != null) and (.disks.rows != null) and (.diskTemps.map != null)' \
+    <<<"$meta" >/dev/null 2>&1 || return 0
   local fetched then_epoch now_epoch
   fetched=$(jq -r '.system.fetchedAt // ""' <<<"$meta")
   [[ -n $fetched ]] || return 0
@@ -117,7 +121,7 @@ warnings='[]'
 # The shape every failure path emits for the sections, so a failed request
 # contributes no rows and no fabricated zeroes.
 default_payload() {
-  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[]}' >"$WORK/payload.json"
+  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[],"disks":[]}' >"$WORK/payload.json"
 }
 
 warn_section() {
@@ -150,18 +154,25 @@ expect_shape() {
 
 # One endpoint into its own body file. On any failure the file is null and the
 # section is named in `warnings`; on success the validated body is copied,
-# because tn_http_get reuses the same TN_BODY path on every call.
+# because the request helper reuses the same TN_BODY path on every call.
+# `method` and `payload` let the two POST-only disk routes share this one
+# failure path; GET stays the default so existing calls are untouched.
 fetch() {
-  local section=$1 path=$2 out=$3 rc shape
-  tn_http_get "$base" "$path" "$key" "$timeout"
+  local section=$1 path=$2 out=$3 method=${4:-GET} payload=${5:-} rc shape
+  if [[ $method == GET ]]; then
+    tn_http_get "$base" "$path" "$key" "$timeout"
+  else
+    tn_http_request "$method" "$base" "$path" "$key" "$timeout" "$payload"
+  fi
   rc=$TN_CURL_RC
   S_ERR=$(tn_classify)
-  # A healthy alert/list and pool is always a JSON array; system/info is a
-  # non-empty object. A 200 carrying `{}` is a route that answered without
-  # data, not a quiet NAS.
+  # A healthy alert/list, pool and disk/details is always a JSON array;
+  # system/info is a non-empty object, and so is disk/temperatures (an empty
+  # map is a NAS that answered with no readings, not a failed route).
   case $section in
-    alert|pool) shape='type == "array"' ;;
-    system)     shape='type == "object" and (length > 0)' ;;
+    alert|pool|disk) shape='type == "array"' ;;
+    system)          shape='type == "object" and (length > 0)' ;;
+    diskTemp)        shape='type == "object"' ;;
   esac
   expect_shape "$TN_BODY" "$shape"
   if [[ -n $S_ERR ]]; then
@@ -183,6 +194,10 @@ attempted=0
 normalize_ok=1
 system_fetched=0
 system_ok=0
+disks_fetched=0
+disks_ok=0
+disk_temps_fetched=0
+disk_temps_ok=0
 default_payload
 
 if [[ -n $config_error || -z $instance ]]; then
@@ -212,14 +227,35 @@ else
     # A failed pool call is named in `warnings`, which `pools_ok` reads below,
     # so it cannot read as every pool having gone or come back.
 
-    # /system/info is slow-moving and rides the meta cache. On reuse the cached
-    # normalized object is mapped back to the raw shape normalize.jq reads, so
-    # exactly one normalizer still owns the shape. A forced or lapsed fetch goes
-    # through `fetch`, which on failure names the section and writes null.
+    # /system/info, disk/details and disk/temperatures are slow-moving and ride
+    # the meta cache. On reuse the cached raw bodies are copied back into
+    # $WORK, so exactly one normalizer still owns the shape on both paths. A
+    # forced or lapsed fetch goes through `fetch`, which on failure names the
+    # section and writes null.
     if meta_is_stale; then
       fetch system "/api/v2.0/system/info" "$WORK/system.json"
       system_fetched=1
       [[ -z $S_ERR ]] && system_ok=1
+
+      # disk/details answers a plain array for {"type":"USED"}. The
+      # temperatures request is built from the names it returned, so a failed
+      # details fetch has nothing to ask about and skips it entirely.
+      printf '%s\n' '{"type":"USED"}' >"$WORK/disk-details-request.json"
+      fetch disk "/api/v2.0/disk/details" "$WORK/disks.json" \
+        POST "$WORK/disk-details-request.json"
+      disks_fetched=1
+      [[ -z $S_ERR ]] && disks_ok=1
+      # normalize.jq always receives this slurpfile, so a skipped temperatures
+      # request leaves an explicit null rather than a missing file.
+      printf 'null\n' >"$WORK/disk-temps.json"
+      if [[ -z $S_ERR ]]; then
+        jq -c '{name: [.[].name], include_thresholds: true}' "$WORK/disks.json" \
+          >"$WORK/disk-temps-request.json"
+        fetch diskTemp "/api/v2.0/disk/temperatures" "$WORK/disk-temps.json" \
+          POST "$WORK/disk-temps-request.json"
+        disk_temps_fetched=1
+        [[ -z $S_ERR ]] && disk_temps_ok=1
+      fi
     else
       jq -c -n --argjson s "$(jq -c '.system.data // null' <<<"$meta")" '
         { hostname:       ($s.hostname // ""),
@@ -228,12 +264,16 @@ else
           cores:          ($s.cores // null),
           physmem:        ($s.physmem // null),
           loadavg:        ($s.loadavg // null) }' >"$WORK/system.json"
+      jq -c '.disks.rows // []' <<<"$meta" >"$WORK/disks.json"
+      jq -c '.diskTemps.map // {}' <<<"$meta" >"$WORK/disk-temps.json"
     fi
 
     if ! jq -n -f "$TN_PLUGIN_DIR/share/normalize.jq" \
            --slurpfile system "$WORK/system.json" \
            --slurpfile alerts "$WORK/alerts.json" \
            --slurpfile pools  "$WORK/pools.json" \
+           --slurpfile disks  "$WORK/disks.json" \
+           --slurpfile diskTemps "$WORK/disk-temps.json" \
            --arg now "$now" >"$WORK/payload.json" 2>/dev/null; then
       normalize_ok=0
       default_payload
@@ -431,16 +471,34 @@ if [[ -z $error ]]; then
   printf '%s\n' "$seen" | tn_write_json "$TN_SEEN_FILE"
 fi
 
-# The meta cache advances only when this poll actually refetched the system and
-# normalized it. A reuse writes nothing, and a failed fetch leaves the previous
-# meta.json byte-for-byte intact, so state.system reports the failure while the
-# last good copy survives for the next poll.
-if ((system_fetched && system_ok && normalize_ok)); then
+# The meta cache advances only when this poll refetched all three slow
+# sections and normalized them. A reuse writes nothing, and any failed section
+# leaves the previous meta.json byte-for-byte intact, so state reports the
+# failure while the last good copy survives for the next poll.
+if ((system_fetched && system_ok && disks_fetched && disks_ok \
+     && disk_temps_fetched && disk_temps_ok && normalize_ok)); then
   meta=$(jq -c -n --argjson meta "$meta" --arg now "$now" \
-    --slurpfile payload "$WORK/payload.json" '
+    --slurpfile payload "$WORK/payload.json" \
+    --slurpfile disks "$WORK/disks.json" \
+    --slurpfile diskTemps "$WORK/disk-temps.json" '
     ($payload[0].system) as $s
     | if $s == null then $meta
-      else $meta + { system: { fetchedAt: $now, data: $s } } end')
+      else $meta + {
+        system: { fetchedAt: $now, data: $s },
+        # Only the fields the plugin consumes are cached, under their wire
+        # names. disk/details also carries serials, identifiers and lunids;
+        # those never leave the NAS.
+        disks: {
+          fetchedAt: $now,
+          rows: [ $disks[0][]? | { name:          (.name // null),
+                                   model:         (.model // null),
+                                   type:          (.type // null),
+                                   size:          (.size // null),
+                                   imported_zpool: (.imported_zpool // null),
+                                   bus:           (.bus // null) } ]
+        },
+        diskTemps: { fetchedAt: $now, map: $diskTemps[0] }
+      } end')
   printf '%s\n' "$meta" | tn_write_json "$TN_META_FILE"
 fi
 
@@ -476,6 +534,7 @@ jq -n \
       counts: $p.counts,
       alerts: $p.alerts,
       pools: $p.pools,
+      disks: $p.disks,
       warnings: $w
     }' >"$WORK/state.json"
 

@@ -1,10 +1,15 @@
-# Normalizes the three TrueNAS REST v2.0 bodies a poll reads into the stable
-# shape state.json carries. Input: --slurpfile system, --slurpfile alerts and
-# --slurpfile pools, each holding one response body (or null when that request
-# failed), plus --arg now. `connection` is built by the poll, not here, because
-# it is about the poll's own reachability rather than the NAS's contents.
+# Normalizes the TrueNAS REST v2.0 bodies a poll reads into the stable shape
+# state.json carries. Input: --slurpfile system, --slurpfile alerts,
+# --slurpfile pools, --slurpfile disks and --slurpfile diskTemps, each holding
+# one response body (or null when that request failed), plus --arg now.
+# `connection` is built by the poll, not here, because it is about the poll's
+# own reachability rather than the NAS's contents.
 
-def num: tonumber? // null;
+# A number written with a trailing zero (`38.0`) survives jq 1.7+ exactly as
+# the wire wrote it, so two builds answering the same temperature would read as
+# different text. `+ 0` canonicalizes it; null is zero in jq's arithmetic, so
+# absence is passed through before the addition.
+def num: (tonumber? // null) | if . == null then null else . + 0 end;
 
 # TrueNAS writes a datetime as an ISO string on some routes and as Mongo's
 # {"$date": <epoch_ms>} on others. Both become an ISO string, or null; a raw
@@ -118,14 +123,50 @@ def system_norm:
                     | if type == "array" then map(num) else null end)
   };
 
+# disk/temperatures answers `[tempC, criticalC]` when thresholds were asked
+# for, and a bare number for a disk that reports none. Both become that pair;
+# an absent entry is [null, null], never [0, 0].
+def temp_pair:
+  if type == "array" then
+    [((.[0]? // null) | num), ((.[1]? // null) | num)]
+  else [num, null] end;
+
+# The one place tempState is decided. A missing temperature or threshold is
+# unknown, never ok, and the warning band starts ten degrees below critical.
+def temp_state:
+  if .[0] == null or .[1] == null then "unknown"
+  elif .[0] >= .[1]              then "critical"
+  elif .[0] >= .[1] - 10         then "warning"
+  else "ok" end;
+
+# A disk row plus the raw temperatures map. `pool` is "" when the disk is not
+# imported; size and temperatures are null when unknown, never 0.
+def disk_norm($temps):
+  (.name // "") as $name
+  | (($temps[$name] // null) | temp_pair) as $t
+  | {
+      name:          $name,
+      model:         (.model // ""),
+      type:          (.type // ""),
+      size:          ((.size? // null) | num),
+      pool:          (.imported_zpool // ""),
+      bus:           (.bus // ""),
+      tempC:         $t[0],
+      tempCriticalC: $t[1],
+      tempState:     ($t | temp_state)
+    };
+
 def alert_rank:
   { "critical": 0, "error": 1, "warning": 2, "notice": 3, "info": 4 }[.] // 5;
 
 ($system[0]) as $sys
 | ($alerts[0] // []) as $alerts_raw
 | ($pools[0]  // []) as $pools_raw
+| ($disks[0]  // []) as $disks_raw
+| ($diskTemps[0] // {}) as $temps
 | ([ $alerts_raw[]? | alert_norm ]) as $alert_rows
 | ([ $pools_raw[]?  | pool_norm  ]) as $pool_rows
+| ([ $disks_raw[]?  | disk_norm($temps) ]) as $disk_rows
 # Dismissed alerts stay in `alerts`, flagged, because a row that disappears when
 # it is dismissed is how a person loses track of what they silenced. They leave
 # `counts`, which is what the bar reads, and are counted as `dismissed` there.
@@ -142,5 +183,6 @@ def alert_rank:
       dismissed: ([ $alert_rows[] | select(.dismissed) ] | length)
     },
     alerts: ($alert_rows | sort_by([(.level | alert_rank), (.datetime // "")])),
-    pools:  $pool_rows
+    pools:  $pool_rows,
+    disks:  ($disk_rows | sort_by(.name))
   }
