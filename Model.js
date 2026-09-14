@@ -219,32 +219,6 @@ function appStateRank(state) {
   return 1;
 }
 
-// The worst service level across the rows: "warning" if anything is down,
-// "unknown" only when a row is blank and nothing is down, "" when all running.
-// A blank state is never a warning, and missing rows answer "".
-function worstServiceLevel(services) {
-  var list = arrayLike(services) ? services : [];
-  var unknown = false;
-  for (var i = 0; i < list.length; i++) {
-    var rank = serviceStateRank(list[i] && list[i].state);
-    if (rank === 1) return "warning";
-    if (rank === 2) unknown = true;
-  }
-  return unknown ? "unknown" : "";
-}
-
-// The same rule for apps, with the transitional states ranking as unknown.
-function worstAppLevel(apps) {
-  var list = arrayLike(apps) ? apps : [];
-  var unknown = false;
-  for (var i = 0; i < list.length; i++) {
-    var rank = appStateRank(list[i] && list[i].state);
-    if (rank === 1) return "warning";
-    if (rank === 2) unknown = true;
-  }
-  return unknown ? "unknown" : "";
-}
-
 // The down services, in input order, as a new list. A blank-state row is
 // unknown, not down, so it never appears here.
 function downServices(services) {
@@ -314,20 +288,6 @@ function linkStateText(state) {
   if (key === "LINK_STATE_UP") return "up";
   if (key === "LINK_STATE_DOWN") return "down";
   return "unknown";
-}
-
-// The worst interface link level across the rows: "warning" when any link is
-// down, "unknown" only when a link is unknown and none is down, "" when every
-// link is up. A blank link is never a warning, and missing rows answer "".
-function worstLinkLevel(network) {
-  var list = arrayLike(network) ? network : [];
-  var unknown = false;
-  for (var i = 0; i < list.length; i++) {
-    var rank = linkStateRank(list[i] && list[i].linkState);
-    if (rank === 1) return "warning";
-    if (rank === 2) unknown = true;
-  }
-  return unknown ? "unknown" : "";
 }
 
 // The down interfaces, in input order, as a new list. A blank or unknown link is
@@ -454,15 +414,6 @@ function failedCloudSync(rows) {
     if (cloudSyncFailed(list[i])) out.push(list[i]);
   }
   return out;
-}
-
-// The worst protection level across the state's two job-bearing sections:
-// "warning" when any replication or cloud sync task has failed, else "". A
-// missing state or a missing section is not a warning.
-function worstProtectionLevel(state) {
-  if (failedReplications(state && state.replication).length > 0) return "warning";
-  if (failedCloudSync(state && state.cloudSync).length > 0) return "warning";
-  return "";
 }
 
 // The label for a protection card: the name when it has one, else the dataset,
