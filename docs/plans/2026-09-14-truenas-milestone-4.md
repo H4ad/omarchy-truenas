@@ -546,9 +546,10 @@ git worktree remove /tmp/opencode/tn-m4-<slug> --force
 - After every merge run `./tests/run.sh` on master.
 
 **Definition of done for M4:** all suites green; `qmllint` 0 errors;
-`omarchy plugin validate` clean on a tree without `.agent`; `./scripts/dev-install
---restart`; against the live NAS `truenasctl poll` writes the four sections with
-real rows, the four `truenasctl` verbs print them, and the panel renders the
-Protection tab; the ERROR path of one run verb is exercised live (invalid id)
-and the happy path stays in tests (no real scrub, replication or cloud sync is
-started); `.agent/WORKLOG.md` and `docs/04-handoff.md` are updated.
+`omarchy plugin validate` clean on a tree without `.agent`; `./scripts/dev-install`
+installs the new version; against the live NAS `truenasctl poll` writes the four
+sections with real rows and the four `truenasctl` verbs print them; the ERROR
+path of a run verb is exercised live (an invalid id) and the happy path stays in
+tests (no real scrub, replication or cloud sync is started); `docs/02`,
+`docs/03`, the design, `README.md` and `.agent/WORKLOG.md` are updated. This is a
+hub-only repo: the milestone is committed on `master` and is not pushed here.
