@@ -103,6 +103,22 @@ Column {
     return parts.length ? "vdev errors: " + parts.join(" · ") : ""
   }
 
+  // Allocated, free and total, each drawn only when the poll reported it.
+  // `Model.formatBytes` answers "" for a missing or non-finite value, so an
+  // unknown free leaves the sentence short rather than reading as 0 B; a real
+  // numeric zero is a reported zero and prints "0 B".
+  function capacityText(pool) {
+    if (!pool || typeof pool !== "object") return ""
+    var parts = []
+    var used = Model.formatBytes(pool.allocated)
+    var free = Model.formatBytes(pool.free)
+    var total = Model.formatBytes(pool.size)
+    if (used !== "") parts.push(used + " used")
+    if (free !== "") parts.push(total !== "" ? free + " free of " + total : free + " free")
+    else if (total !== "") parts.push(total + " total")
+    return parts.join(" · ")
+  }
+
   Text {
     width: parent.width
     wrapMode: Text.WordWrap
@@ -126,6 +142,7 @@ Column {
       readonly property string statusWord: String(modelData.status || "unknown")
       readonly property string scrubLine: view.scrubText(modelData.scan)
       readonly property string vdevLine: view.vdevText(modelData.vdevErrors)
+      readonly property string capacityLine: view.capacityText(modelData)
 
       Item {
         width: parent.width
@@ -168,6 +185,16 @@ Column {
         accentColor: Color.accent
         urgentColor: view.panel.urgentColor
         fontFamily: view.panel.contentFontFamily
+      }
+
+      Text {
+        width: parent.width
+        wrapMode: Text.WordWrap
+        visible: poolCard.capacityLine !== ""
+        text: poolCard.capacityLine
+        color: view.panel.dimForeground
+        font.family: view.panel.contentFontFamily
+        font.pixelSize: Style.font.caption
       }
 
       Text {
