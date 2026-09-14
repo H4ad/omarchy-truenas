@@ -1,0 +1,32 @@
+[
+  {
+    "id": 2,
+    "pool": 2,
+    "pool_name": "Backup",
+    "threshold": 35,
+    "description": "",
+    "enabled": true,
+    "schedule": {
+      "minute": "0",
+      "hour": "0",
+      "dom": "*",
+      "month": "*",
+      "dow": "7"
+    }
+  },
+  {
+    "id": 1,
+    "pool": 1,
+    "pool_name": "storage",
+    "threshold": 35,
+    "description": "monthly scrub",
+    "enabled": true,
+    "schedule": {
+      "minute": "00",
+      "hour": "00",
+      "dom": "*",
+      "month": "*",
+      "dow": "7"
+    }
+  }
+]

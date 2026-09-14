@@ -1,0 +1,76 @@
+[
+  {
+    "id": 1,
+    "dataset": "storage",
+    "recursive": true,
+    "enabled": true,
+    "lifetime_value": 2,
+    "lifetime_unit": "DAY",
+    "exclude": [],
+    "naming_schema": "auto-hourly-%Y-%m-%d_%H-%M",
+    "allow_empty": true,
+    "vmware_sync": false,
+    "schedule": {
+      "minute": "0",
+      "hour": "*",
+      "dom": "*",
+      "month": "*",
+      "dow": "*",
+      "begin": "00:00",
+      "end": "23:59"
+    },
+    "state": {
+      "state": "FINISHED",
+      "datetime": { "$date": 1789358400000 },
+      "last_snapshot": "storage@auto-hourly-2026-09-14_01-00"
+    }
+  },
+  {
+    "id": 6,
+    "dataset": "Backup",
+    "recursive": true,
+    "enabled": true,
+    "lifetime_value": 3,
+    "lifetime_unit": "DAY",
+    "exclude": [],
+    "naming_schema": "auto-daily-%Y-%m-%d_%H-%M",
+    "allow_empty": false,
+    "vmware_sync": false,
+    "schedule": {
+      "minute": "0",
+      "hour": "0",
+      "dom": "*",
+      "month": "*",
+      "dow": "*",
+      "begin": "00:00",
+      "end": "23:59"
+    },
+    "state": { "state": "PENDING" }
+  },
+  {
+    "id": 7,
+    "dataset": "boot-pool",
+    "recursive": false,
+    "enabled": false,
+    "lifetime_value": 1,
+    "lifetime_unit": "WEEK",
+    "exclude": ["boot-pool/.system"],
+    "naming_schema": "auto-weekly-%Y-%m-%d_%H-%M",
+    "allow_empty": false,
+    "vmware_sync": false,
+    "schedule": {
+      "minute": "30",
+      "hour": "4",
+      "dom": "*",
+      "month": "*",
+      "dow": "7",
+      "begin": "04:30",
+      "end": "23:59"
+    },
+    "state": {
+      "state": "FINISHED",
+      "datetime": { "$date": 1789354800000 },
+      "last_snapshot": "boot-pool@auto-weekly-2026-09-13_04-30"
+    }
+  }
+]
