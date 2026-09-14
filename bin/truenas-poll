@@ -834,7 +834,7 @@ if [[ -z $error ]]; then
   printf '%s\n' "$seen" | tn_write_json "$TN_SEEN_FILE"
 fi
 
-# The meta cache advances only when this poll refetched all five slow
+# The meta cache advances only when this poll refetched all nine slow
 # sections and normalized them. A reuse writes nothing, and any failed section
 # leaves the previous meta.json byte-for-byte intact, so state reports the
 # failure while the last good copy survives for the next poll.

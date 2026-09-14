@@ -18,7 +18,7 @@ JSON
   printf '%s' "$WORK/alert-one.json"
 }
 
-# The seven endpoints every notification case needs. system carries no
+# The eleven endpoints every notification case needs. system carries no
 # notification and is canned throughout; the temperatures default to the cool
 # fixture so an alert or pool case cannot grow a disk toast by accident, and the
 # service and app lists default to the all-running fixtures so only a case that
