@@ -316,8 +316,15 @@ else
   # as a resolution, and would wipe a pool's last known state the same way.
   alert_warned=$(jq -r '[.[] | select(.section == "alert")] | length' <<<"$warnings")
   pool_warned=$(jq -r '[.[] | select(.section == "pool")] | length' <<<"$warnings")
+  disk_warned=$(jq -r '[.[] | select(.section == "disk")] | length' <<<"$warnings")
+  disk_temp_warned=$(jq -r '[.[] | select(.section == "diskTemp")] | length' <<<"$warnings")
   alerts_ok=$((normalize_ok == 1 && alert_warned == 0))
   pools_ok=$((normalize_ok == 1 && pool_warned == 0))
+  # `disks_ok` above is the fetch flag the meta gate reads; this is the
+  # notification gate. Either disk section failing means there is no disk
+  # answer worth recording: writing then would mark a hot disk unknown and
+  # replay it as hot on the next good poll.
+  disks_notify_ok=$((normalize_ok == 1 && disk_warned == 0 && disk_temp_warned == 0))
 
   levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
   renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
@@ -462,6 +469,73 @@ else
           })) as $next
       | $seen + { pools: $next }')
     [[ -n $seen_pools ]] && seen=$seen_pools
+  fi
+
+  if ((disks_notify_ok)); then
+    jq -c -n \
+      --slurpfile payload "$WORK/payload.json" \
+      --argjson seen "$seen" '
+      ($payload[0]) as $p
+      | ($seen.disks // {}) as $prev
+      | {
+          hot: [ ($p.disks // [])[] as $disk
+                 | ($prev[$disk.name] // null) as $old
+                 | select($disk.tempState == "warning"
+                          or $disk.tempState == "critical")
+                 | select($old == null
+                          or ($old.state != "warning" and $old.state != "critical"))
+                 | { name: $disk.name, state: $disk.tempState,
+                     tempC: $disk.tempC, tempCriticalC: $disk.tempCriticalC } ],
+          cooled: [ ($p.disks // [])[] as $disk
+                    | ($prev[$disk.name] // null) as $old
+                    | select($disk.tempState == "ok")
+                    | select($old != null
+                             and ($old.state == "warning" or $old.state == "critical"))
+                    | { name: $disk.name, state: $disk.tempState,
+                        tempC: $disk.tempC } ]
+        }' >"$WORK/disk-decisions.json"
+
+    while IFS= read -r d; do
+      [[ -n $d ]] || continue
+      sev=$(jq -r '.state' <<<"$d")
+      # The warning band starts ten degrees below critical, the rule
+      # share/normalize.jq decides tempState with; the row carries only the
+      # critical threshold, so the band start is derived here.
+      notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "$base" \
+        "Disk $(jq -r '.name' <<<"$d") is hot" \
+        "$(jq -r 'if .state == "critical"
+                  then "\(.tempC | round) °C, critical at \(.tempCriticalC | round) °C"
+                  else "\(.tempC | round) °C, warning at \(.tempCriticalC - 10 | round) °C"
+                  end' <<<"$d")"
+    done < <(jq -c '.hot[]' "$WORK/disk-decisions.json")
+
+    while IFS= read -r d; do
+      [[ -n $d ]] || continue
+      notify low "$GLYPH_OK" "$base" \
+        "Disk $(jq -r '.name' <<<"$d") cooled" \
+        "$(jq -r '"\(.tempC | round) °C"' <<<"$d")"
+    done < <(jq -c '.cooled[]' "$WORK/disk-decisions.json")
+
+    seen_disks=$(jq -c -n \
+      --argjson seen "$seen" \
+      --slurpfile payload "$WORK/payload.json" \
+      --slurpfile decisions "$WORK/disk-decisions.json" \
+      --arg now "$now" '
+      ($payload[0]) as $p
+      | ($decisions[0]) as $d
+      | ($seen.disks // {}) as $prev
+      | (reduce ($p.disks[]?) as $disk ({};
+          .[$disk.name] = {
+            state: $disk.tempState,
+            tempC: $disk.tempC,
+            lastNotifiedAt: (
+              if (($d.hot | map(.name) | index($disk.name)) != null)
+                 or (($d.cooled | map(.name) | index($disk.name)) != null)
+              then $now
+              else ($prev[$disk.name].lastNotifiedAt // $now) end)
+          })) as $next
+      | $seen + { disks: $next }')
+    [[ -n $seen_disks ]] && seen=$seen_disks
   fi
 fi
 
