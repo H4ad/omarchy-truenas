@@ -82,9 +82,11 @@ image, and the marketplace submission.
 
 ## Screenshot
 
-`preview.png` does not exist yet. It is a live screenshot of the finished bar
-item and popout, pending verification against a real NAS (Task 20, blocked on an
-API key). Do not add a placeholder: a doctored preview is worse than none.
+`preview.png` is a live screenshot of the bar item and the Health popout taken
+against a real TrueNAS (25.10.6) on 2026-09-13, during the milestone-1 live
+verification. It shows the Default bar variant (`3` active alerts and `6%` of the
+fullest pool) and real pool capacity. The disk serial in the alert text is
+cropped out on purpose. Regenerate it only from a real run.
 
 ## Explicitly out of scope
 
