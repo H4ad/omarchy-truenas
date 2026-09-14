@@ -66,6 +66,10 @@ function alert(level, datetime, uuid) {
   return { level: level, datetime: datetime, uuid: uuid };
 }
 
+function disk(name, tempC, tempCriticalC, tempState) {
+  return { name: name, tempC: tempC, tempCriticalC: tempCriticalC, tempState: tempState };
+}
+
 const ok = { ok: true };
 
 // A QVariantList reaches a plain JS function as an object with indexed members
@@ -109,6 +113,77 @@ check("the fullest pool wins",
 check("a real zero is a real zero",
   0, Model.capacityPct({ pools: [pool("storage", "ONLINE", 0)] }));
 check("a missing state is null", null, Model.capacityPct(null));
+
+test_case("tempStateRank");
+
+check("critical outranks warning",
+  true, Model.tempStateRank("critical") > Model.tempStateRank("warning"));
+check("warning outranks ok",
+  true, Model.tempStateRank("warning") > Model.tempStateRank("ok"));
+check("unknown ranks below ok",
+  true, Model.tempStateRank("unknown") < Model.tempStateRank("ok"));
+check("a state this file does not know ranks with unknown",
+  0, Model.tempStateRank("toasty"));
+check("a missing state ranks with unknown", 0, Model.tempStateRank(null));
+
+test_case("tempLevel");
+
+check("critical in any row is critical", "critical",
+  Model.tempLevel([disk("sda", 61, 60, "critical"), disk("sdb", 38, 60, "ok")]));
+check("warning is the worst when nothing is critical", "warning",
+  Model.tempLevel([disk("sda", 51, 60, "warning"), disk("sdb", 38, 60, "ok")]));
+check("all ok is no level", "", Model.tempLevel([disk("sda", 38, 60, "ok")]));
+check("unknown is not a level", "",
+  Model.tempLevel([disk("sda", null, null, "unknown")]));
+check("no rows is no level", "", Model.tempLevel([]));
+check("not a list is no level", "", Model.tempLevel(null));
+check("a blank is no level", "", Model.tempLevel(""));
+
+test_case("hottestTempC");
+
+check("the hottest known temperature wins", 42.85,
+  Model.hottestTempC([disk("sda", 38, 60, "ok"), disk("nvme0n1", 42.85, 78.85, "ok")]));
+check("a null temperature is skipped",
+  39, Model.hottestTempC([disk("sda", null, 60, "unknown"), disk("sdb", 39, 60, "ok")]));
+check("a blank temperature is skipped",
+  38, Model.hottestTempC([disk("sda", "", 60, "unknown"), disk("sdb", 38, 60, "ok")]));
+check("a NaN temperature is skipped",
+  38, Model.hottestTempC([disk("sda", NaN, 60, "unknown"), disk("sdb", 38, 60, "ok")]));
+check("no known temperature is null, never 0", null,
+  Model.hottestTempC([disk("sda", null, 60, "unknown")]));
+check("a real zero is a real zero", 0,
+  Model.hottestTempC([disk("sda", 0, 60, "ok")]));
+check("no rows is null", null, Model.hottestTempC([]));
+check("not a list is null", null, Model.hottestTempC(null));
+
+test_case("hotTempLabel");
+
+check("a fraction rounds to whole degrees", "43\u00B0",
+  Model.hotTempLabel([disk("sda", 42.85, 78.85, "ok")]));
+check("a whole degree stays whole", "54\u00B0",
+  Model.hotTempLabel([disk("sda", 54, 60, "warning")]));
+check("no known temperature is blank", "",
+  Model.hotTempLabel([disk("sda", null, 60, "unknown")]));
+check("not a list is blank", "", Model.hotTempLabel(null));
+
+test_case("formatTemp");
+
+check("a whole degree", "38 \u00B0C", Model.formatTemp(38.0));
+check("a fraction rounds to a whole degree", "43 \u00B0C", Model.formatTemp(42.85));
+check("null is unknown", "", Model.formatTemp(null));
+check("undefined is unknown", "", Model.formatTemp(undefined));
+check("a blank is unknown", "", Model.formatTemp(""));
+check("NaN is unknown", "", Model.formatTemp(NaN));
+check("Infinity is unknown", "", Model.formatTemp(Infinity));
+
+test_case("tempThresholdText");
+
+check("names the critical threshold", "critical at 60 \u00B0C",
+  Model.tempThresholdText({ tempCriticalC: 60 }));
+check("no threshold is blank", "", Model.tempThresholdText({ tempCriticalC: null }));
+check("a missing field is blank", "", Model.tempThresholdText({}));
+check("no disk is blank", "", Model.tempThresholdText(null));
+check("a blank disk is blank", "", Model.tempThresholdText(""));
 
 test_case("mode");
 
