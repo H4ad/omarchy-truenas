@@ -1,0 +1,28 @@
+[
+  {
+    "_note": "synthetic row: the live box has zero iSCSI targets, so this shape comes from the v25.10.5 iscsi.target.query reference",
+    "id": 1,
+    "name": "iqn.2005-10.org.freenas.ctl:target0",
+    "alias": "bulk",
+    "mode": "ISCSI",
+    "groups": [
+      { "portal": 1, "initiator": null, "authmethod": "NONE",
+        "auth": null, "auth_networks": [] }
+    ],
+    "rel_tgt_id": 1,
+    "iscsi_parameters": { "QueuedCommands": 128 }
+  },
+  {
+    "_note": "synthetic row: the live box has zero iSCSI targets, so this shape comes from the v25.10.5 iscsi.target.query reference",
+    "id": 2,
+    "name": "iqn.2005-10.org.freenas.ctl:target1",
+    "alias": null,
+    "mode": "BOTH",
+    "groups": [
+      { "portal": 1, "initiator": null, "authmethod": "CHAP",
+        "auth": 4, "auth_networks": [] }
+    ],
+    "rel_tgt_id": 2,
+    "iscsi_parameters": null
+  }
+]

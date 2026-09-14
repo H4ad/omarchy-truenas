@@ -161,15 +161,15 @@ previous=$(tn_read_json "$TN_STATE_FILE" '{}')
 seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
 meta=$(tn_read_json "$TN_META_FILE" '{}')
 
-# A cache entry is reusable only when all nine sections are present and the
+# A cache entry is reusable only when all thirteen sections are present and the
 # system fetch time is fresh. A missing, empty, or unparsable meta.json reads
 # as `{}` here and is always stale, so nothing is silently reported as null.
-# An older meta.json without the disk, service, app or protection keys is stale
-# once, refetches once, and self-heals. --force-meta short-circuits the age
-# check on top of a normal poll.
+# An older meta.json without the disk, service, app, protection or share keys is
+# stale once, refetches once, and self-heals. --force-meta short-circuits the
+# age check on top of a normal poll.
 meta_is_stale() {
   ((FORCE_META)) && return 0
-  jq -e '(.system.data != null) and (.disks.rows != null) and (.diskTemps.map != null) and (.services.rows != null) and (.apps.rows != null) and (.replication.rows != null) and (.cloudSync.rows != null) and (.snapshotTasks.rows != null) and (.scrubs.rows != null)' \
+  jq -e '(.system.data != null) and (.disks.rows != null) and (.diskTemps.map != null) and (.services.rows != null) and (.apps.rows != null) and (.replication.rows != null) and (.cloudSync.rows != null) and (.snapshotTasks.rows != null) and (.scrubs.rows != null) and (.smb.rows != null) and (.nfs.rows != null) and (.iscsi.rows != null) and (.network.rows != null)' \
     <<<"$meta" >/dev/null 2>&1 || return 0
   local fetched then_epoch now_epoch
   fetched=$(jq -r '.system.fetchedAt // ""' <<<"$meta")
@@ -196,7 +196,7 @@ warnings='[]'
 # The shape every failure path emits for the sections, so a failed request
 # contributes no rows and no fabricated zeroes.
 default_payload() {
-  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[],"disks":[],"services":[],"apps":[],"replication":[],"cloudSync":[],"snapshotTasks":[],"scrubs":[]}' >"$WORK/payload.json"
+  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[],"disks":[],"services":[],"apps":[],"replication":[],"cloudSync":[],"snapshotTasks":[],"scrubs":[],"shares":{"smb":[],"nfs":[],"iscsi":[]},"network":[]}' >"$WORK/payload.json"
 }
 
 warn_section() {
@@ -250,6 +250,8 @@ fetch() {
     service|app)     shape='type == "array" and all(.[]; type == "object")' ;;
     replication|cloudSync|snapshotTasks|scrubs) \
                      shape='type == "array" and all(.[]; type == "object")' ;;
+    smb|nfs|iscsi|network) \
+                     shape='type == "array" and all(.[]; type == "object")' ;;
     alert|pool|disk) shape='type == "array"' ;;
     system)          shape='type == "object" and (length > 0)' ;;
     diskTemp)        shape='type == "object"' ;;
@@ -290,6 +292,14 @@ snapshot_fetched=0
 snapshot_ok=0
 scrub_fetched=0
 scrub_ok=0
+smb_fetched=0
+smb_ok=0
+nfs_fetched=0
+nfs_ok=0
+iscsi_fetched=0
+iscsi_ok=0
+network_fetched=0
+network_ok=0
 default_payload
 
 if [[ -n $config_error || -z $instance ]]; then
@@ -359,6 +369,26 @@ else
       app_fetched=1
       [[ -z $S_ERR ]] && app_ok=1
 
+      # Shares and interfaces are read whole and filtered client-side. The three
+      # share types do not share a route or a field vocabulary: SMB and NFS live
+      # under /sharing, iSCSI under /iscsi, and the interface collection at
+      # /interface. Each fails independently of the others.
+      fetch smb "/api/v2.0/sharing/smb" "$WORK/smb.json"
+      smb_fetched=1
+      [[ -z $S_ERR ]] && smb_ok=1
+
+      fetch nfs "/api/v2.0/sharing/nfs" "$WORK/nfs.json"
+      nfs_fetched=1
+      [[ -z $S_ERR ]] && nfs_ok=1
+
+      fetch iscsi "/api/v2.0/iscsi/target" "$WORK/iscsi.json"
+      iscsi_fetched=1
+      [[ -z $S_ERR ]] && iscsi_ok=1
+
+      fetch network "/api/v2.0/interface" "$WORK/network.json"
+      network_fetched=1
+      [[ -z $S_ERR ]] && network_ok=1
+
       # Protection tasks are read whole and filtered client-side; each fails
       # independently of the disks. /cloudsync is normally empty. The scrub
       # route carries no run state, only the task schedule.
@@ -393,6 +423,10 @@ else
       jq -c '.cloudSync.rows // []' <<<"$meta" >"$WORK/cloudsync.json"
       jq -c '.snapshotTasks.rows // []' <<<"$meta" >"$WORK/snapshot-tasks.json"
       jq -c '.scrubs.rows // []' <<<"$meta" >"$WORK/scrubs.json"
+      jq -c '.smb.rows // []' <<<"$meta" >"$WORK/smb.json"
+      jq -c '.nfs.rows // []' <<<"$meta" >"$WORK/nfs.json"
+      jq -c '.iscsi.rows // []' <<<"$meta" >"$WORK/iscsi.json"
+      jq -c '.network.rows // []' <<<"$meta" >"$WORK/network.json"
     fi
 
     if ! jq -n -f "$TN_PLUGIN_DIR/share/normalize.jq" \
@@ -407,6 +441,10 @@ else
            --slurpfile cloudSync "$WORK/cloudsync.json" \
            --slurpfile snapshotTasks "$WORK/snapshot-tasks.json" \
            --slurpfile scrubs "$WORK/scrubs.json" \
+           --slurpfile smb "$WORK/smb.json" \
+           --slurpfile nfs "$WORK/nfs.json" \
+           --slurpfile iscsi "$WORK/iscsi.json" \
+           --slurpfile network "$WORK/network.json" \
            --arg now "$now" >"$WORK/payload.json" 2>/dev/null; then
       normalize_ok=0
       default_payload
@@ -834,7 +872,7 @@ if [[ -z $error ]]; then
   printf '%s\n' "$seen" | tn_write_json "$TN_SEEN_FILE"
 fi
 
-# The meta cache advances only when this poll refetched all nine slow
+# The meta cache advances only when this poll refetched all thirteen slow
 # sections and normalized them. A reuse writes nothing, and any failed section
 # leaves the previous meta.json byte-for-byte intact, so state reports the
 # failure while the last good copy survives for the next poll.
@@ -844,7 +882,9 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
      && replication_fetched && replication_ok \
      && cloudsync_fetched && cloudsync_ok \
      && snapshot_fetched && snapshot_ok \
-     && scrub_fetched && scrub_ok)); then
+     && scrub_fetched && scrub_ok \
+     && smb_fetched && smb_ok && nfs_fetched && nfs_ok \
+     && iscsi_fetched && iscsi_ok && network_fetched && network_ok)); then
   meta=$(jq -c -n --argjson meta "$meta" --arg now "$now" \
     --slurpfile payload "$WORK/payload.json" \
     --slurpfile disks "$WORK/disks.json" \
@@ -854,7 +894,11 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
     --slurpfile replication "$WORK/replication.json" \
     --slurpfile cloudSync "$WORK/cloudsync.json" \
     --slurpfile snapshotTasks "$WORK/snapshot-tasks.json" \
-    --slurpfile scrubs "$WORK/scrubs.json" '
+    --slurpfile scrubs "$WORK/scrubs.json" \
+    --slurpfile smb "$WORK/smb.json" \
+    --slurpfile nfs "$WORK/nfs.json" \
+    --slurpfile iscsi "$WORK/iscsi.json" \
+    --slurpfile network "$WORK/network.json" '
     ($payload[0].system) as $s
     | if $s == null then $meta
       else $meta + {
@@ -1013,6 +1057,63 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
                                    begin:  (.schedule.begin // null),
                                    end:    (.schedule.end // null) }
                                else null end) } ]
+        },
+        # Shares. Each row keeps only the fields its normalizer reads, under the
+        # wire names. The SMB audit and options blobs, the NFS hosts, networks
+        # and security lists, and the iSCSI groups and iscsi_parameters never
+        # reach disk.
+        smb: {
+          fetchedAt: $now,
+          rows: [ $smb[0][]? | {
+                    id:       (.id? // null),
+                    name:     (.name // null),
+                    path:     (.path // null),
+                    enabled:  (.enabled == true),
+                    locked:   (.locked == true),
+                    readonly: (.readonly == true),
+                    purpose:  (.purpose // null),
+                    comment:  (.comment // null) } ]
+        },
+        nfs: {
+          fetchedAt: $now,
+          rows: [ $nfs[0][]? | {
+                    id:      (.id? // null),
+                    path:    (.path // null),
+                    enabled: (.enabled == true),
+                    locked:  (.locked == true),
+                    ro:      (.ro == true),
+                    comment: (.comment // null) } ]
+        },
+        iscsi: {
+          fetchedAt: $now,
+          rows: [ $iscsi[0][]? | {
+                    id:    (.id? // null),
+                    name:  (.name // null),
+                    alias: (.alias // null),
+                    mode:  (.mode // null) } ]
+        },
+        # The network row keeps the nested state object reduced to the four keys
+        # the normalizer reads, because iface_norm reads state.link_state on both
+        # the fetch and the reuse path. Every MAC (link_address,
+        # permanent_link_address, hardware_link_address) and every other state
+        # key is dropped before the write; the aliases keep only type, address
+        # and netmask, so broadcast goes too.
+        network: {
+          fetchedAt: $now,
+          rows: [ $network[0][]? | {
+                    name: (.name // null),
+                    type: (.type // null),
+                    state: (if (.state? | type) == "object" then
+                              { link_state:           (.state.link_state // null),
+                                media_type:           (.state.media_type // null),
+                                active_media_subtype: (.state.active_media_subtype // null),
+                                aliases: [ (.state.aliases? // [])[]?
+                                           | if type == "object" then
+                                               { type:    (.type // null),
+                                                 address: (.address // null),
+                                                 netmask: (.netmask // null) }
+                                             else empty end ] }
+                            else null end) } ]
         }
       } end')
   printf '%s\n' "$meta" | tn_write_json "$TN_META_FILE"
@@ -1057,6 +1158,8 @@ jq -n \
       cloudSync: $p.cloudSync,
       snapshotTasks: $p.snapshotTasks,
       scrubs: $p.scrubs,
+      shares: $p.shares,
+      network: $p.network,
       warnings: $w
     }' >"$WORK/state.json"
 

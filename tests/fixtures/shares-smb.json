@@ -1,0 +1,44 @@
+[
+  {
+    "id": 3,
+    "purpose": "DEFAULT_SHARE",
+    "name": "backup",
+    "path": "/mnt/storage/backup",
+    "enabled": true,
+    "comment": "backups",
+    "readonly": false,
+    "browsable": true,
+    "access_based_share_enumeration": false,
+    "locked": false,
+    "audit": { "enable": false, "watch_list": [], "ignore_list": [] },
+    "options": { "aapl_name_mangling": false, "hostsallow": [], "hostsdeny": [] }
+  },
+  {
+    "id": 1,
+    "purpose": "DEFAULT_SHARE",
+    "name": "default",
+    "path": "/mnt/storage/default",
+    "enabled": true,
+    "comment": "",
+    "readonly": false,
+    "browsable": true,
+    "access_based_share_enumeration": false,
+    "locked": false,
+    "audit": { "enable": false, "watch_list": [], "ignore_list": [] },
+    "options": { "aapl_name_mangling": false, "hostsallow": [], "hostsdeny": [] }
+  },
+  {
+    "id": 2,
+    "purpose": "DEFAULT_SHARE",
+    "name": "media",
+    "path": "/mnt/storage/media",
+    "enabled": false,
+    "comment": "media library",
+    "readonly": true,
+    "browsable": false,
+    "access_based_share_enumeration": false,
+    "locked": false,
+    "audit": { "enable": false, "watch_list": [], "ignore_list": [] },
+    "options": { "aapl_name_mangling": false, "hostsallow": [], "hostsdeny": [] }
+  }
+]

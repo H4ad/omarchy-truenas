@@ -1,0 +1,46 @@
+[
+  {
+    "name": "enp4s0",
+    "type": "PHYSICAL",
+    "description": "",
+    "fake": false,
+    "id": "enp4s0",
+    "ipv4_dhcp": false,
+    "ipv6_auto": false,
+    "mtu": 9000,
+    "aliases": [
+      { "type": "INET", "address": "192.0.2.10", "netmask": 24 }
+    ],
+    "state": {
+      "name": "enp4s0",
+      "orig_name": "enp4s0",
+      "description": "enp4s0",
+      "cloned": false,
+      "mtu": 9000,
+      "flags": ["UP", "BROADCAST", "RUNNING", "MULTICAST", "LOWER_UP"],
+      "nd6_flags": [],
+      "capabilities": [],
+      "link_state": "LINK_STATE_UP",
+      "media_type": "Ethernet",
+      "media_subtype": "autoselect",
+      "active_media_type": "Ethernet",
+      "active_media_subtype": "1000Mb/s Twisted Pair",
+      "supported_media": ["1000baseT/Full", "Autoneg"],
+      "media_options": null,
+      "link_address": "02:00:00:00:00:01",
+      "permanent_link_address": "02:00:00:00:00:01",
+      "hardware_link_address": "02:00:00:00:00:01",
+      "rx_queues": 1,
+      "tx_queues": 1,
+      "aliases": [
+        { "type": "INET", "address": "192.0.2.10", "netmask": 24,
+          "broadcast": "192.0.2.255" },
+        { "type": "INET6", "address": "2001:db8::10", "netmask": 64 }
+      ],
+      "vrrp_config": null,
+      "ports": [],
+      "xmit_hash_policy": null,
+      "lacpdu_rate": null
+    }
+  }
+]
