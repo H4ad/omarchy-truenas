@@ -19,7 +19,7 @@ Single NAS. Full control (reads plus writes). One instance, one API key.
 Sections in v1: System, Pools, Alerts, Disks, Apps & Services, Protection
 (replication / cloud-sync / snapshots / scrub), Shares & Network, Jobs.
 Notifications for: new/cleared alerts, pool state changes, task finished,
-disk temp/SMART, app/service down, update available.
+disk temperature, app/service down, update available.
 
 ## References
 
@@ -91,7 +91,7 @@ The API allows roughly 20 auth / unauthenticated requests per 60 s, then a
 every pollSeconds (floor 15, default 30):
     alert/list · pool · core/get_jobs
 every ~300s (META_MAX_AGE):
-    system/info · disk · disk/temperatures · smart/test/results
+    system/info · disk/details · disk/temperatures
     service · app · replication · cloudsync · pool/snapshottask
     pool/scrub · sharing/{smb,nfs,iscsi,webdav} · smb/status
     network/interface · update
@@ -271,7 +271,7 @@ reads the key on stdin; `config list` reports that a key is set, never its value
 
 1. Skeleton, manifest, poll, config/credentials, `truenasctl test`, Health,
    Pools, Alerts, bar variants, alert + pool notifications.
-2. Disks + temp/SMART.
+2. Disks + temperatures.
 3. Apps + Services + writes.
 4. Protection + run-now writes.
 5. Shares + Network.

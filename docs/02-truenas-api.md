@@ -160,8 +160,8 @@ queued process, behind a `ConfirmAction` for dismiss; see the design doc.
 
 ## Milestone 2: disks and temperatures
 
-Both disk routes are POST-only. Verified against the live 25.10.6 on
-2026-09-13:
+`disk/temperatures` is POST-only (a GET answers `405`); `disk/details` is used
+as a POST here. Verified against the live 25.10.6 on 2026-09-13:
 
 | Purpose | Method | Path | Body | Observed answer |
 | --- | --- | --- | --- | --- |
@@ -238,8 +238,9 @@ zero.
 ### A 200 is not success until the body has the promised shape
 
 A route that does not exist can still answer `200` with HTML or an empty object.
-`bin/truenas-poll` `expect_shape` checks `alert/list` and `pool` are arrays and
-`system/info` is a non-empty object after the request succeeds, and treats a
+`bin/truenas-poll` `expect_shape` checks `alert/list`, `pool` and
+`disk/details` are arrays, `system/info` is a non-empty object and
+`disk/temperatures` an object after the request succeeds, and treats a
 wrong-shaped body as a section failure. Trusting the status code alone would
 report a healthy NAS with zero alerts, which is the one lie that matters.
 
