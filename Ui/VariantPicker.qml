@@ -34,10 +34,18 @@ Column {
 
   signal picked(string variant)
 
+  // Every field the text and chart variants read, so each row previews the real
+  // renderer on live-shaped numbers instead of blank.
   readonly property var sampleView: ({
-    mode: "firing", alertCount: 3, capacityText: "71%",
+    mode: "firing", alertCount: 3,
+    counts: { critical: 0, error: 2, warning: 1, notice: 0, info: 1 },
+    capacityText: "71%", capacityFill: 4,
     worstPool: "DEGRADED", worstLevel: "warning",
-    tempText: "54\u00B0", tempLevel: "warning"
+    tempText: "54\u00B0", tempLevel: "warning",
+    downTotal: 1, protectionCount: 1, uptimeText: "up 18h",
+    poolDots: [{ severity: "" }, { severity: "" }, { severity: "warning" }],
+    diskDots: [{ severity: "warning" }, { severity: "" }, { severity: "" }],
+    sparkColumns: [0.2, 0.35, 0.3, 0.6, 0.55, 0.8]
   })
   readonly property var sampleGlyphs: ({
     main: Model.glyphFor("firing", ({ warning: 1 })),
@@ -96,6 +104,10 @@ Column {
       readonly property bool selected: root.value === modelData
       readonly property var segments: BarVariants.segmentsFor(
         modelData, root.previewView, root.previewGlyphs)
+      // A chart variant prints no text body, so the preview draws the same shape
+      // the bar draws (cells, squares, columns) through the same chart spec.
+      readonly property string chartKind: BarVariants.chartKind(modelData)
+      readonly property var chart: BarVariants.chartFor(modelData, root.previewView)
 
       width: parent.width
       implicitHeight: Math.max(name.implicitHeight, blurb.implicitHeight, preview.implicitHeight)
@@ -137,6 +149,7 @@ Column {
 
       Row {
         id: preview
+        visible: row.chartKind === ""
         anchors.right: parent.right
         anchors.rightMargin: Style.space(3)
         anchors.verticalCenter: parent.verticalCenter
@@ -152,6 +165,73 @@ Column {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             renderType: Text.NativeRendering
+          }
+        }
+      }
+
+      // The chart preview: cells for CapacityBar, one square per dot for Pools and
+      // DiskHeat, one column per sample for Sparkline. Drawn the same way the bar
+      // draws them so the preview and the bar cannot disagree.
+      Row {
+        id: chartPreview
+        visible: row.chartKind !== "" && row.chart !== null
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(3)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.spaceReal(2)
+
+        Repeater {
+          model: row.chartKind === "bar" && row.chart ? row.chart.total : 0
+
+          Rectangle {
+            required property int index
+            width: Style.spaceReal(4)
+            height: Style.spaceReal(8)
+            radius: 1
+            color: index < row.chart.filled
+              ? root.colorForSeverity(row.chart.severity)
+              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+          }
+        }
+
+        Text {
+          visible: row.chartKind === "bar" && row.chart !== null
+          text: row.chart ? row.chart.label : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Repeater {
+          model: (row.chartKind === "dots" || row.chartKind === "heat") && row.chart
+            ? row.chart.items.length : 0
+
+          Rectangle {
+            required property int index
+            width: Style.spaceReal(5)
+            height: Style.spaceReal(5)
+            radius: 1
+            color: root.colorForSeverity(row.chart.items[index].severity)
+          }
+        }
+
+        Repeater {
+          model: row.chartKind === "spark" && row.chart ? row.chart.columns.length : 0
+
+          Item {
+            required property int index
+            width: Style.spaceReal(2)
+            height: Style.spaceReal(10)
+
+            Rectangle {
+              anchors.bottom: parent.bottom
+              width: parent.width
+              height: Style.spaceReal(2)
+                + (row.chart.columns[index] === null || row.chart.columns[index] === undefined
+                   ? 0 : Number(row.chart.columns[index]) * Style.spaceReal(8))
+              radius: 1
+              color: root.colorForSeverity(row.chart.severity)
+            }
           }
         }
       }
