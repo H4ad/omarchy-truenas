@@ -185,6 +185,96 @@ function tempThresholdText(disk) {
   return text === "" ? "" : "critical at " + text;
 }
 
+// Service states, worst first. RUNNING is healthy; a blank state is unknown; any
+// other state is a real problem the view calls out. Case-insensitive because the
+// wire says RUNNING today and the plugin must not break if it says Running.
+function serviceStateRank(state) {
+  var key = String(state || "").toUpperCase();
+  if (key === "RUNNING") return 0;
+  if (key === "") return 2;
+  return 1;
+}
+
+// App states, worst first. DEPLOYING, STARTING and STOPPING are transitional,
+// like blank, and must never look like a down app: the poller reads the NAS
+// back and the next poll catches up. Everything else that is not RUNNING is
+// down.
+function appStateRank(state) {
+  var key = String(state || "").toUpperCase();
+  if (key === "RUNNING") return 0;
+  if (key === "" || key === "DEPLOYING" || key === "STARTING" || key === "STOPPING") return 2;
+  return 1;
+}
+
+// The worst service level across the rows: "warning" if anything is down,
+// "unknown" only when a row is blank and nothing is down, "" when all running.
+// A blank state is never a warning, and missing rows answer "".
+function worstServiceLevel(services) {
+  var list = arrayLike(services) ? services : [];
+  var unknown = false;
+  for (var i = 0; i < list.length; i++) {
+    var rank = serviceStateRank(list[i] && list[i].state);
+    if (rank === 1) return "warning";
+    if (rank === 2) unknown = true;
+  }
+  return unknown ? "unknown" : "";
+}
+
+// The same rule for apps, with the transitional states ranking as unknown.
+function worstAppLevel(apps) {
+  var list = arrayLike(apps) ? apps : [];
+  var unknown = false;
+  for (var i = 0; i < list.length; i++) {
+    var rank = appStateRank(list[i] && list[i].state);
+    if (rank === 1) return "warning";
+    if (rank === 2) unknown = true;
+  }
+  return unknown ? "unknown" : "";
+}
+
+// The down services, in input order, as a new list. A blank-state row is
+// unknown, not down, so it never appears here.
+function downServices(services) {
+  var list = arrayLike(services) ? services : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (serviceStateRank(list[i] && list[i].state) === 1) out.push(list[i]);
+  }
+  return out;
+}
+
+// The same for apps: only the real down states, transitional ones excluded.
+function downApps(apps) {
+  var list = arrayLike(apps) ? apps : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (appStateRank(list[i] && list[i].state) === 1) out.push(list[i]);
+  }
+  return out;
+}
+
+// How many rows carry an update. A non-list counts zero because the caller
+// asked how many of these rows need one and there are no rows; a row whose flag
+// is missing or not exactly true is not counted.
+function appsUpgradeable(apps) {
+  var list = arrayLike(apps) ? apps : [];
+  var count = 0;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].upgradeAvailable === true) count += 1;
+  }
+  return count;
+}
+
+// The label for an app card: the title when it has one, else the name, else "".
+// Never "undefined": a row missing both fields reads as blank, not the word.
+function appLabel(app) {
+  var title = app && app.title;
+  if (title !== null && title !== undefined && String(title) !== "") return String(title);
+  var name = app && app.name;
+  if (name !== null && name !== undefined && String(name) !== "") return String(name);
+  return "";
+}
+
 function hasAlerts(state) {
   var counts = state && state.counts;
   if (counts && typeof counts.total === "number") return counts.total > 0;
