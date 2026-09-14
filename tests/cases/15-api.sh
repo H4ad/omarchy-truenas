@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# Task 16: bin/truenas-api. The two alert writes the view can make, and the
-# proof that the key travels the way it does everywhere else: on stdin to curl,
-# never in argv, and so never in the method, payload or request logs. The stub
-# curls are in tests/stubs/curl; `api` is defined in tests/lib.sh.
+# Task 16: bin/truenas-api. The alert, service and app writes the view can
+# make, and the proof that the key travels the way it does everywhere else: on
+# stdin to curl, never in argv, and so never in the method, payload or request
+# logs. The stub curls are in tests/stubs/curl; `api` is defined in tests/lib.sh.
 
 alert_uuid="11111111-2222-3333-4444-555555555555"
 
@@ -84,9 +84,12 @@ teardown
 # app, and both are a 2xx, so the caller sees the same {"ok":true} either way.
 api_base="https://nas.example:4433"
 
+# The NAS answers a service write with `true` (synchronous), so this one pins the
+# JSON-2xx branch: the body is neither empty nor an object, and still success.
 test_case "service-start posts the service name to the start route"
 setup; single_instance_config
-respond "/api/v2.0/service/start" 0 200 /dev/null
+printf 'true\n' >"$WORK/service-true.json"
+respond "/api/v2.0/service/start" 0 200 "$WORK/service-true.json"
 out=$(api service-start cifs)
 rc=$?
 check "exit ok" 0 "$rc"
@@ -109,6 +112,7 @@ check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
 check "the exact route" "$api_base/api/v2.0/service/stop" \
   "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
 check "the body key is service" cifs "$(jq -r '.service' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" service "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 teardown
 
 test_case "service-restart posts the service name to the restart route"
@@ -122,11 +126,14 @@ check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
 check "the exact route" "$api_base/api/v2.0/service/restart" \
   "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
 check "the body key is service" cifs "$(jq -r '.service' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" service "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 teardown
 
+# An app write answers a job id number (asynchronous). Same JSON-2xx branch.
 test_case "app-start posts app_name to the app start route"
 setup; single_instance_config
-respond "/api/v2.0/app/start" 0 200 /dev/null
+printf '12345\n' >"$WORK/app-job.json"
+respond "/api/v2.0/app/start" 0 200 "$WORK/app-job.json"
 out=$(api app-start appc)
 rc=$?
 check "exit ok" 0 "$rc"
@@ -149,6 +156,7 @@ check "the method was POST" 1 "$(grep -c 'POST' "$STUB_METHOD_LOG")"
 check "the exact route" "$api_base/api/v2.0/app/stop" \
   "$(awk 'NR == 1 { print $1 }' "$STUB_CURL_LOG")"
 check "the body key is app_name" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
+check "the body is one key" app_name "$(jq -r 'keys | join(",")' "$STUB_PAYLOAD_LOG")"
 teardown
 
 test_case "app-redeploy posts app_name to the redeploy route"
@@ -186,6 +194,40 @@ check "exit 2" 2 "$rc"
 check "names the missing argument" 1 \
   "$(grep -c 'a service-start needs a service name' <<<"$out")"
 check "usage on stderr" 1 "$(grep -c 'truenas-api <verb>' <<<"$out")"
+teardown
+
+test_case "an extra positional is a usage error with status 2"
+setup
+out=$(api service-start cifs extra 2>&1)
+rc=$?
+check "exit 2" 2 "$rc"
+check "explains the extra argument" 1 "$(grep -c 'takes one argument' <<<"$out")"
+check "usage on stderr" 1 "$(grep -c 'truenas-api <verb>' <<<"$out")"
+teardown
+
+# The usage list and the dispatch table are two places the same eight verbs
+# live. This fails if a verb is documented and never dispatched.
+test_case "every verb in the usage text is dispatched by the case"
+setup
+known=$(api 2>&1)
+for verb_name in $(printf '%s\n' "$known" | sed -n 's/^  \([a-z][a-z-]*\) <.*/\1/p'); do
+  api "$verb_name" placeholder >/dev/null 2>&1
+  rc=$?
+  check "$verb_name is dispatched" 1 "$(( rc == 2 ? 0 : 1 ))"
+done
+teardown
+
+# A 2xx is not success on its own: a route that does not exist answers 200 with
+# the frontend's HTML, and calling that a landed write is the one lie that
+# matters. It stays a failure.
+test_case "a 2xx with a non-JSON body is a failure, not a silent ok"
+setup; single_instance_config
+printf '<html></html>\n' >"$WORK/notjson.html"
+respond "/api/v2.0/service/start" 0 200 "$WORK/notjson.html"
+out=$(api service-start cifs)
+rc=$?
+check "exit non-zero" 1 "$rc"
+check "names the error" not_json "$(jq -r '.error' <<<"$out")"
 teardown
 
 test_case "the key never reaches the logs for a service or app write"

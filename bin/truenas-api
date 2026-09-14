@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # The one write path the panel has: alert dismiss/restore, and the service and
 # app control verbs. Every verb answers with a single JSON object, so Panel.qml
-# has one shape to parse whether the write landed or not: {"ok":true} on any
-# 2xx, and {error, message} otherwise.
+# has one shape to parse whether the write landed or not: {"ok":true} on a JSON
+# 2xx (the NAS answers `true` for a service, a job id for an app), and
+# {error, message} otherwise. A 2xx whose body is not JSON at all is a failure
+# (`not_json`), which is how a route that does not exist is told from a landed
+# write.
 #
 # The key is resolved exactly the way the poller resolves it and handed to curl
 # as a config file on stdin, never in argv. The name or uuid is written into the
@@ -16,7 +19,7 @@ TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 usage() {
   cat <<'TXT'
-truenas-api <verb> <name>
+truenas-api <verb> <name|uuid>
 
   dismiss <uuid>          dismiss one alert
   restore <uuid>          restore a dismissed alert
@@ -55,6 +58,10 @@ case $verb in
   app-redeploy)    path=/api/v2.0/app/redeploy;    body_key=app_name; what="an app name" ;;
   *) usage >&2; exit 2 ;;
 esac
+
+# Exactly one positional. A second one is a usage error rather than a silent
+# ignore, because a caller that passed the wrong tuple needs to hear about it.
+(( $# > 2 )) && { tn_warn "truenas-api takes one argument, got $(( $# - 1 ))"; usage >&2; exit 2; }
 [[ -n $target ]] || { tn_warn "a $verb needs $what"; usage >&2; exit 2; }
 
 config=$(tn_load_config)
@@ -80,7 +87,8 @@ key=${resolved#ok:}
 # after a call is not reached on the error path. TN_BODY is read with a default
 # because the trap is installed before the request has set it and `set -u` is on.
 TN_BODY=""
-payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX")
+payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX") \
+  || { tn_warn "could not create a temporary file"; exit 1; }
 trap 'rm -f "${payload:-}" "${TN_BODY:-}"' EXIT
 
 jq -n --arg k "$body_key" --arg v "$target" '{ ($k): $v }' >"$payload"
@@ -95,13 +103,11 @@ if [[ -z $class ]]; then
   exit 0
 fi
 
-# tn_error_message reads the NAS's own words and reads the body file, so it runs
-# before the body is removed; a curl-level failure has no body, so name the
-# transport instead of printing an empty message. The service control routes
-# answer an unknown name with the name at the top level ({"message":"<name>"}),
-# which the shared reader does not look at, so that is tried second.
+# tn_error_message reads the NAS's own words (including the top-level `.message`
+# a service control route uses) and reads the body file, so it runs before the
+# body is removed; a curl-level failure has no body, so name the transport
+# instead of printing an empty message.
 message=$(tn_error_message)
-[[ -n $message ]] || message=$(jq -r '.message // ""' "$TN_BODY" 2>/dev/null)
 [[ -n $message ]] || message=$(tn_curl_rc_message "$TN_CURL_RC")
 rm -f "$payload" "$TN_BODY"
 unset key resolved

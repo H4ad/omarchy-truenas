@@ -305,7 +305,12 @@ tn_classify() {
 }
 
 tn_error_message() {
-  jq -r '.error.message // .error.type // ""' "$TN_BODY" 2>/dev/null
+  # The top-level `.message` is read too: the service control routes answer an
+  # unknown name with `{"message":"<name>"}` and no `.error` at all. The type
+  # guard keeps a non-string (a number, an array) from being dumped as a bare
+  # value by -r, which would print JSON in the middle of a sentence.
+  jq -r '(.error.message // .error.type // .message // "")
+         | if type == "string" then . else tostring end' "$TN_BODY" 2>/dev/null
 }
 
 tn_curl_rc_message() {
