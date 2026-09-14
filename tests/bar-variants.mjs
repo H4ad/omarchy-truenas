@@ -76,11 +76,19 @@ function view(extra) {
   const base = {
     mode: "quiet",
     alertCount: 0,
+    counts: {},
     capacityText: "",
     worstPool: "",
     worstLevel: "",
     tempText: "",
     tempLevel: "",
+    downTotal: 0,
+    protectionCount: 0,
+    uptimeText: "",
+    capacityFill: 0,
+    poolDots: [],
+    diskDots: [],
+    sparkColumns: [],
     degraded: false
   };
   for (const key in (extra || {})) base[key] = extra[key];
@@ -101,9 +109,10 @@ function severities(variant, v) {
 
 // ------------------------------------------------------------------ the settings
 
-test_case("the seven variants");
-check("the frozen order", ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full"],
-  BarVariants.VARIANTS);
+test_case("the fifteen variants");
+check("the frozen order", ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full",
+  "Severity", "Down", "Protection", "Uptime",
+  "CapacityBar", "Pools", "DiskHeat", "Sparkline"], BarVariants.VARIANTS);
 check("Default is the built-in fallback", "Default", BarVariants.DEFAULT_VARIANT);
 
 test_case("the manifest offers exactly the same variants");
@@ -119,6 +128,9 @@ check("the manifest options match VARIANTS, in order", BarVariants.VARIANTS,
   variantSetting && variantSetting.options);
 check("the description names Temp as the hottest disk", true,
   /Temp is the hottest disk/.test(String((variantSetting || {}).description || "")));
+check("the description names every chart variant", true,
+  ["Severity", "Down", "Protection", "Uptime", "CapacityBar", "Pools", "DiskHeat", "Sparkline"]
+    .every(function (name) { return String((variantSetting || {}).description || "").indexOf(name) !== -1; }));
 
 test_case("resolveVariant");
 check("the manifest spelling is pinned", "Alerts", BarVariants.resolveVariant("Alerts"));
@@ -129,7 +141,7 @@ check("an empty setting is Default", "Default", BarVariants.resolveVariant(""));
 check("nothing at all is Default", "Default", BarVariants.resolveVariant(null));
 check("undefined too", "Default", BarVariants.resolveVariant(undefined));
 check("a singular typo is Default", "Default", BarVariants.resolveVariant("Alert"));
-check("a variant nobody implemented is Default", "Default", BarVariants.resolveVariant("Sparkline"));
+check("a variant nobody implemented is Default", "Default", BarVariants.resolveVariant("Thermometer"));
 check("whitespace is not a variant", "Default", BarVariants.resolveVariant(" Alerts "));
 BarVariants.VARIANTS.forEach(function (variant) {
   check(variant + " resolves to itself, never widened", variant, BarVariants.resolveVariant(variant));
@@ -318,6 +330,128 @@ check("neither half leaves the glyph alone", "G",
   render("Full", view({ mode: "quiet", alertCount: 0, capacityText: "" })));
 check("an unknown capacity is never half a zero", false,
   /0%/.test(render("Full", view({ mode: "firing", alertCount: 3, capacityText: "" }))));
+
+// ------------------------------------------------------------------ Severity
+
+test_case("Severity prints the worst two alert buckets");
+check("two buckets, count before glyph", "G 2\u25B2 1\u25CF",
+  render("Severity", view({ mode: "firing", counts: { critical: 2, error: 1, warning: 3, total: 6 } })));
+check("each segment carries its own bucket", ["", "critical", "error"],
+  severities("Severity", view({ mode: "firing", counts: { critical: 2, error: 1, warning: 3 } })));
+check("the third bucket is dropped", "G 1\u25B2 2\u25CF",
+  render("Severity", view({ counts: { critical: 1, error: 2, warning: 3 } })));
+check("one bucket is one segment", "G 4\u25B2",
+  render("Severity", view({ counts: { critical: 4 } })));
+check("no buckets prints the glyph alone", "G", render("Severity", view({ counts: {} })));
+check("a zero bucket is not printed", "G",
+  render("Severity", view({ counts: { critical: 0, error: 0 } })));
+check("missing counts is not a crash", "G", render("Severity", view({})));
+
+// ---------------------------------------------------------------------- Down
+
+test_case("Down counts services and apps not running");
+check("a down count", "G 3", render("Down", view({ downTotal: 3 })));
+check("tinted as a warning", ["", "warning"], severities("Down", view({ downTotal: 3 })));
+check("zero prints nothing", "G", render("Down", view({ downTotal: 0 })));
+check("a null is nothing", "G", render("Down", view({ downTotal: null })));
+
+// ---------------------------------------------------------------- Protection
+
+test_case("Protection counts failed jobs");
+check("a failure count", "G 2", render("Protection", view({ protectionCount: 2 })));
+check("tinted as a warning", ["", "warning"], severities("Protection", view({ protectionCount: 1 })));
+check("zero prints nothing", "G", render("Protection", view({ protectionCount: 0 })));
+check("a missing count is nothing", "G", render("Protection", view({})));
+
+// ------------------------------------------------------------------- Uptime
+
+test_case("Uptime prints the time since boot");
+check("a known uptime", "G up 18h", render("Uptime", view({ uptimeText: "up 18h" })));
+check("untinted", ["", ""], severities("Uptime", view({ uptimeText: "up 18h" })));
+check("nothing known prints nothing", "G", render("Uptime", view({ uptimeText: "" })));
+check("a null is nothing", "G", render("Uptime", view({ uptimeText: null })));
+
+// ---------------------------------------------------------------- chartKind
+
+test_case("chartKind names the shape, or nothing");
+check("CapacityBar is a bar", "bar", BarVariants.chartKind("CapacityBar"));
+check("Pools is dots", "dots", BarVariants.chartKind("Pools"));
+check("DiskHeat is heat", "heat", BarVariants.chartKind("DiskHeat"));
+check("Sparkline is spark", "spark", BarVariants.chartKind("Sparkline"));
+check("a text variant has no shape", "", BarVariants.chartKind("Default"));
+check("an unknown variant has no shape", "", BarVariants.chartKind("Nope"));
+check("case does not matter", "spark", BarVariants.chartKind("sparkline"));
+
+// ------------------------------------------------------------- chart: bar
+
+test_case("CapacityBar draws cells and the percent");
+check("the spec", { kind: "bar", filled: 4, total: 6, label: "71%", severity: "warning" },
+  BarVariants.chartFor("CapacityBar",
+    view({ capacityText: "71%", capacityFill: 4, worstLevel: "warning" })));
+check("an unknown capacity is no chart", null,
+  BarVariants.chartFor("CapacityBar", view({ capacityText: "" })));
+check("a null capacity is no chart", null,
+  BarVariants.chartFor("CapacityBar", view({ capacityText: null })));
+check("a real zero percent still draws",
+  { kind: "bar", filled: 0, total: 6, label: "0%", severity: "" },
+  BarVariants.chartFor("CapacityBar", view({ capacityText: "0%" })));
+check("a fill beyond the cells is clamped", 6,
+  BarVariants.chartFor("CapacityBar", view({ capacityText: "99%", capacityFill: 99 })).filled);
+
+// ------------------------------------------------------------- chart: dots
+
+test_case("Pools draws one square per pool, capped");
+check("a spec per pool", { kind: "dots",
+    items: [{ severity: "" }, { severity: "warning" }], overflow: 0 },
+  BarVariants.chartFor("Pools", view({ poolDots: ["", "warning"] })));
+check("no pools is no chart", null, BarVariants.chartFor("Pools", view({ poolDots: [] })));
+check("a missing list is no chart", null, BarVariants.chartFor("Pools", view({})));
+const manyPools = [];
+for (let i = 0; i < 14; i++) manyPools.push("warning");
+check("the cap keeps ten squares", 10,
+  BarVariants.chartFor("Pools", view({ poolDots: manyPools })).items.length);
+check("the overflow is counted", 4,
+  BarVariants.chartFor("Pools", view({ poolDots: manyPools })).overflow);
+
+// ------------------------------------------------------------- chart: heat
+
+test_case("DiskHeat draws one square per disk, capped");
+check("a spec per disk", { kind: "heat", items: [{ severity: "critical" }], overflow: 0 },
+  BarVariants.chartFor("DiskHeat", view({ diskDots: ["critical"] })));
+check("a disk with no band is untinted", { severity: "" },
+  BarVariants.chartFor("DiskHeat", view({ diskDots: [""] })).items[0]);
+check("no disks is no chart", null, BarVariants.chartFor("DiskHeat", view({ diskDots: [] })));
+const manyDisks = [];
+for (let i = 0; i < 15; i++) manyDisks.push("warning");
+check("the cap keeps twelve squares", 12,
+  BarVariants.chartFor("DiskHeat", view({ diskDots: manyDisks })).items.length);
+check("the overflow is counted", 3,
+  BarVariants.chartFor("DiskHeat", view({ diskDots: manyDisks })).overflow);
+
+// ------------------------------------------------------------ chart: spark
+
+test_case("Sparkline draws the capacity columns");
+check("the spec", { kind: "spark", columns: [0.5, null, 0.8], severity: "warning" },
+  BarVariants.chartFor("Sparkline",
+    view({ sparkColumns: [0.5, null, 0.8], worstLevel: "warning" })));
+check("an empty history is no chart", null,
+  BarVariants.chartFor("Sparkline", view({ sparkColumns: [] })));
+check("all gaps is no chart", null,
+  BarVariants.chartFor("Sparkline", view({ sparkColumns: [null, null] })));
+check("a real zero still draws", { kind: "spark", columns: [0, null], severity: "" },
+  BarVariants.chartFor("Sparkline", view({ sparkColumns: [0, null] })));
+
+// ------------------------------------------------- override still wins
+
+test_case("the override modes still win over a chart");
+check("offline shows the plug, not cells", "P",
+  render("CapacityBar", view({ mode: "offline", capacityText: "71%", capacityFill: 4 })));
+check("offline has no chart", null,
+  BarVariants.chartFor("Pools", view({ mode: "offline", poolDots: ["warning"] })));
+check("unconfigured has no chart", null,
+  BarVariants.chartFor("Sparkline", view({ mode: "unconfigured", sparkColumns: [0.5] })));
+check("a chart variant prints only the glyph on the text path", "G",
+  render("Pools", view({ poolDots: ["warning"] })));
 
 // -------------------------------------------------------------------- textFor
 

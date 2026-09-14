@@ -67,13 +67,21 @@ Column {
 
   function blurbFor(variant) {
     switch (BarVariants.resolveVariant(variant)) {
-      case "Icon":     return "glyph only"
-      case "Alerts":   return "alert count"
-      case "Capacity": return "fullest pool"
-      case "Pool":     return "worst pool status"
-      case "Temp":     return "hottest disk"
-      case "Full":     return "alerts + capacity"
-      default:         return "alerts, else capacity"
+      case "Icon":         return "glyph only"
+      case "Alerts":       return "alert count"
+      case "Capacity":     return "fullest pool"
+      case "Pool":         return "worst pool status"
+      case "Temp":         return "hottest disk"
+      case "Full":         return "alerts + capacity"
+      case "Severity":     return "worst two alert buckets"
+      case "Down":         return "down services + apps"
+      case "Protection":   return "failed protection jobs"
+      case "Uptime":       return "time since boot"
+      case "CapacityBar":  return "capacity cells + percent"
+      case "Pools":        return "one square per pool"
+      case "DiskHeat":     return "one square per disk"
+      case "Sparkline":    return "capacity trend"
+      default:             return "alerts, else capacity"
     }
   }
 

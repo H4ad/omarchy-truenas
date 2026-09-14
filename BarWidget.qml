@@ -23,6 +23,12 @@ BarWidget {
     (Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state"))
       + "/omarchy/truenas/state.json"
 
+  // The sparkline's sample file, written by the poller. Read-only here. A
+  // missing or malformed file leaves `history` null and the sparkline empty.
+  readonly property string historyPath:
+    (Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state"))
+      + "/omarchy/truenas/history.json"
+
   // The config file, read only for the base URL the right click opens. It is not
   // the poll path and it is never written here: `truenasctl login` owns it.
   readonly property string configPath: {
@@ -34,6 +40,7 @@ BarWidget {
 
   property var state: null
   property var configDoc: null
+  property var history: null
   property int nowTick: 0
 
   readonly property var counts: (state && state.counts) || ({})
@@ -58,6 +65,33 @@ BarWidget {
   // tell" never look alike.
   readonly property bool degraded: mode === "offline" || mode === "unconfigured"
 
+  // Time since boot, through the same age formatter the tooltips use. "" when
+  // the system section did not answer, never "up 0s".
+  readonly property string uptimeText: {
+    var system = root.state && root.state.system
+    if (!system) return ""
+    var seconds = system.uptimeSeconds
+    if (seconds === null || seconds === undefined || seconds === "") return ""
+    var number = Number(seconds)
+    if (!isFinite(number) || number < 0) return ""
+    return "up " + Model.ageText(Math.round(number))
+  }
+
+  // The per-pool and per-disk tints the chart variants draw. The mapping is
+  // Model's, so the bar and the views agree on what a status or a band is.
+  readonly property var poolDots: {
+    var out = []
+    for (var i = 0; i < root.pools.length; i++)
+      out.push(Model.poolDotSeverity(root.pools[i] && root.pools[i].status))
+    return out
+  }
+  readonly property var diskDots: {
+    var out = []
+    for (var i = 0; i < root.disks.length; i++)
+      out.push(Model.diskDotSeverity(root.disks[i] && root.disks[i].tempState))
+    return out
+  }
+
   readonly property var variantChoice: BarVariants.resolveVariant(root.setting("variant", "Default"))
   readonly property var glyphs: ({
     main: Model.glyphFor(root.mode, root.counts),
@@ -67,17 +101,67 @@ BarWidget {
   readonly property var barView: ({
     mode: root.mode,
     alertCount: root.alertCount,
+    counts: root.counts,
     capacityText: root.capacityText,
     worstPool: root.worstPoolStatus,
     worstLevel: root.worstLevel,
     tempText: Model.hotTempLabel(root.disks),
-    tempLevel: Model.tempLevel(root.disks)
+    tempLevel: Model.tempLevel(root.disks),
+    downTotal: Model.downTotal(root.state),
+    protectionCount: Model.protectionFailures(root.state),
+    uptimeText: root.uptimeText,
+    capacityFill: Model.capacityBarFill(root.capacityPct, BarVariants.CAPACITY_CELLS),
+    poolDots: root.poolDots,
+    diskDots: root.diskDots,
+    sparkColumns: Model.sparkColumns(root.history, BarVariants.SPARK_COLUMNS)
   })
   readonly property var segments: BarVariants.segmentsFor(root.variantChoice, root.barView, root.glyphs)
   // The one severity the segments carry, or "" when they disagree or carry
   // none. The single-tint path below paints the whole item one colour, and a
   // lone hot disk has to paint its own rather than the alert count's.
   readonly property string soleSeverity: BarVariants.soleSeverity(root.segments)
+
+  // The chart path. `chartSpec` is null for a text variant, for the two override
+  // modes, and whenever a chart has nothing to draw, so the ordinary segment
+  // path stays the fallback and an unknown value is never a zero-length shape.
+  readonly property string chartKind: BarVariants.chartKind(root.variantChoice)
+  readonly property var chartSpec:
+    root.chartKind === "" ? null : BarVariants.chartFor(root.variantChoice, root.barView)
+  readonly property bool showChart: root.chartSpec !== null
+  readonly property int chartOverflow:
+    (root.chartSpec && root.chartSpec.overflow) ? Number(root.chartSpec.overflow) : 0
+  readonly property string chartOverflowTooltip:
+    root.chartOverflow > 0 ? " · +" + root.chartOverflow + " more" : ""
+
+  // Chart geometry, the design's sizes: 4x8 cells with a 2px gap, 5px squares,
+  // and a 40x10 sparkline.
+  readonly property real chartCellWidth: 4
+  readonly property real chartCellHeight: 8
+  readonly property real chartCellGap: 2
+  readonly property real chartDotSize: 5
+  readonly property real chartSparkWidth: 40
+  readonly property real chartSparkHeight: 10
+  readonly property real chartBarRowHeight:
+    Math.max(root.chartCellHeight, root.segmentFontSize + 4)
+  readonly property real chartSparkColumnWidth: {
+    var columns = root.chartSpec && root.chartSpec.columns ? root.chartSpec.columns.length : 0
+    if (columns <= 0) return root.chartSparkWidth
+    return root.chartSparkWidth / columns
+  }
+  readonly property color chartEmptyColor: {
+    var base = root.bar ? root.bar.foreground : Color.foreground
+    return Qt.rgba(base.r, base.g, base.b, 0.22)
+  }
+  readonly property Component chartComponent: {
+    if (!root.chartSpec) return null
+    switch (root.chartSpec.kind) {
+      case "bar":  return chartBar
+      case "dots": return chartDots
+      case "heat": return chartDots
+      case "spark": return chartSpark
+    }
+    return null
+  }
 
   // One glyph paints one colour, so per-severity segments go through the icon
   // slot as a Row of separately tinted Text items. A vertical bar has no
@@ -168,6 +252,14 @@ BarWidget {
     }
   }
 
+  function applyHistory(text) {
+    try {
+      root.history = JSON.parse(String(text || "null"))
+    } catch (e) {
+      root.history = null
+    }
+  }
+
   function injectPanel() {
     var target = panelLoader.item
     if (!target) return
@@ -202,6 +294,15 @@ BarWidget {
     onLoaded: root.applyConfig(text())
     onFileChanged: reload()
     onLoadFailed: root.configDoc = null
+  }
+
+  FileView {
+    path: root.historyPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyHistory(text())
+    onFileChanged: reload()
+    onLoadFailed: root.history = null
   }
 
   // Only drives the "checked 12s ago" tooltip. The count itself arrives with the
@@ -286,12 +387,146 @@ BarWidget {
     }
   }
 
+  // The chart path's sizing twin: an invisible Loader instantiates the exact
+  // component the button draws, so fixedWidth comes from the same content the
+  // icon slot shows, not a second guess at it.
+  Loader {
+    id: chartSizer
+    visible: false
+    active: root.showChart
+    sourceComponent: root.chartComponent
+  }
+
+  // CapacityBar: `total` cells, the first `filled` tinted, then the percent.
+  // Each child is an Item of one height so the cells and the label sit on one
+  // centred line; a Row alone would top-align the shorter cells against the text.
+  Component {
+    id: chartBar
+
+    Item {
+      implicitWidth: barRow.implicitWidth
+      implicitHeight: barRow.implicitHeight
+
+      Row {
+        id: barRow
+        anchors.centerIn: parent
+        spacing: root.chartCellGap
+
+        Repeater {
+          model: root.chartSpec ? root.chartSpec.total : 0
+
+          Item {
+            required property int index
+            width: root.chartCellWidth
+            height: root.chartBarRowHeight
+
+            Rectangle {
+              anchors.centerIn: parent
+              width: root.chartCellWidth
+              height: root.chartCellHeight
+              color: index < (root.chartSpec ? root.chartSpec.filled : 0)
+                ? root.colorForSeverity(root.chartSpec ? root.chartSpec.severity : "")
+                : root.chartEmptyColor
+            }
+          }
+        }
+
+        Item {
+          width: barLabel.implicitWidth
+          height: root.chartBarRowHeight
+
+          Text {
+            id: barLabel
+            anchors.centerIn: parent
+            text: root.chartSpec ? root.chartSpec.label : ""
+            color: root.colorForSeverity(root.chartSpec ? root.chartSpec.severity : "")
+            font.family: root.segmentFontFamily
+            font.pixelSize: root.segmentFontSize
+            renderType: Text.NativeRendering
+          }
+        }
+      }
+    }
+  }
+
+  // Pools and DiskHeat: one small square per row, coloured by its severity. A
+  // healthy or unknown square is the bar's own foreground.
+  Component {
+    id: chartDots
+
+    Item {
+      implicitWidth: dotsRow.implicitWidth
+      implicitHeight: dotsRow.implicitHeight
+
+      Row {
+        id: dotsRow
+        anchors.centerIn: parent
+        spacing: root.chartCellGap
+
+        Repeater {
+          model: root.chartSpec ? root.chartSpec.items : []
+
+          Item {
+            required property var modelData
+            width: root.chartDotSize
+            height: root.chartDotSize
+
+            Rectangle {
+              anchors.fill: parent
+              color: root.colorForSeverity(modelData ? modelData.severity : "")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Sparkline: one thin column per sample, oldest first, bottom-aligned in a
+  // 10px band. A null sample draws nothing, so a gap in the history stays a gap;
+  // a real 0 keeps a 1px stub so it is not mistaken for the gap.
+  Component {
+    id: chartSpark
+
+    Item {
+      implicitWidth: sparkRow.implicitWidth
+      implicitHeight: root.chartSparkHeight
+
+      Row {
+        id: sparkRow
+        anchors.centerIn: parent
+        spacing: 0
+
+        Repeater {
+          model: root.chartSpec ? root.chartSpec.columns : []
+
+          Item {
+            required property var modelData
+            width: root.chartSparkColumnWidth
+            height: root.chartSparkHeight
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              height: (modelData === null || modelData === undefined)
+                ? 0 : Math.max(1, Number(modelData) * root.chartSparkHeight)
+              color: root.colorForSeverity(root.chartSpec ? root.chartSpec.severity : "")
+            }
+          }
+        }
+      }
+    }
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.tintedSegments ? "" : BarVariants.textFor(root.segments)
-    iconComponent: root.tintedSegments ? segmentRow : null
+    text: (root.showChart || root.tintedSegments)
+      ? "" : BarVariants.textFor(root.segments)
+    iconComponent: root.showChart
+      ? root.chartComponent
+      : (root.tintedSegments ? segmentRow : null)
     foreground: root.degraded
       ? (root.bar ? root.bar.foreground : Color.foreground)
       : (root.soleSeverity !== ""
@@ -299,11 +534,14 @@ BarWidget {
           : root.severityColor)
     dimmed: root.quiet || root.degraded
     fontSize: Style.font.caption
-    fixedWidth: root.tintedSegments
-      ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
-      : -1
+    fixedWidth: root.showChart
+      ? Math.max(12, chartSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+      : (root.tintedSegments
+          ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+          : -1)
     slotSize: Style.bar.statusSlot
-    tooltipText: Model.tooltipFor(root.state, root.mode) + (root.nowTick, "")
+    tooltipText: Model.tooltipFor(root.state, root.mode)
+      + root.chartOverflowTooltip + (root.nowTick, "")
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.MiddleButton) root.refresh()
