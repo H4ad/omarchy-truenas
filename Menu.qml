@@ -53,6 +53,8 @@ Ui.Panel {
   readonly property var cloudSync: (snapshot && Model.arrayLike(snapshot.cloudSync)) ? snapshot.cloudSync : []
   readonly property var snapshotTasks: (snapshot && Model.arrayLike(snapshot.snapshotTasks)) ? snapshot.snapshotTasks : []
   readonly property var scrubs: (snapshot && Model.arrayLike(snapshot.scrubs)) ? snapshot.scrubs : []
+  readonly property var shares: (snapshot && snapshot.shares) ? snapshot.shares : null
+  readonly property var network: (snapshot && Model.arrayLike(snapshot.network)) ? snapshot.network : []
   readonly property string mode: Model.mode(snapshot)
   readonly property var connection: (snapshot && snapshot.connection) || null
   readonly property bool connected: !!(connection && connection.ok)
@@ -127,6 +129,34 @@ Ui.Panel {
   readonly property var scrubWarning: {
     for (var i = 0; i < root.warnings.length; i++) {
       if (String(root.warnings[i] && root.warnings[i].section || "") === "scrubs")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var smbWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "smb")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var nfsWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "nfs")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var iscsiWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "iscsi")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var networkWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "network")
         return root.warnings[i]
     }
     return null
@@ -242,6 +272,28 @@ Ui.Panel {
     return "nothing down"
   }
 
+  // Shares and interfaces. The three share types and the interface list each
+  // fail on their own, so any one warning prints the sentence rather than a
+  // count a failed section zeroed. A down link is named; a blank or unknown
+  // link is not a warning. Never "0 shares": an empty list prints a phrase.
+  readonly property string sharesText: {
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
+    if (root.smbWarning || root.nfsWarning || root.iscsiWarning || root.networkWarning)
+      return "the shares and network could not be read"
+    var counts = Model.shareCounts(root.shares)
+    if (counts.total === 0 && root.network.length === 0) return "no shares reported"
+    if (counts.total === 0) return "no shares"
+    var text = counts.total + (counts.total === 1 ? " share" : " shares")
+    var down = Model.downInterfaces(root.network).length
+    if (down > 0) return text + " · " + down + (down === 1 ? " link down" : " links down")
+    return text
+  }
+
   // Protection: replication and cloud sync carry a job, so a failed one is a
   // real failure; snapshot tasks and scrub tasks do not, so only the count is
   // reported. A failed section prints why rather than a count.
@@ -298,6 +350,7 @@ Ui.Panel {
       { kind: "view", args: ["disks"], label: "Disks", detail: root.disksText },
       { kind: "view", args: ["services"], label: "Services", detail: root.servicesText },
       { kind: "view", args: ["apps"], label: "Apps", detail: root.appsText },
+      { kind: "view", args: ["shares"], label: "Shares", detail: root.sharesText },
       { kind: "view", args: ["protection"], label: "Protection", detail: root.protectionText },
       { kind: "view", args: ["alerts"], label: "Alerts", detail: root.alertsText },
       { kind: "view", args: ["config"], label: "Config", detail: root.configText },
