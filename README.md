@@ -16,5 +16,5 @@ and what does not in [docs/03-features.md](docs/03-features.md), and the traps
 that have already cost time in [docs/11-pitfalls.md](docs/11-pitfalls.md); read
 the pitfalls before changing anything, most of them fail silently.
 
-**Planned:** disks and temperatures, apps and services, replication, cloud sync
-and snapshots, and shares are later milestones and are not implemented yet.
+**Planned:** replication, cloud sync and snapshots, and shares are later
+milestones and are not implemented yet.

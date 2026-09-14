@@ -221,6 +221,79 @@ only when system, disks, temperatures and normalization all succeeded; a failed
 section leaves the previous `meta.json` byte-for-byte intact, and an older meta
 without the new keys reads as stale once, refetches once and self-heals.
 
+## Milestone 3: services and apps
+
+`/service` and `/app` are read whole on the meta cadence; there is no query
+route, so both lists are filtered client-side. Verified against the live 25.10.6
+on 2026-09-13:
+
+| Purpose | Method | Path | Body | Observed answer |
+| --- | --- | --- | --- | --- |
+| service list | GET | `/api/v2.0/service` | -- | JSON array, rows `{id, service, enable, state, pids}` |
+| app list | GET | `/api/v2.0/app` | -- | JSON array, rows with the fields below |
+| service control | POST | `/api/v2.0/service/{start,stop,restart}` | `{"service":"ups"}` | `200` and the body `true` (synchronous) |
+| app control | POST | `/api/v2.0/app/{start,stop,redeploy}` | `{"app_name":"appc"}` | `200` and the body is a job id number (asynchronous) |
+
+Findings that constrain the design, each observed on that box unless marked
+otherwise:
+
+- Service writes answer `true` **synchronously**; app writes answer a job id and
+  run asynchronously. A forced re-poll after an app write may still show the old
+  state until the job lands. That is honest: the panel reads the NAS back and
+  the next poll catches up. It never fabricates "starting".
+- A service control body missing `service` is `400 {"message":"service attribute
+  expected."}`; an unknown service name is `404 {"message":"<name>"}`. An app
+  body missing `app_name` is `400 {"message":"app_name attribute expected."}`.
+  The `app/start` route with an empty body answered `200` with a failed job
+  (`[EINVAL] app_name: Input should be a valid string`), so the caller always
+  sends `app_name`.
+- `POST /api/v2.0/app/restart` is `404`: there is no app restart route. The
+  restart-like verb is `POST /api/v2.0/app/redeploy`. `POST /api/v2.0/app/query`
+  is `404` too: the list is fetched whole and filtered client-side.
+- `POST /api/v2.0/service/reload` exists (404 for an unknown service), but M3
+  does not ship it.
+- The rows, as the two lists arrived: services `cifs RUNNING`, `nfs RUNNING`,
+  `ssh RUNNING` and `ftp`, `iscsitarget`, `snmp`, `ups`, `nvmet` all `STOPPED`
+  (the first three `enable` true, the rest false); apps `appa` (custom),
+  `appc` and `appe` `RUNNING`, and `appb` `RUNNING` with an update
+  available.
+- The app row carries `title`, `app_version`, `train`, `home` and `icon` (icon is
+  `null` for a custom app) under `metadata`, plus `human_version` (e.g.
+  `16.0.4-rootless_1.2.39`), `version`, `custom_app`, `upgrade_available`,
+  `migrated`, `portals` (`{"Web UI":"http://…"}` or `{}`), `notes` and
+  `active_workloads.containers`. `notes` can be tens of kilobytes: it is never
+  cached and never enters `state.json`.
+
+### The service and app meta cache
+
+`meta.json` gains `services` and `apps`, beside the M1 and M2 keys:
+
+```jsonc
+{ "services": { "fetchedAt": "...",
+                "rows": [ { "id": 4, "service": "cifs", "state": "RUNNING",
+                            "enable": true }, … ] },
+  "apps":     { "fetchedAt": "...",
+                "rows": [ { "name": "appc", "id": "appc",
+                            "state": "RUNNING", "custom_app": false,
+                            "upgrade_available": false, "migrated": false,
+                            "human_version": "16.0.4-rootless_1.2.39",
+                            "metadata": { "title": "appc",
+                                          "app_version": "16.0.4-rootless",
+                                          "train": "community",
+                                          "home": "https://appc.org/",
+                                          "icon": "…" },
+                            "portals": { "Web UI": "http://…" },
+                            "active_workloads": { "containers": 1 } }, … ] } }
+```
+
+The cached rows are the raw wire fields the plugin consumes, under their wire
+names; service `pids`, app `notes` and the workload details are dropped before
+the write and never reach disk. The normalizer owns the row shape on both the
+fetch and the reuse path. Meta advances only when system, disks, temperatures,
+services, apps and normalization all succeeded, and `meta_is_stale` requires all
+five sections, so an older meta without the new keys reads as stale once,
+refetches once and self-heals.
+
 ## Cross-cutting rules
 
 ### A datetime is a string *or* `{$date}`
@@ -265,10 +338,10 @@ never hits every endpoint:
   the names the details call returned, so a failed details call skips it), then
   `service`, `app` and the rest as milestones add them.
 
-A cold poll -- no fresh meta, so every section is fetched -- spends five
-requests: `alert/list`, `pool`, `system/info`, `disk/details` and
-`disk/temperatures`. A warm poll, with a fresh meta cache, spends two:
-`alert/list` and `pool`.
+A cold poll -- no fresh meta, so every section is fetched -- spends seven
+requests: `alert/list`, `pool`, `system/info`, `disk/details`,
+`disk/temperatures`, `service` and `app`. A warm poll, with a fresh meta cache,
+spends two: `alert/list` and `pool`.
 
 Results of the slow set are cached in
 `~/.local/state/omarchy/truenas/meta.json` with a `fetchedAt`, and
@@ -302,7 +375,7 @@ The endpoint shapes above are taken from the 25.04.2 reference and encoded in
 `share/normalize.jq`, and the test fixtures (`tests/fixtures/`) are sanitized
 snapshots of those shapes plus synthetic failure states (a degraded pool with
 checksum errors and a scrub on record, alert levels across the buckets, `401`,
-`500`, unreachable). The milestone-1 shapes and the milestone-2 disk routes
-were confirmed against a live TrueNAS 25.10.6 on 2026-09-13, and the disk probes
-are recorded above. A field the live box did not exercise is still a claim to
-re-measure, not a fact to quote.
+`500`, unreachable). The milestone-1 shapes, the milestone-2 disk routes and the
+milestone-3 service and app routes were confirmed against a live TrueNAS 25.10.6
+on 2026-09-13, and those probes are recorded above. A field the live box did not
+exercise is still a claim to re-measure, not a fact to quote.
