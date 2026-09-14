@@ -234,5 +234,139 @@ check("an empty field never matches a needle", 0,
   Search.apps([{ name: null, title: "", state: null, train: undefined,
     appVersion: null, version: "" }], "x").length);
 
+const replicationTasks = [
+  { name: "storage-to-backup", direction: "PUSH", transport: "LOCAL",
+    targetDataset: "Backup/replica-storage",
+    state: { state: "FINISHED" }, job: { state: "SUCCESS" } },
+  { name: "backup-to-offsite", direction: "PULL", transport: "SSH",
+    targetDataset: "storage/offsite",
+    state: { state: "PENDING" }, job: null }
+];
+
+test_case("replication matches name, direction, transport, target and state");
+
+check("name, case-insensitively", ["storage-to-backup"],
+  Search.replication(replicationTasks, "storage-TO").map(function (r) { return r.name; }));
+check("direction", ["backup-to-offsite"],
+  Search.replication(replicationTasks, "pull").map(function (r) { return r.name; }));
+check("transport", ["backup-to-offsite"],
+  Search.replication(replicationTasks, "ssh").map(function (r) { return r.name; }));
+check("target dataset", ["storage-to-backup"],
+  Search.replication(replicationTasks, "replica").map(function (r) { return r.name; }));
+check("the task state when the job is null", ["backup-to-offsite"],
+  Search.replication(replicationTasks, "pending").map(function (r) { return r.name; }));
+check("the job state", ["storage-to-backup"],
+  Search.replication(replicationTasks, "success").map(function (r) { return r.name; }));
+check("a needle nothing carries", 0, Search.replication(replicationTasks, "archive").length);
+
+test_case("replication preserves order, copies and survives junk");
+
+check("an empty needle returns every task", ["storage-to-backup", "backup-to-offsite"],
+  Search.replication(replicationTasks, "").map(function (r) { return r.name; }));
+const replicationBefore = JSON.stringify(replicationTasks);
+Search.replication(replicationTasks, "ssh");
+check("the input list is untouched", replicationBefore, JSON.stringify(replicationTasks));
+check("the empty-needle result is a copy", false, Search.replication(replicationTasks, "") === replicationTasks);
+check("a non-list is an empty list", [], Search.replication(null, "x"));
+check("a bare string is not walked", [], Search.replication("storage", "x"));
+check("a row without fields does not throw", 0, Search.replication([{}], "x").length);
+check("null rows are skipped, not fatal", 0, Search.replication([null, undefined, 4], "x").length);
+
+const cloudSyncTasks = [
+  { name: "clouda", path: "/mnt/storage/photos", direction: "PUSH",
+    transferMode: "SYNC", job: { state: "SUCCESS" } },
+  { name: "cloudb", path: "/mnt/Backup/backup", direction: "PULL",
+    transferMode: "COPY", job: { state: "FAILED" } }
+];
+
+test_case("cloudSync matches name, path, direction, mode and job state");
+
+check("name, case-insensitively", ["clouda"],
+  Search.cloudSync(cloudSyncTasks, "clouda").map(function (t) { return t.name; }));
+check("path", ["cloudb"],
+  Search.cloudSync(cloudSyncTasks, "backup/backup").map(function (t) { return t.name; }));
+check("direction", ["cloudb"],
+  Search.cloudSync(cloudSyncTasks, "pull").map(function (t) { return t.name; }));
+check("transfer mode", ["cloudb"],
+  Search.cloudSync(cloudSyncTasks, "copy").map(function (t) { return t.name; }));
+check("the job state", ["cloudb"],
+  Search.cloudSync(cloudSyncTasks, "failed").map(function (t) { return t.name; }));
+check("a needle nothing carries", 0, Search.cloudSync(cloudSyncTasks, "archive").length);
+
+test_case("cloudSync preserves order, copies and survives junk");
+
+check("an empty needle returns every task", ["clouda", "cloudb"],
+  Search.cloudSync(cloudSyncTasks, "").map(function (t) { return t.name; }));
+const cloudSyncBefore = JSON.stringify(cloudSyncTasks);
+Search.cloudSync(cloudSyncTasks, "clouda");
+check("the input list is untouched", cloudSyncBefore, JSON.stringify(cloudSyncTasks));
+check("the empty-needle result is a copy", false, Search.cloudSync(cloudSyncTasks, "") === cloudSyncTasks);
+check("a non-list is an empty list", [], Search.cloudSync(null, "x"));
+check("a bare string is not walked", [], Search.cloudSync("clouda", "x"));
+check("a row without fields does not throw", 0, Search.cloudSync([{}], "x").length);
+check("null rows are skipped, not fatal", 0, Search.cloudSync([null, undefined, 4], "x").length);
+
+const snapshotTaskRows = [
+  { dataset: "storage", namingSchema: "auto-hourly-%Y",
+    state: { state: "FINISHED", lastSnapshot: "storage@auto-hourly-1" } },
+  { dataset: "Backup", namingSchema: "auto-daily-%Y",
+    state: { state: "PENDING", lastSnapshot: null } }
+];
+
+test_case("snapshotTasks matches dataset, naming schema, state and snapshot");
+
+check("dataset, case-insensitively", ["storage"],
+  Search.snapshotTasks(snapshotTaskRows, "storage").map(function (t) { return t.dataset; }));
+check("naming schema", ["storage"],
+  Search.snapshotTasks(snapshotTaskRows, "hourly").map(function (t) { return t.dataset; }));
+check("the task state", ["Backup"],
+  Search.snapshotTasks(snapshotTaskRows, "pending").map(function (t) { return t.dataset; }));
+check("the last snapshot", ["storage"],
+  Search.snapshotTasks(snapshotTaskRows, "auto-hourly-1").map(function (t) { return t.dataset; }));
+check("a needle nothing carries", 0, Search.snapshotTasks(snapshotTaskRows, "archive").length);
+
+test_case("snapshotTasks preserves order, copies and survives junk");
+
+check("an empty needle returns every task", ["storage", "Backup"],
+  Search.snapshotTasks(snapshotTaskRows, "").map(function (t) { return t.dataset; }));
+const snapshotBefore = JSON.stringify(snapshotTaskRows);
+Search.snapshotTasks(snapshotTaskRows, "storage");
+check("the input list is untouched", snapshotBefore, JSON.stringify(snapshotTaskRows));
+check("the empty-needle result is a copy", false, Search.snapshotTasks(snapshotTaskRows, "") === snapshotTaskRows);
+check("a non-list is an empty list", [], Search.snapshotTasks(null, "x"));
+check("a bare string is not walked", [], Search.snapshotTasks("storage", "x"));
+check("a row without fields does not throw", 0, Search.snapshotTasks([{}], "x").length);
+check("null rows are skipped, not fatal", 0, Search.snapshotTasks([null, undefined, 4], "x").length);
+
+const scrubRows = [
+  { pool: "storage", description: "monthly scrub", threshold: 35, enabled: true },
+  { pool: "Backup", description: "", threshold: 35, enabled: false }
+];
+
+test_case("scrubs matches pool, description, threshold and enabled");
+
+check("pool, case-insensitively", ["storage"],
+  Search.scrubs(scrubRows, "storage").map(function (t) { return t.pool; }));
+check("description", ["storage"],
+  Search.scrubs(scrubRows, "monthly").map(function (t) { return t.pool; }));
+check("the threshold, stringified from a number", ["storage", "Backup"],
+  Search.scrubs(scrubRows, "35").map(function (t) { return t.pool; }));
+check("the enabled flag", ["storage"],
+  Search.scrubs(scrubRows, "true").map(function (t) { return t.pool; }));
+check("a needle nothing carries", 0, Search.scrubs(scrubRows, "archive").length);
+
+test_case("scrubs preserves order, copies and survives junk");
+
+check("an empty needle returns every task", ["storage", "Backup"],
+  Search.scrubs(scrubRows, "").map(function (t) { return t.pool; }));
+const scrubsBefore = JSON.stringify(scrubRows);
+Search.scrubs(scrubRows, "storage");
+check("the input list is untouched", scrubsBefore, JSON.stringify(scrubRows));
+check("the empty-needle result is a copy", false, Search.scrubs(scrubRows, "") === scrubRows);
+check("a non-list is an empty list", [], Search.scrubs(null, "x"));
+check("a bare string is not walked", [], Search.scrubs("storage", "x"));
+check("a row without fields does not throw", 0, Search.scrubs([{}], "x").length);
+check("null rows are skipped, not fatal", 0, Search.scrubs([null, undefined, 4], "x").length);
+
 console.log("\nsearch: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

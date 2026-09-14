@@ -310,6 +310,110 @@ function appLabel(app) {
   return "";
 }
 
+// Protection task state ranks. 0 is a landed success, 1 is a failure, 2 is
+// anything else (a task that has not run, a transitional job, a blank state).
+// The scale is deliberately not monotonic in the same way the service and app
+// ranks are: "I cannot tell" must not read as a failure. Case-insensitive
+// because the wire says FAILED today and the plugin must not break if a build
+// says Failed. ERROR is included even though the recon did not enumerate it,
+// because the OpenAPI job list and the design both name it.
+var PROTECTION_OK_STATES = { "SUCCESS": true, "FINISHED": true };
+var PROTECTION_BAD_STATES = { "FAILED": true, "ERROR": true, "ABORTED": true };
+
+function protectionStateRank(state) {
+  var key = String(state || "").toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(PROTECTION_OK_STATES, key)) return 0;
+  if (Object.prototype.hasOwnProperty.call(PROTECTION_BAD_STATES, key)) return 1;
+  return 2;
+}
+
+// The one state a protection row shows: the job state when it has one, else
+// the task state, else "". Cloud sync has no task state, snapshot tasks have no
+// job; both fall out of the same rule.
+function protectionState(row) {
+  if (!row || typeof row !== "object") return "";
+  var job = row.job;
+  if (job && typeof job === "object"
+      && job.state !== null && job.state !== undefined && String(job.state) !== "")
+    return String(job.state);
+  var task = row.state;
+  if (task && typeof task === "object"
+      && task.state !== null && task.state !== undefined && String(task.state) !== "")
+    return String(task.state);
+  return "";
+}
+
+// A replication task is failed when its last job failed or when the task state
+// carries warnings. Warnings are the route's own signal that something is
+// wrong even when the job state string is not one of the failure words.
+function replicationFailed(row) {
+  if (!row || typeof row !== "object") return false;
+  if (protectionStateRank(row.job && row.job.state) === 1) return true;
+  var warnings = arrayLike(row.state && row.state.warnings) ? row.state.warnings : [];
+  return warnings.length > 0;
+}
+
+// Cloud sync has no task state and no warnings list: only the job can fail.
+function cloudSyncFailed(row) {
+  if (!row || typeof row !== "object") return false;
+  return protectionStateRank(row.job && row.job.state) === 1;
+}
+
+// The failed replication tasks, in input order, as a new list.
+function failedReplications(rows) {
+  var list = arrayLike(rows) ? rows : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (replicationFailed(list[i])) out.push(list[i]);
+  }
+  return out;
+}
+
+// The same for cloud sync.
+function failedCloudSync(rows) {
+  var list = arrayLike(rows) ? rows : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (cloudSyncFailed(list[i])) out.push(list[i]);
+  }
+  return out;
+}
+
+// The worst protection level across the state's two job-bearing sections:
+// "warning" when any replication or cloud sync task has failed, else "". A
+// missing state or a missing section is not a warning.
+function worstProtectionLevel(state) {
+  if (failedReplications(state && state.replication).length > 0) return "warning";
+  if (failedCloudSync(state && state.cloudSync).length > 0) return "warning";
+  return "";
+}
+
+// The label for a protection card: the name when it has one, else the dataset,
+// else the pool, else "". Never "undefined".
+function protectionLabel(row) {
+  if (!row || typeof row !== "object") return "";
+  var fields = [row.name, row.dataset, row.pool];
+  for (var i = 0; i < fields.length; i++) {
+    var value = fields[i];
+    if (value !== null && value !== undefined && String(value) !== "") return String(value);
+  }
+  return "";
+}
+
+// A compact cron line for a schedule: `dow hour minute`, each present field
+// only. A null or non-object schedule is "", never a line of empty fields. The
+// scrub and cloud sync schedules have no begin/end, which this ignores anyway.
+function scheduleText(schedule) {
+  if (!schedule || typeof schedule !== "object") return "";
+  var fields = ["dow", "hour", "minute"];
+  var parts = [];
+  for (var i = 0; i < fields.length; i++) {
+    var value = schedule[fields[i]];
+    if (value !== null && value !== undefined && String(value) !== "") parts.push(String(value));
+  }
+  return parts.join(" ");
+}
+
 function hasAlerts(state) {
   var counts = state && state.counts;
   if (counts && typeof counts.total === "number") return counts.total > 0;
