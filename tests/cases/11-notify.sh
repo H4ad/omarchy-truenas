@@ -27,13 +27,62 @@ notify_endpoints() {
   local alerts=$1 pool=$2 temps=${3:-"$ROOT/tests/fixtures/disk-temperatures.json"}
   local services=${4:-"$ROOT/tests/fixtures/services.json"}
   local apps=${5:-"$ROOT/tests/fixtures/apps.json"}
+  local replication=${6:-"$ROOT/tests/fixtures/replication.json"}
+  local cloudsync=${7:-"$ROOT/tests/fixtures/cloudsync.json"}
   respond     "/api/v2.0/alert/list"  0 200 "$alerts"
+  # The specific pool sub-routes come before /api/v2.0/pool, because the stub
+  # matches a URL by substring.
+  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
   respond_add "/api/v2.0/pool"        0 200 "$pool"
   respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
   respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
   respond_add "/api/v2.0/disk/temperatures" 0 200 "$temps"
   respond_add "/api/v2.0/service"     0 200 "$services"
   respond_add "/api/v2.0/app"         0 200 "$apps"
+  respond_add "/api/v2.0/replication" 0 200 "$replication"
+  respond_add "/api/v2.0/cloudsync"   0 200 "$cloudsync"
+}
+
+# The protection half of the map on its own: quiet alerts and pools, the real
+# disks and services, and the replication and cloud sync bodies a case varies.
+notify_protection() {
+  local replication=$1 cloudsync=${2:-"$ROOT/tests/fixtures/cloudsync.json"}
+  notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+    "$ROOT/tests/fixtures/pools-healthy.json" \
+    "$ROOT/tests/fixtures/disk-temperatures.json" \
+    "$ROOT/tests/fixtures/services.json" \
+    "$ROOT/tests/fixtures/apps.json" \
+    "$replication" "$cloudsync"
+}
+
+# A copy of the replication fixture with task id 1's job state and error set.
+rep_job() {
+  local id=$1 state=$2 error=${3:-} out=$4
+  jq -c --argjson id "$id" --arg s "$state" --arg e "$error" \
+    'map(if .id == $id then .job = { state: $s, time_finished: null,
+             error: (if $e == "" then null else $e end) } else . end)' \
+    "$ROOT/tests/fixtures/replication.json" >"$out"
+}
+
+# A copy of the replication fixture with a warning on task id 1's task state.
+rep_warn() {
+  local id=$1 out=$2
+  jq -c --argjson id "$id" \
+    'map(if .id == $id then .state = { state: "FINISHED", datetime: null,
+             warnings: ["snapshot failed"], last_snapshot: null }
+         else . end)' \
+    "$ROOT/tests/fixtures/replication.json" >"$out"
+}
+
+# A one-row cloud sync body with the job state and error a case wants.
+cs_job() {
+  local state=$1 error=${2:-} out=$3
+  jq -nc --arg s "$state" --arg e "$error" \
+    '[ { id: 3, description: "clouda", path: "/mnt/storage", enabled: true,
+         direction: "PUSH", transfer_mode: "SYNC", schedule: null,
+         job: { state: $s, time_finished: null,
+                error: (if $e == "" then null else $e end) } } ]' >"$out"
 }
 
 # A copy of the service or app fixture with one row moved to another state, so a
@@ -745,4 +794,170 @@ check "the service that came back" 1 \
   "$(grep -c 'Service ssh is running again' "$STUB_NOTIFY_LOG" || true)"
 check "cifs is now down" true "$(seen '.services.cifs.down')"
 check "ssh is now up" false "$(seen '.services.ssh.down')"
+teardown
+
+# --- Protection (replication and cloud sync) --------------------------------
+# Only replication and cloud sync carry a job, so only they toast. Every case
+# runs with metaMaxAgeSeconds 0, because the protection rows ride the meta cache
+# and a second poll would otherwise reuse the first poll's rows.
+
+test_case "a replication job going FAILED toasts once and is not replayed"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_protection "$ROOT/tests/fixtures/replication.json"
+poll
+check "a successful baseline is quiet" 0 "$(notifications)"
+check "the job state is recorded" SUCCESS "$(seen '.replication["1"].state')"
+check "and it is not failed" false "$(seen '.replication["1"].failed')"
+rep_job 1 FAILED "send failed" "$WORK/rep-failed.json"
+notify_protection "$WORK/rep-failed.json"
+poll
+check "one failure toast" 1 "$(notifications)"
+check "the headline names the task" 1 \
+  "$(grep -c 'Replication storage-to-backup failed' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries the job error" 1 \
+  "$(grep -c 'send failed' "$STUB_NOTIFY_LOG" || true)"
+check "with the alert glyph" 1 \
+  "$(awk -v g=$'\uf0f3' '/Replication storage-to-backup failed/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "at normal urgency" 1 \
+  "$(awk '/Replication storage-to-backup failed/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the exec is argv words, xdg-open then the base" 1 \
+  "$(awk '/Replication storage-to-backup failed/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the state is recorded" FAILED "$(seen '.replication["1"].state')"
+check "and it is failed" true "$(seen '.replication["1"].failed')"
+poll
+check "an identical poll does not replay" 1 "$(notifications)"
+teardown
+
+test_case "a replication job that recovers toasts a recovery"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+rep_job 1 FAILED "" "$WORK/rep-failed.json"
+notify_protection "$WORK/rep-failed.json"
+poll
+check "a first sighting that is failed is quiet" 0 "$(notifications)"
+check "but it is recorded failed" true "$(seen '.replication["1"].failed')"
+notify_protection "$ROOT/tests/fixtures/replication.json"
+poll
+check "a recovery toast" 1 "$(notifications)"
+check "saying it recovered" 1 \
+  "$(grep -c 'Replication storage-to-backup recovered' "$STUB_NOTIFY_LOG" || true)"
+check "at low urgency" 1 \
+  "$(awk '/Replication storage-to-backup recovered/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "with the ok glyph" 1 \
+  "$(awk -v g=$'\uf00c' '/Replication storage-to-backup recovered/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the state is SUCCESS again" SUCCESS "$(seen '.replication["1"].state')"
+teardown
+
+test_case "replication state warnings are a failure"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_protection "$ROOT/tests/fixtures/replication.json"
+poll
+check "the clean baseline is quiet" 0 "$(notifications)"
+rep_warn 1 "$WORK/rep-warn.json"
+notify_protection "$WORK/rep-warn.json"
+poll
+check "warnings toast" 1 "$(notifications)"
+check "naming the task" 1 \
+  "$(grep -c 'Replication storage-to-backup failed' "$STUB_NOTIFY_LOG" || true)"
+check "and it is recorded failed" true "$(seen '.replication["1"].failed')"
+teardown
+
+test_case "a RUNNING job carries the decisive state forward and a later FAILED still toasts"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_protection "$ROOT/tests/fixtures/replication.json"
+poll
+rep_job 1 RUNNING "" "$WORK/rep-running.json"
+notify_protection "$WORK/rep-running.json"
+poll
+check "a running job toasts nothing" 0 "$(notifications)"
+check "and carries SUCCESS forward" SUCCESS "$(seen '.replication["1"].state')"
+check "with failed still false" false "$(seen '.replication["1"].failed')"
+rep_job 1 FAILED "boom" "$WORK/rep-failed.json"
+notify_protection "$WORK/rep-failed.json"
+poll
+check "the failure after the gap still toasts" 1 "$(notifications)"
+check "and it is recorded failed" true "$(seen '.replication["1"].failed')"
+teardown
+
+test_case "a failed replication poll leaves seen.replication untouched"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_protection "$ROOT/tests/fixtures/replication.json"
+poll
+check "the baseline is quiet" 0 "$(notifications)"
+before=$(seen '.replication')
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+respond_add "/api/v2.0/pool/scrub" 0 200 "$ROOT/tests/fixtures/scrubs.json"
+respond_add "/api/v2.0/pool" 0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service" 0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app" 0 200 "$ROOT/tests/fixtures/apps.json"
+respond_add "/api/v2.0/replication" 0 500 "$ROOT/tests/fixtures/err-500.json"
+respond_add "/api/v2.0/cloudsync" 0 200 "$ROOT/tests/fixtures/cloudsync.json"
+poll
+check "no toast from a failed replication answer" 0 "$(notifications)"
+check "the serialized seen.replication is unchanged" "$before" "$(seen '.replication')"
+notify_protection "$ROOT/tests/fixtures/replication.json"
+poll
+check "and nothing is replayed on the next good poll" 0 "$(notifications)"
+teardown
+
+test_case "a cloud sync job going FAILED toasts and a recovery follows"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+cs_job SUCCESS "" "$WORK/cs-success.json"
+notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-success.json"
+poll
+check "the successful baseline is quiet" 0 "$(notifications)"
+check "the job state is recorded" SUCCESS "$(seen '.cloudSync["3"].state')"
+cs_job FAILED "quota exceeded" "$WORK/cs-failed.json"
+notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-failed.json"
+poll
+check "one failure toast" 1 "$(notifications)"
+check "the headline names the task" 1 \
+  "$(grep -c 'Cloud sync clouda failed' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries the error" 1 \
+  "$(grep -c 'quota exceeded' "$STUB_NOTIFY_LOG" || true)"
+check "and it is recorded failed" true "$(seen '.cloudSync["3"].failed')"
+notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-success.json"
+poll
+check "a recovery toast" 2 "$(notifications)"
+check "saying it recovered" 1 \
+  "$(grep -c 'Cloud sync clouda recovered' "$STUB_NOTIFY_LOG" || true)"
+check "with the ok glyph" 1 \
+  "$(awk -v g=$'\uf00c' '/Cloud sync clouda recovered/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+teardown
+
+test_case "a cloud sync task first sighted failed toasts nothing"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+cs_job FAILED "" "$WORK/cs-failed.json"
+notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-failed.json"
+poll
+check "no toast on a first sighting" 0 "$(notifications)"
+check "but it is recorded failed" true "$(seen '.cloudSync["3"].failed')"
+poll
+check "and an identical poll stays quiet" 0 "$(notifications)"
+teardown
+
+test_case "a failed cloud sync poll leaves seen.cloudSync untouched"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+cs_job SUCCESS "" "$WORK/cs-success.json"
+notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-success.json"
+poll
+check "the baseline is quiet" 0 "$(notifications)"
+before=$(seen '.cloudSync')
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+respond_add "/api/v2.0/pool/scrub" 0 200 "$ROOT/tests/fixtures/scrubs.json"
+respond_add "/api/v2.0/pool" 0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service" 0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app" 0 200 "$ROOT/tests/fixtures/apps.json"
+respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+respond_add "/api/v2.0/cloudsync" 0 500 "$ROOT/tests/fixtures/err-500.json"
+poll
+check "no toast from a failed cloud sync answer" 0 "$(notifications)"
+check "the serialized seen.cloudSync is unchanged" "$before" "$(seen '.cloudSync')"
 teardown
