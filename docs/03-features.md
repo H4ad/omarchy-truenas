@@ -213,8 +213,8 @@ failure sentence instead of an empty table.
 
 ## Milestone 6, what ships
 
-**Help sheet.** `Ui/HelpModal.qml` was complete and dead; the panel `?` button
-and the menu Help row now open it. It carries ten sections in panel tab order
+**Help sheet.** `Ui/HelpModal.qml` existed and was dead; the panel `?` button
+and the menu Help row now open it. It carries ten sections in its own order
 (CONNECTION, POOLS, DISKS, SERVICES, APPS, PROTECTION, SHARES AND NETWORK,
 ALERTS, SECRETS, WHEN SOMETHING FAILS), each term one sentence: what the word
 means and what the user can do about it. It draws over the panel inside

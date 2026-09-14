@@ -11,8 +11,8 @@ All six milestones are complete, reviewed, merged, verified against a live
 TrueNAS 25.10.6, installed and enabled on the desk. Milestone 6 was the release
 milestone: the glossary is reachable from the panel `?` and the menu Help row,
 the menu header shows the version, every data view satisfies the empty and error
-state contract, the four uncalled Model helpers are gone, and the manifest and
-README ship as version `1.0.0`. The design's v1 feature set is finished. Nothing
+state contract, the four uncalled Model helpers are gone, and the manifest ships
+as version `1.0.0`. The design's v1 feature set is finished. Nothing
 blocks publication except the manual steps below.
 
 - Repo: `~/Projects/omarchy-truenas` (hub-only; remote `hub` =
@@ -88,7 +88,7 @@ share/normalize.jq     API shapes -> stable state shape (system, counts, alerts,
                        services, apps, replication, cloudSync, snapshotTasks, scrubs, shares, network)
 scripts/dev-install    copy runtime files to the plugin dir; --restart restarts the shell
 scripts/screenshot     open the panel over IPC, capture a hand-picked region into preview.png
-docs/01,02,03,11       plugin API, TrueNAS API (M1-M6 verified), features, pitfalls
+docs/01,02,03,11       plugin API, TrueNAS API (M1-M5 verified; M6 added no route), features, pitfalls
 docs/plans/            the design and the M1-M6 plans
 tests/                 run.sh + cases/*.sh + *.mjs + stubs + fixtures
 ```
@@ -171,7 +171,7 @@ replay or hide a change.
   pools `2 (worst ONLINE)`, alerts `4 active (critical 0, error 0, warning 2,
   notice 0, info 2, dismissed 0)`.
 - `./bin/truenasctl poll --quiet --force-meta` exits 0 and `state.json` holds all
-  thirteen meta sections with zero `warnings`: alerts 4, pools 2, disks 5,
+  thirteen polled sections with zero `warnings`: alerts 4, pools 2, disks 5,
   services 8, apps 5, replication 1, cloudSync 0 (the real zero), snapshotTasks
   7, scrubs 2, smb 3, nfs 1, iscsi 0 (the real zero), network 1.
 - `./bin/truenasctl test -v`: reachable yes, version 25.10.6, key set, curl rc 0
@@ -283,8 +283,8 @@ variants 149, links 27, for 1623 assertions.
   live app is disruptive. A service write was exercised live instead
   (`service-start snmp` flipped it to RUNNING, `service-start ups` reported
   `action_failed`). Exercise an app write on a disposable app next time.
-- Alert `dismiss`/`restore` is still not exercised against the NAS: the only
-  active warning is a genuine "uncorrectable errors for sda".
+- Alert `dismiss`/`restore` is still not exercised against the NAS: the active
+  warnings are genuine (for example, uncorrectable errors for sda).
 - The M4 run verbs were verified live only on their error path (an invalid id
   answers `422`); no real scrub, replication or cloud sync was started.
 - On load the shell logs `TypeError: Cannot assign to read-only property

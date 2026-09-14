@@ -178,7 +178,7 @@ code.
     "terms": [ { "term": "tempState", "text": "…" } ] } ]
 ```
 
-The array gains one section per shipped surface, in panel tab order, plus a
+The array gains one section per shipped surface, in the sheet's own order, plus a
 closing troubleshooting section: CONNECTION, POOLS, DISKS, SERVICES, APPS,
 PROTECTION, SHARES AND NETWORK, ALERTS, SECRETS, WHEN SOMETHING FAILS. The
 repeaters in the file are unchanged; only the data grows. Every sentence stays
