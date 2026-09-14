@@ -204,3 +204,53 @@ function scrubs(list, needle) {
   }
   return out;
 }
+
+// One filter serves all three share types: each carries a subset of name, path,
+// comment and purpose, and an empty field never matches a non-empty needle, so
+// an SMB row with no path field still matches on its name and an NFS row with no
+// name still matches on its path.
+function shares(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var share = items[i];
+    if (!share || typeof share !== "object") continue;
+    if (contains(share.name, needle)
+        || contains(share.path, needle)
+        || contains(share.comment, needle)
+        || contains(share.purpose, needle)) {
+      out.push(share);
+    }
+  }
+  return out;
+}
+
+// An interface matches on its name, type, link state, media type, negotiated
+// media subtype and every runtime address. The addresses list is guarded, so a
+// row with no addresses still matches on its name.
+function interfaces(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var iface = items[i];
+    if (!iface || typeof iface !== "object") continue;
+    var match = contains(iface.name, needle)
+      || contains(iface.type, needle)
+      || contains(iface.linkState, needle)
+      || contains(iface.mediaType, needle)
+      || contains(iface.mediaSubtype, needle);
+    if (!match) {
+      var addresses = arrayLike(iface.addresses) ? iface.addresses : [];
+      for (var j = 0; j < addresses.length; j++) {
+        if (contains(addresses[j] && addresses[j].address, needle)) {
+          match = true;
+          break;
+        }
+      }
+    }
+    if (match) out.push(iface);
+  }
+  return out;
+}

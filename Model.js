@@ -288,6 +288,83 @@ function unknownApps(apps) {
   return out;
 }
 
+// Interface link-state ranks. 0 is up, 1 is down (the worst), 2 is unknown. The
+// scale is deliberately not monotonic, exactly like the service and app ranks: a
+// blank or LINK_STATE_UNKNOWN link is "I cannot tell" and must never read as a
+// down link, which is a warning. Anything else, LINK_STATE_DOWN included, is a
+// real bad state and ranks 1. The wire value is the raw TrueNAS enum word, e.g.
+// LINK_STATE_UP, so the table is keyed on that spelling.
+var LINK_STATE_RANK = {
+  "LINK_STATE_UP": 0,
+  "": 2,
+  "LINK_STATE_UNKNOWN": 2
+};
+
+function linkStateRank(state) {
+  var key = String(state || "").toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(LINK_STATE_RANK, key)) return LINK_STATE_RANK[key];
+  return 1;
+}
+
+// One word for an interface's link: "up", "down", or "unknown" for a blank, a
+// LINK_STATE_UNKNOWN, or a spelling this file has not heard of. Never
+// "undefined".
+function linkStateText(state) {
+  var key = String(state || "").toUpperCase();
+  if (key === "LINK_STATE_UP") return "up";
+  if (key === "LINK_STATE_DOWN") return "down";
+  return "unknown";
+}
+
+// The worst interface link level across the rows: "warning" when any link is
+// down, "unknown" only when a link is unknown and none is down, "" when every
+// link is up. A blank link is never a warning, and missing rows answer "".
+function worstLinkLevel(network) {
+  var list = arrayLike(network) ? network : [];
+  var unknown = false;
+  for (var i = 0; i < list.length; i++) {
+    var rank = linkStateRank(list[i] && list[i].linkState);
+    if (rank === 1) return "warning";
+    if (rank === 2) unknown = true;
+  }
+  return unknown ? "unknown" : "";
+}
+
+// The down interfaces, in input order, as a new list. A blank or unknown link is
+// unknown, not down, so it never appears here.
+function downInterfaces(network) {
+  var list = arrayLike(network) ? network : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (linkStateRank(list[i] && list[i].linkState) === 1) out.push(list[i]);
+  }
+  return out;
+}
+
+// The unknown-link interfaces, in input order, as a new list. Counted apart so a
+// list of unknown rows never reads as "every link is up".
+function unknownInterfaces(network) {
+  var list = arrayLike(network) ? network : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (linkStateRank(list[i] && list[i].linkState) === 2) out.push(list[i]);
+  }
+  return out;
+}
+
+// The row counts the Shares view and the Menu print: one per share type plus the
+// total. A missing or non-list key is 0; a shares argument that is not an object
+// yields all zeroes. A section that failed contributes 0 too, so the caller must
+// gate the printed count on that section's warning, the way Menu.qml gates
+// servicesText, rather than show the zero as a real answer.
+function shareCounts(shares) {
+  var bag = shares && typeof shares === "object" ? shares : {};
+  var smb = arrayLike(bag.smb) ? bag.smb.length : 0;
+  var nfs = arrayLike(bag.nfs) ? bag.nfs.length : 0;
+  var iscsi = arrayLike(bag.iscsi) ? bag.iscsi.length : 0;
+  return { smb: smb, nfs: nfs, iscsi: iscsi, total: smb + nfs + iscsi };
+}
+
 // How many rows carry an update. A non-list counts zero because the caller
 // asked how many of these rows need one and there are no rows; a row whose flag
 // is missing or not exactly true is not counted.
