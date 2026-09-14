@@ -507,8 +507,10 @@ and `docs/04-handoff.md` updated; `git push hub master`.
   that wants it caches those fields.
 - **Non-up link states are unverified.** Only `LINK_STATE_UP` was observed; the
   `LINK_STATE_DOWN` and `LINK_STATE_UNKNOWN` spellings are from the TrueNAS
-  enum. `Model.linkStateRank` treats any unrecognized word as unknown so a new
-  spelling never reads as down.
+  enum. `Model.linkStateRank` ranks an unrecognized word `1`, the same as
+  `LINK_STATE_DOWN` (the frozen contract above), so a new spelling reads as down
+  at the chip and section level and never as unknown; only `linkStateText`
+  prints `unknown` for a word it does not know.
 - **Bridge, VLAN and link-aggregation interfaces are unverified.** Only one
   `PHYSICAL` interface exists. The normalizer reads the same nested paths for
   every type, so an unknown shape degrades to empty strings, not a crash.

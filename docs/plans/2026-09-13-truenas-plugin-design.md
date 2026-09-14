@@ -1,7 +1,7 @@
 # TrueNAS plugin for Omarchy — design
 
 Date: 2026-09-13
-Status: approved, ready for implementation planning
+Status: complete, all six milestones shipped
 Plugin id: `io.github.h4ad.truenas`
 Repo: `~/Projects/omarchy-truenas` (WIP to `hub`, finished work to GitHub)
 
@@ -303,9 +303,22 @@ reads the key on stdin; `config list` reports that a key is set, never its value
 3. Apps + Services + writes.
 4. Protection + run-now writes.
 5. Shares + Network.
-6. Menu, help/glossary, README, preview image, release.
+6. Menu, help/glossary, README, preview image, release. (complete)
 
 Each milestone ends usable and is committed on its own.
+
+### Milestone 6 decisions
+
+- **Version `1.0.0`.** M6 is the release milestone and the v1 set is complete, so
+  the manifest moves from `0.5.0` to `1.0.0`. The REST removal in TrueNAS 26 and
+  the shapes never measured live do not hold the release back: `tn_call` isolates
+  the migration and the caveats live in `docs/04-handoff.md`.
+- **Preview image.** `scripts/screenshot` ships as the helper, opening the panel
+  over IPC and capturing a hand-picked region with `slurp` and `grim`. Because the
+  panel is a layer-shell surface and the crop is a human judgement, refreshing
+  `preview.png` is a manual step; no agent fabricates the image, and the
+  committed `preview.png` stays the milestone-1 screenshot until a human re-runs
+  the helper.
 
 ## Open questions / risks
 

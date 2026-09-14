@@ -1,30 +1,32 @@
 # TrueNAS plugin - handoff
 
-Written 2026-09-14 at `master` (milestone 5 merged), for an agent with none of
+Written 2026-09-14 at `master` (milestone 6 merged), for an agent with none of
 the session history. Read this first, then `.agent/WORKLOG.md`, then
 `docs/plans/2026-09-13-truenas-plugin-design.md` and the milestone plans under
 `docs/plans/`.
 
 ## tl;dr
 
-Milestones 1 (system/pools/alerts), 2 (disks and temperatures), 3 (services and
-apps with control writes), 4 (protection with run-now writes and failure
-notifications) and 5 (shares and network, read-only) are complete, reviewed,
-merged, verified against a live TrueNAS 25.10.6, installed and enabled on the
-desk. Version is `0.5.0`. Nothing blocks milestone 6 (polish).
+All six milestones are complete, reviewed, merged, verified against a live
+TrueNAS 25.10.6, installed and enabled on the desk. Milestone 6 was the release
+milestone: the glossary is reachable from the panel `?` and the menu Help row,
+the menu header shows the version, every data view satisfies the empty and error
+state contract, the four uncalled Model helpers are gone, and the manifest ships
+as version `1.0.0`. The design's v1 feature set is finished. Nothing
+blocks publication except the manual steps below.
 
 - Repo: `~/Projects/omarchy-truenas` (hub-only; remote `hub` =
   `forge:h4ad/omarchy-truenas.git`). No GitHub remote yet.
 - Git identity: `Vinícius Lourenço <contact@viniciusl.com.br>`.
 - `.agent` → `~/agent-state/omarchy-truenas` (Syncthing; never commit).
-- Tests: 1649 assertions green (`./tests/run.sh`)
-  (shell 1061, model 267, search 145, bar variants 149, links 27).
-  `omarchy plugin validate` clean on a tree without `.agent`;
-  `/usr/lib/qt6/bin/qmllint` Qt6 0 errors.
+- Tests: 1623 assertions green (`./tests/run.sh`)
+  (shell 1065, model 237, search 145, bar variants 149, links 27).
+  `/usr/lib/qt6/bin/qmllint` Qt6 0 errors; `omarchy plugin validate` clean on
+  the installed tree.
 - Reference plugin to copy patterns from: `~/Projects/omarchy-signoz`
   (architecture) and `docs/01-omarchy-plugin-api.md`, `docs/11-pitfalls.md`
   (both adapted into this repo).
-- Merged milestone branches still exist locally as `agent/desk/m1-*` … `m5-*`
+- Merged milestone branches still exist locally as `agent/desk/m1-*` … `m6-*`
   (audit); the worktrees were removed.
 
 ## How to continue (the process that worked)
@@ -42,34 +44,36 @@ git merge --no-ff agent/desk/m6-<slug> -m "Merge Task <N>: <title>"
 git worktree remove /tmp/opencode/tn-m6-<slug> --force
 ```
 
-Wave pattern that worked five times: pick tasks with disjoint file sets, run
-them in parallel, review in parallel, merge in dependency order, run
-`./tests/run.sh` after every merge, then one final whole-implementation review.
-Always run `./tests/run.sh` before believing a task is done.
+Wave pattern that worked six times: pick tasks with disjoint file sets, run them
+in parallel, review in parallel, merge in dependency order, run `./tests/run.sh`
+after every merge, then one final whole-implementation review. Always run
+`./tests/run.sh` before believing a task is done.
 
 ## What exists
 
 ```
 manifest.json          bar-widget + menu + service; Default/Icon/Alerts/
                        Capacity/Pool/Temp/Full, hideWhenHealthy, panelWidth,
-                       configPath; 0.5.0
+                       configPath; 1.0.0
 Service.qml            singleton poller owner (Timer + Process truenas-poll, IPC target "truenas")
-BarWidget.qml          read-only watcher of state.json; variants; IPC io.github.h4ad.truenas; Loader(Panel)
+BarWidget.qml          read-only watcher of state.json; variants; IPC io.github.h4ad.truenas;
+                       Loader(Panel); openHelp() -> panelLoader.item.showHelp() then open()
 Panel.qml              popout: Health/Pools/Disks/Services/Apps/Shares/Protection/Alerts/Config,
-                       single write queue, ConfirmAction inside PanelKeyCatcher
-Menu.qml               summon menu (views, poll now, open NAS UI, status)
+                       single write queue, ConfirmAction inside PanelKeyCatcher,
+                       HelpModal + showHelp/hideHelp/helpOpen + the header `?` button
+Menu.qml               summon menu (views, poll now, open NAS UI, status, Help row,
+                       dim version caption from manifest.version)
 Model.js               .pragma library: mode, worstPool, capacityPct, formatBytes, errorSentence,
                        tempStateRank/tempLevel/hottestTempC/formatTemp, serviceStateRank/appStateRank,
-                       worstServiceLevel/worstAppLevel, downServices/downApps, unknownServices/unknownApps,
-                       appsUpgradeable, appLabel, protectionStateRank/protectionState/replicationFailed/
-                       cloudSyncFailed/failedReplications/failedCloudSync/worstProtectionLevel/
-                       protectionLabel/scheduleText, linkStateRank/linkStateText/worstLinkLevel/
-                       downInterfaces/unknownInterfaces/shareCounts
+                       downServices/downApps, unknownServices/unknownApps, appsUpgradeable, appLabel,
+                       protectionStateRank/protectionState/replicationFailed/cloudSyncFailed/
+                       failedReplications/failedCloudSync/protectionLabel/scheduleText,
+                       linkStateRank/linkStateText/downInterfaces/unknownInterfaces/shareCounts
 BarVariants.js         Default/Icon/Alerts/Capacity/Pool/Temp/Full (+ offline override), soleSeverity
 Links.js               origin-gated view URLs; Search.js alerts/pools/disks/services/apps/replication/
                        cloudSync/snapshotTasks/scrubs/shares/interfaces filtering
 Views/                 Health, Pools, Disks, Services, Apps, Shares, Protection, Alerts, Config
-Ui/                    Card, Chip, CapacityBar, ConfirmAction, FilterField, HelpModal,
+Ui/                    Card, Chip, CapacityBar, ConfirmAction, FilterField, HelpModal (ten sections),
                        ScrollIndicator, SecretField, VariantPicker
 bin/truenas-poll       read path -> state.json + notifications (alerts, pools, disk temps,
                        service/app down, replication/cloud sync failure & recovery)
@@ -83,8 +87,9 @@ bin/truenas-lib.sh     config normalize, credential resolve, HTTP (key on curl s
 share/normalize.jq     API shapes -> stable state shape (system, counts, alerts, pools, disks,
                        services, apps, replication, cloudSync, snapshotTasks, scrubs, shares, network)
 scripts/dev-install    copy runtime files to the plugin dir; --restart restarts the shell
-docs/01,02,03,11       plugin API, TrueNAS API (M1-M5 verified), features, pitfalls
-docs/plans/            the design and the M1-M5 plans
+scripts/screenshot     open the panel over IPC, capture a hand-picked region into preview.png
+docs/01,02,03,11       plugin API, TrueNAS API (M1-M5 verified; M6 added no route), features, pitfalls
+docs/plans/            the design and the M1-M6 plans
 tests/                 run.sh + cases/*.sh + *.mjs + stubs + fixtures
 ```
 
@@ -160,6 +165,22 @@ replay or hide a change.
   and enabled in `shell.json` (`variant: "Full"`). Install/restart with
   `./scripts/dev-install --restart`.
 
+### Milestone 6 live verification (2026-09-14, after `./scripts/dev-install --restart`)
+
+- `connection: ok`, dialect `rest-v2.0`, version `25.10.6`, uptime `17h 25m`,
+  pools `2 (worst ONLINE)`, alerts `4 active (critical 0, error 0, warning 2,
+  notice 0, info 2, dismissed 0)`.
+- `./bin/truenasctl poll --quiet --force-meta` exits 0 and `state.json` holds all
+  thirteen polled sections with zero `warnings`: alerts 4, pools 2, disks 5,
+  services 8, apps 5, replication 1, cloudSync 0 (the real zero), snapshotTasks
+  7, scrubs 2, smb 3, nfs 1, iscsi 0 (the real zero), network 1.
+- `./bin/truenasctl test -v`: reachable yes, version 25.10.6, key set, curl rc 0
+  http 200.
+- The shell was restarted and the plugin reloaded; `qs log` shows no truenas QML
+  errors, only the pre-existing host-side `moduleName` TypeError at
+  `plugins/bar/Bar.qml:1770` and a Syncthing plugin warning, both unrelated.
+- The IPC verbs `open` and `close` work.
+
 ## Secrets and paths
 
 ```
@@ -188,7 +209,8 @@ omarchy plugin validate <clean-tree> # the dev repo's .agent symlink is rejected
 The harness sources `tests/cases/*.sh` into one shell; the stub `tests/stubs/curl`
 emulates curl's config/header parsing and `tests/stubs/omarchy-notification-send`
 emulates the sender's argv contract, so a broken invocation fails the suite. Keep
-those stubs honest.
+those stubs honest. Current totals: shell 1065, model 237, search 145, bar
+variants 149, links 27, for 1623 assertions.
 
 ## Decisions and traps
 
@@ -224,12 +246,16 @@ those stubs honest.
 - Service/app and replication/cloud sync toasts dedupe through a stable boolean
   in `seen.json` (a `down`/`failed` flag), so a blank or transitional poll cannot
   replay or hide a change.
-- `LinkStateRank` treats an unrecognized link word as a real down state (rank 1),
-  matching the frozen M5 contract; the plan's open-question prose said the
-  opposite but the frozen contract is authoritative. `linkStateText` still prints
-  `unknown` for a word it does not know, so the chip and the section level can
-  disagree for a future enum; revisit if the NAS grows a link state.
-- Read the real binary's contract, not the reference's stub. Bugs in M1-M5 came
+- `linkStateRank` treats an unrecognized link word as a real down state (rank 1),
+  matching the frozen M5 contract. `linkStateText` still prints `unknown` for a
+  word it does not know, so the chip and the section level can disagree for a
+  future enum; revisit if the NAS grows a link state.
+- The help sheet's content is data in `Ui/HelpModal.qml`, not a Model accessor:
+  there is no node suite that could hold the words, and only the layout repeaters
+  are code. Add a section by adding an array entry.
+- The version caption reads `manifest.version` and renders only when it is
+  non-empty, so a manifest with no version shows nothing rather than a blank.
+- Read the real binary's contract, not the reference's stub. Bugs in M1-M6 came
   from trusting assumptions over a live probe.
 - QML compiled components are cached per URL; `--restart` is the only reliable
   way to see a panel change.
@@ -245,40 +271,84 @@ those stubs honest.
   unknown spellings and the `BRIDGE`/`VLAN`/`LINK_AGGREGATION` shapes come from
   the enum/documentation.
 - **`locked` was only ever seen `false`.** No locked dataset exists on the box.
-- **The panel Shares tab was not clicked through by a human.** The shell
-  reloaded the plugin with no truenas QML errors and `qmllint`/`validate` are
-  clean; a visual pass over the Shares and Network blocks is still worth doing.
+- **The panel `?` and the help sheet were not clicked through by a human.** The
+  sheet is wired, `qmllint` and `validate` are clean, and the shell reloaded with
+  no truenas QML errors, but the click, the scroll and the Escape handling want a
+  visual pass.
+- **The menu Help row and the version caption were not visually confirmed.** The
+  row and caption exist and the suite is green; a human has not opened the menu
+  and read them.
 - The app write verbs (`app-start/stop/redeploy`) are covered by
   `tests/cases/15-api.sh` but were not exercised against the NAS: redeploying a
   live app is disruptive. A service write was exercised live instead
   (`service-start snmp` flipped it to RUNNING, `service-start ups` reported
   `action_failed`). Exercise an app write on a disposable app next time.
-- Alert `dismiss`/`restore` is still not exercised against the NAS: the only
-  active warning is a genuine "uncorrectable errors for sda".
+- Alert `dismiss`/`restore` is still not exercised against the NAS: the active
+  warnings are genuine (for example, uncorrectable errors for sda).
 - The M4 run verbs were verified live only on their error path (an invalid id
   answers `422`); no real scrub, replication or cloud sync was started.
 - On load the shell logs `TypeError: Cannot assign to read-only property
   "moduleName"` at `plugins/bar/Bar.qml:1770`; hosts and the signoz plugin show
   the same shape. Probably host-side; confirm before chasing.
-- `preview.png` is still the milestone-1 screenshot; M6 refreshes it.
-- `Model.worstServiceLevel`/`worstAppLevel`/`appsUpgradeable` are tested but have
-  no production caller yet; the Menu counts down and unknown rows directly.
+- `preview.png` is still the milestone-1 screenshot; milestone 6 shipped
+  `scripts/screenshot` but did not refresh the image (see the manual steps).
 - `qmllint` emits the repo's baseline unqualified-access warnings because
   `qs.Commons`/`qs.Ui` do not resolve outside the shell; 0 errors is the bar.
 
-## Roadmap
+## Remaining manual steps
 
-M1-M5 shipped. Each later milestone gets its own plan; the design doc lists them.
+These are human actions with the exact command; none blocks the merge.
 
-- **M6 Polish:** menu completeness, the glossary behind the `?`, the preview
-  image, and the marketplace submission. Open M5 questions to revisit: a Network
-  deep link (`Links.js` has no `networkUrl`), a share enable toggle (needs
-  `PUT /sharing/smb/{id}` with the whole document plus a write verb and
-  confirmation), and the optional `/smb` global header (would add a fifth meta
-  call).
+1. **Create the public GitHub repository and push only finished `master`.**
+   ```bash
+   gh repo create h4ad/omarchy-truenas --public --source ~/Projects/omarchy-truenas --remote origin
+   git -C ~/Projects/omarchy-truenas push origin master
+   ```
+   Push `master` only. Never push an `agent/*` or `wip/*` ref to `origin`.
+   Pushing is never done by the agent without an explicit request.
+2. **Refresh `preview.png`** (blocking for the marketplace submission, not for
+   the merge). On the desk, with the plugin installed, a key set and the poll
+   current:
+   ```bash
+   ./scripts/dev-install --restart
+   omarchy-shell io.github.h4ad.truenas open
+   ./scripts/screenshot preview.png   # drag over the bar item and the Health popout
+   git add preview.png && git commit -S -m 'docs: refresh the preview screenshot'
+   ```
+   The panel is a layer-shell surface and the crop is a judgement, which is why
+   the region is chosen by hand.
+3. **Submit to the marketplace.** Open the submission form linked from
+   `https://omarchyplugins.com/develop.html` and complete it with the repo URL,
+   the `MIT` license and `preview.png`.
+4. **A visual click-through** on a real session after `./scripts/dev-install
+   --restart`: every tab, the help `?`, its scroll and Escape handling, the
+   menu's Help row and version caption, and a filter that matches nothing on each
+   list. No unit test runs QML, so this is the only check for the rendering
+   itself.
+5. **A live regression check** of the read path:
+   ```bash
+   bin/truenasctl test -v
+   bin/truenasctl poll && bin/truenasctl status
+   qs log -p "$OMARCHY_PATH/shell" --tail 100
+   ```
+   Confirm all thirteen meta sections still write and the log stays clean.
+
+## Writing and git rules
+
+- No emojis and no em dashes. Use a comma, a period or parentheses.
+- No banned inflating or stock words; the working agreement carries the list.
+  Sentence case in headings.
+- Commit subjects are conventional (`docs:`, `feat:`, `fix:`, `chore:`, `test:`),
+  subject line only, no body and no trailers.
+- Never commit `.agent`: it is a Syncthing symlink, never tracked, and
+  `git status` must never show it.
+- Never `git stash`; use a wip commit.
+- Hub-only: `git push hub master` stores the work. Only finished commits go to a
+  GitHub `origin`, never a `wip/*` or `agent/*` ref. Follow the `git-park` skill.
 
 ## Finishing / publishing
 
 This is a hub-only project, so `git push hub master` is how work is stored. If a
-GitHub remote is added later, only clean finished commits go to `origin`; never a
-`wip/*` or `agent/*` ref. Follow the `git-park` skill.
+GitHub remote is added, only clean finished commits go to `origin`; never a
+`wip/*` or `agent/*` ref. The GitHub repo, the `preview.png` refresh and the
+marketplace form are the remaining manual gates above.
