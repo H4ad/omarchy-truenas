@@ -7,12 +7,36 @@
 # other endpoints are canned here rather than repeated in each case.
 all_healthy() {
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+  # The specific pool sub-routes come before /api/v2.0/pool: the stub matches on
+  # a substring, so a scrub request would otherwise be served the pool list.
+  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
   respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
   respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
   respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
   respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
   respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
   respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
+  respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+  respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
+}
+
+# The same map with one protection route failing. The failing route is written
+# first so the substring match cannot serve it from a broader entry.
+protection_route_fails() {
+  local route=$1
+  respond     "$route" 0 500 "$ROOT/tests/fixtures/err-500.json"
+  respond_add "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
+  respond_add "/api/v2.0/pool"              0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+  respond_add "/api/v2.0/system/info"       0 200 "$ROOT/tests/fixtures/system-info.json"
+  respond_add "/api/v2.0/disk/details"      0 200 "$ROOT/tests/fixtures/disks.json"
+  respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+  respond_add "/api/v2.0/service"           0 200 "$ROOT/tests/fixtures/services.json"
+  respond_add "/api/v2.0/app"               0 200 "$ROOT/tests/fixtures/apps.json"
+  respond_add "/api/v2.0/replication"       0 200 "$ROOT/tests/fixtures/replication.json"
+  respond_add "/api/v2.0/cloudsync"         0 200 "$ROOT/tests/fixtures/cloudsync.json"
 }
 
 test_case "a healthy NAS reports the pools and a quiet count"
@@ -72,6 +96,40 @@ check "an empty portal map is null" null \
   "$(state '.apps[] | select(.name=="appa") | .webui')"
 check "the upgrade flag is a boolean" true \
   "$(state '.apps[] | select(.name=="appb") | .upgradeAvailable')"
+check "two replication tasks" 2 "$(state '.replication | length')"
+check "replication sorted by name" "backup-to-offsite,storage-to-backup" \
+  "$(state '.replication | map(.name) | join(",")')"
+check "the nested task state is an object, not a string" object \
+  "$(state '.replication[] | select(.id==1) | .state | type')"
+check "the state datetime is ISO, never an object" string \
+  "$(state '.replication[] | select(.id==1) | .state.datetime | type')"
+check "the last snapshot is carried" "storage/vm-root@auto-daily-2026-09-14_00-05" \
+  "$(state '.replication[] | select(.id==1) | .state.lastSnapshot')"
+check "a PENDING task has no last snapshot, never empty text" null \
+  "$(state '.replication[] | select(.id==2) | .state.lastSnapshot')"
+check "the job state is carried" SUCCESS \
+  "$(state '.replication[] | select(.id==1) | .job.state')"
+check "no replication secret reaches a row" 0 \
+  "$(state '[.replication[] | select(has("ssh_credentials") or has("encryption_key"))] | length')"
+check "an auto task has a null schedule" null \
+  "$(state '.replication[] | select(.id==1) | .schedule')"
+check "a scheduled task keeps its window" "03:00" \
+  "$(state '.replication[] | select(.id==2) | .schedule.begin')"
+check "cloud sync is empty, not fabricated" "[]" "$(state '.cloudSync')"
+check "three snapshot tasks" 3 "$(state '.snapshotTasks | length')"
+check "snapshot tasks sorted by dataset" "Backup,boot-pool,storage" \
+  "$(state '.snapshotTasks | map(.dataset) | join(",")')"
+check "the naming schema is carried" "auto-hourly-%Y-%m-%d_%H-%M" \
+  "$(state '.snapshotTasks[] | select(.id==1) | .namingSchema')"
+check "a pending snapshot task has no datetime" null \
+  "$(state '.snapshotTasks[] | select(.id==6) | .state.datetime')"
+check "the scrub rows are sorted by pool" "Backup,storage" \
+  "$(state '.scrubs | map(.pool) | join(",")')"
+check "the scrub row keeps the numeric pool id apart from the name" 1 \
+  "$(state '.scrubs[] | select(.pool=="storage") | .poolId')"
+check "the scrub row carries no run state" false \
+  "$(state '.scrubs[] | select(.pool=="storage") | has("state")')"
+check "the scrub threshold is a number" 35 "$(state '.scrubs[0].threshold')"
 check "the details request is a POST" 2 "$(grep -o 'POST' "$STUB_METHOD_LOG" | wc -l)"
 check "with the USED type" 1 "$(grep -c '"type":"USED"' "$STUB_PAYLOAD_LOG" || true)"
 check "and temperatures asked per disk, with thresholds" 1 \
@@ -433,6 +491,23 @@ check "the pools still render" 2 "$(state '.pools | length')"
 check "and the services answered" 8 "$(state '.services | length')"
 teardown
 
+test_case "a failed protection fetch leaves that section empty with a warning"
+for pair in "replication:/api/v2.0/replication" \
+            "cloudSync:/api/v2.0/cloudsync" \
+            "snapshotTasks:/api/v2.0/pool/snapshottask" \
+            "scrubs:/api/v2.0/pool/scrub"; do
+  section=${pair%%:*}; route=${pair#*:}
+  setup; single_instance_config
+  protection_route_fails "$route"
+  poll
+  check "$section is empty, not fabricated rows" "[]" "$(state ".$section")"
+  check "a warning names the $section section" "$section" \
+    "$(state ".warnings[] | select(.section==\"$section\") | .section")"
+  check "the $section failure leaves the pools rendering" 2 \
+    "$(state '.pools | length')"
+  teardown
+done
+
 test_case "a 200 with a non-object list row fails the section, not fabricates a card"
 setup; single_instance_config
 printf '[{}, null]\n' >"$WORK/bad-list.json"
@@ -468,7 +543,7 @@ setup; single_instance_config
 all_healthy
 "$ROOT/bin/truenas-poll" --quiet --force-meta
 check "connected" true "$(state '.connection.ok')"
-check "seven requests on a cold poll" 7 "$(requests)"
+check "eleven requests on a cold poll" 11 "$(requests)"
 teardown
 
 test_case "failures accumulate, hold lastOkAt, and reset on recovery"

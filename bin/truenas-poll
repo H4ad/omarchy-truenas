@@ -86,15 +86,15 @@ previous=$(tn_read_json "$TN_STATE_FILE" '{}')
 seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
 meta=$(tn_read_json "$TN_META_FILE" '{}')
 
-# A cache entry is reusable only when all five sections are present and the
+# A cache entry is reusable only when all nine sections are present and the
 # system fetch time is fresh. A missing, empty, or unparsable meta.json reads
 # as `{}` here and is always stale, so nothing is silently reported as null.
-# An older meta.json without the disk, service or app keys is stale once,
-# refetches once, and self-heals. --force-meta short-circuits the age check on
-# top of a normal poll.
+# An older meta.json without the disk, service, app or protection keys is stale
+# once, refetches once, and self-heals. --force-meta short-circuits the age
+# check on top of a normal poll.
 meta_is_stale() {
   ((FORCE_META)) && return 0
-  jq -e '(.system.data != null) and (.disks.rows != null) and (.diskTemps.map != null) and (.services.rows != null) and (.apps.rows != null)' \
+  jq -e '(.system.data != null) and (.disks.rows != null) and (.diskTemps.map != null) and (.services.rows != null) and (.apps.rows != null) and (.replication.rows != null) and (.cloudSync.rows != null) and (.snapshotTasks.rows != null) and (.scrubs.rows != null)' \
     <<<"$meta" >/dev/null 2>&1 || return 0
   local fetched then_epoch now_epoch
   fetched=$(jq -r '.system.fetchedAt // ""' <<<"$meta")
@@ -121,7 +121,7 @@ warnings='[]'
 # The shape every failure path emits for the sections, so a failed request
 # contributes no rows and no fabricated zeroes.
 default_payload() {
-  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[],"disks":[],"services":[],"apps":[]}' >"$WORK/payload.json"
+  printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[],"disks":[],"services":[],"apps":[],"replication":[],"cloudSync":[],"snapshotTasks":[],"scrubs":[]}' >"$WORK/payload.json"
 }
 
 warn_section() {
@@ -173,6 +173,8 @@ fetch() {
   # with no readings, not a failed route).
   case $section in
     service|app)     shape='type == "array" and all(.[]; type == "object")' ;;
+    replication|cloudSync|snapshotTasks|scrubs) \
+                     shape='type == "array" and all(.[]; type == "object")' ;;
     alert|pool|disk) shape='type == "array"' ;;
     system)          shape='type == "object" and (length > 0)' ;;
     diskTemp)        shape='type == "object"' ;;
@@ -205,6 +207,14 @@ service_fetched=0
 service_ok=0
 app_fetched=0
 app_ok=0
+replication_fetched=0
+replication_ok=0
+cloudsync_fetched=0
+cloudsync_ok=0
+snapshot_fetched=0
+snapshot_ok=0
+scrub_fetched=0
+scrub_ok=0
 default_payload
 
 if [[ -n $config_error || -z $instance ]]; then
@@ -273,6 +283,25 @@ else
       fetch app "/api/v2.0/app" "$WORK/apps.json"
       app_fetched=1
       [[ -z $S_ERR ]] && app_ok=1
+
+      # Protection tasks are read whole and filtered client-side; each fails
+      # independently of the disks. /cloudsync is normally empty. The scrub
+      # route carries no run state, only the task schedule.
+      fetch replication "/api/v2.0/replication" "$WORK/replication.json"
+      replication_fetched=1
+      [[ -z $S_ERR ]] && replication_ok=1
+
+      fetch cloudSync "/api/v2.0/cloudsync" "$WORK/cloudsync.json"
+      cloudsync_fetched=1
+      [[ -z $S_ERR ]] && cloudsync_ok=1
+
+      fetch snapshotTasks "/api/v2.0/pool/snapshottask" "$WORK/snapshot-tasks.json"
+      snapshot_fetched=1
+      [[ -z $S_ERR ]] && snapshot_ok=1
+
+      fetch scrubs "/api/v2.0/pool/scrub" "$WORK/scrubs.json"
+      scrub_fetched=1
+      [[ -z $S_ERR ]] && scrub_ok=1
     else
       jq -c -n --argjson s "$(jq -c '.system.data // null' <<<"$meta")" '
         { hostname:       ($s.hostname // ""),
@@ -285,6 +314,10 @@ else
       jq -c '.diskTemps.map // {}' <<<"$meta" >"$WORK/disk-temps.json"
       jq -c '.services.rows // []' <<<"$meta" >"$WORK/services.json"
       jq -c '.apps.rows // []' <<<"$meta" >"$WORK/apps.json"
+      jq -c '.replication.rows // []' <<<"$meta" >"$WORK/replication.json"
+      jq -c '.cloudSync.rows // []' <<<"$meta" >"$WORK/cloudsync.json"
+      jq -c '.snapshotTasks.rows // []' <<<"$meta" >"$WORK/snapshot-tasks.json"
+      jq -c '.scrubs.rows // []' <<<"$meta" >"$WORK/scrubs.json"
     fi
 
     if ! jq -n -f "$TN_PLUGIN_DIR/share/normalize.jq" \
@@ -295,6 +328,10 @@ else
            --slurpfile diskTemps "$WORK/disk-temps.json" \
            --slurpfile services "$WORK/services.json" \
            --slurpfile apps "$WORK/apps.json" \
+           --slurpfile replication "$WORK/replication.json" \
+           --slurpfile cloudSync "$WORK/cloudsync.json" \
+           --slurpfile snapshotTasks "$WORK/snapshot-tasks.json" \
+           --slurpfile scrubs "$WORK/scrubs.json" \
            --arg now "$now" >"$WORK/payload.json" 2>/dev/null; then
       normalize_ok=0
       default_payload
@@ -714,13 +751,21 @@ fi
 # failure while the last good copy survives for the next poll.
 if ((system_fetched && system_ok && disks_fetched && disks_ok \
      && disk_temps_fetched && disk_temps_ok && normalize_ok \
-     && service_fetched && service_ok && app_fetched && app_ok)); then
+     && service_fetched && service_ok && app_fetched && app_ok \
+     && replication_fetched && replication_ok \
+     && cloudsync_fetched && cloudsync_ok \
+     && snapshot_fetched && snapshot_ok \
+     && scrub_fetched && scrub_ok)); then
   meta=$(jq -c -n --argjson meta "$meta" --arg now "$now" \
     --slurpfile payload "$WORK/payload.json" \
     --slurpfile disks "$WORK/disks.json" \
     --slurpfile diskTemps "$WORK/disk-temps.json" \
     --slurpfile services "$WORK/services.json" \
-    --slurpfile apps "$WORK/apps.json" '
+    --slurpfile apps "$WORK/apps.json" \
+    --slurpfile replication "$WORK/replication.json" \
+    --slurpfile cloudSync "$WORK/cloudsync.json" \
+    --slurpfile snapshotTasks "$WORK/snapshot-tasks.json" \
+    --slurpfile scrubs "$WORK/scrubs.json" '
     ($payload[0].system) as $s
     | if $s == null then $meta
       else $meta + {
@@ -769,6 +814,116 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
                                  icon:        ($m.icon // null) },
                      portals:           (.portals // {}),
                      active_workloads: { containers: (.active_workloads.containers? // null) } } ]
+        },
+        # Protection rows, reduced to the fields the normalizer reads under
+        # their wire names. The nested state and job are whitelisted so
+        # logs_excerpt, exception, ssh_credentials and encryption_key never
+        # reach disk; the schedule keeps the seven cron keys.
+        replication: {
+          fetchedAt: $now,
+          rows: [ $replication[0][]? | {
+                    id:              (.id? // null),
+                    name:            (.name // null),
+                    direction:       (.direction // null),
+                    transport:       (.transport // null),
+                    source_datasets: (.source_datasets // null),
+                    target_dataset:  (.target_dataset // null),
+                    recursive:       (.recursive == true),
+                    enabled:         (.enabled == true),
+                    auto:            (.auto == true),
+                    retention_policy: (.retention_policy // null),
+                    lifetime_value:  (.lifetime_value // null),
+                    lifetime_unit:   (.lifetime_unit // null),
+                    retries:         (.retries // null),
+                    schedule: (if (.schedule? | type) == "object" then
+                                 { minute: (.schedule.minute // null),
+                                   hour:   (.schedule.hour // null),
+                                   dom:    (.schedule.dom // null),
+                                   month:  (.schedule.month // null),
+                                   dow:    (.schedule.dow // null),
+                                   begin:  (.schedule.begin // null),
+                                   end:    (.schedule.end // null) }
+                               else null end),
+                    state: (if (.state? | type) == "object" then
+                              { state:        (.state.state // null),
+                                datetime:     (.state.datetime // null),
+                                warnings:     ((.state.warnings? // []) | if type == "array" then . else [] end),
+                                last_snapshot: (.state.last_snapshot // null) }
+                            else null end),
+                    job: (if (.job? | type) == "object" then
+                            { state:         (.job.state // null),
+                              time_finished: (.job.time_finished // null),
+                              error:         (.job.error // null) }
+                          else null end) } ]
+        },
+        cloudSync: {
+          fetchedAt: $now,
+          rows: [ $cloudSync[0][]? | {
+                    id:            (.id? // null),
+                    description:   (.description // null),
+                    path:          (.path // null),
+                    enabled:       (.enabled == true),
+                    direction:     (.direction // null),
+                    transfer_mode: (.transfer_mode // null),
+                    schedule: (if (.schedule? | type) == "object" then
+                                 { minute: (.schedule.minute // null),
+                                   hour:   (.schedule.hour // null),
+                                   dom:    (.schedule.dom // null),
+                                   month:  (.schedule.month // null),
+                                   dow:    (.schedule.dow // null),
+                                   begin:  (.schedule.begin // null),
+                                   end:    (.schedule.end // null) }
+                               else null end),
+                    job: (if (.job? | type) == "object" then
+                            { state:         (.job.state // null),
+                              time_finished: (.job.time_finished // null),
+                              error:         (.job.error // null) }
+                          else null end) } ]
+        },
+        snapshotTasks: {
+          fetchedAt: $now,
+          rows: [ $snapshotTasks[0][]? | {
+                    id:             (.id? // null),
+                    dataset:        (.dataset // null),
+                    recursive:      (.recursive == true),
+                    enabled:        (.enabled == true),
+                    lifetime_value: (.lifetime_value // null),
+                    lifetime_unit:  (.lifetime_unit // null),
+                    naming_schema:  (.naming_schema // null),
+                    allow_empty:    (.allow_empty == true),
+                    schedule: (if (.schedule? | type) == "object" then
+                                 { minute: (.schedule.minute // null),
+                                   hour:   (.schedule.hour // null),
+                                   dom:    (.schedule.dom // null),
+                                   month:  (.schedule.month // null),
+                                   dow:    (.schedule.dow // null),
+                                   begin:  (.schedule.begin // null),
+                                   end:    (.schedule.end // null) }
+                               else null end),
+                    state: (if (.state? | type) == "object" then
+                              { state:         (.state.state // null),
+                                datetime:      (.state.datetime // null),
+                                last_snapshot: (.state.last_snapshot // null) }
+                            else null end) } ]
+        },
+        scrubs: {
+          fetchedAt: $now,
+          rows: [ $scrubs[0][]? | {
+                    id:          (.id? // null),
+                    pool:        (.pool // null),
+                    pool_name:   (.pool_name // null),
+                    threshold:   (.threshold // null),
+                    description: (.description // null),
+                    enabled:     (.enabled == true),
+                    schedule: (if (.schedule? | type) == "object" then
+                                 { minute: (.schedule.minute // null),
+                                   hour:   (.schedule.hour // null),
+                                   dom:    (.schedule.dom // null),
+                                   month:  (.schedule.month // null),
+                                   dow:    (.schedule.dow // null),
+                                   begin:  (.schedule.begin // null),
+                                   end:    (.schedule.end // null) }
+                               else null end) } ]
         }
       } end')
   printf '%s\n' "$meta" | tn_write_json "$TN_META_FILE"
@@ -809,6 +964,10 @@ jq -n \
       disks: $p.disks,
       services: $p.services,
       apps: $p.apps,
+      replication: $p.replication,
+      cloudSync: $p.cloudSync,
+      snapshotTasks: $p.snapshotTasks,
+      scrubs: $p.scrubs,
       warnings: $w
     }' >"$WORK/state.json"
 

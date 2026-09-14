@@ -10,11 +10,17 @@ source "$ROOT/bin/truenas-lib.sh"
 
 system_requests()    { grep -c '/api/v2.0/system/info'       "$STUB_CURL_LOG" || true; }
 alert_requests()     { grep -c '/api/v2.0/alert/list'        "$STUB_CURL_LOG" || true; }
-pool_requests()      { grep -c '/api/v2.0/pool'              "$STUB_CURL_LOG" || true; }
+# The trailing space pins the exact pool route: /api/v2.0/pool is a substring
+# of /api/v2.0/pool/scrub and /api/v2.0/pool/snapshottask.
+pool_requests()      { grep -c '/api/v2.0/pool '             "$STUB_CURL_LOG" || true; }
 disk_requests()      { grep -c '/api/v2.0/disk/details'      "$STUB_CURL_LOG" || true; }
 disk_temp_requests() { grep -c '/api/v2.0/disk/temperatures' "$STUB_CURL_LOG" || true; }
 service_requests()   { grep -c '/api/v2.0/service'           "$STUB_CURL_LOG" || true; }
 app_requests()       { grep -c '/api/v2.0/app'               "$STUB_CURL_LOG" || true; }
+replication_requests() { grep -c '/api/v2.0/replication '    "$STUB_CURL_LOG" || true; }
+cloudsync_requests()   { grep -c '/api/v2.0/cloudsync '      "$STUB_CURL_LOG" || true; }
+snapshot_requests()    { grep -c '/api/v2.0/pool/snapshottask' "$STUB_CURL_LOG" || true; }
+scrub_requests()       { grep -c '/api/v2.0/pool/scrub'      "$STUB_CURL_LOG" || true; }
 meta_file()          { jq -r "$1" "$XDG_STATE_HOME/omarchy/truenas/meta.json"; }
 
 # The whole map every poll needs, with the system response variable so a case
@@ -23,12 +29,16 @@ meta_file()          { jq -r "$1" "$XDG_STATE_HOME/omarchy/truenas/meta.json"; }
 meta_responses() {
   local rc=${1:-0} code=${2:-200} body=${3:-$ROOT/tests/fixtures/system-info.json}
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
   respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
   respond_add "/api/v2.0/system/info" "$rc" "$code" "$body"
   respond_add "/api/v2.0/disk/details"      0 200 "$ROOT/tests/fixtures/disks.json"
   respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
   respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
   respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
+  respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+  respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
 }
 
 # A system/info body whose version is the one field a case varies.
@@ -58,6 +68,10 @@ check "the cold poll fetched the details once" 1 "$(disk_requests)"
 check "and the temperatures once" 1 "$(disk_temp_requests)"
 check "and the services once" 1 "$(service_requests)"
 check "and the apps once" 1 "$(app_requests)"
+check "and the replication tasks once" 1 "$(replication_requests)"
+check "and the cloud sync tasks once" 1 "$(cloudsync_requests)"
+check "and the snapshot tasks once" 1 "$(snapshot_requests)"
+check "and the scrub tasks once" 1 "$(scrub_requests)"
 poll
 check "the second poll stays inside the window" 1 "$(system_requests)"
 check "the system still reaches state from the cache" 25.04.2 "$(state '.system.version')"
@@ -67,12 +81,19 @@ check "the cached poll makes no disk request" 1 "$(disk_requests)"
 check "nor a temperatures request" 1 "$(disk_temp_requests)"
 check "nor a service request" 1 "$(service_requests)"
 check "nor an app request" 1 "$(app_requests)"
-check "a warm poll is two fast requests" 9 "$(requests)"
+check "nor a replication request" 1 "$(replication_requests)"
+check "nor a cloud sync request" 1 "$(cloudsync_requests)"
+check "nor a snapshot task request" 1 "$(snapshot_requests)"
+check "nor a scrub request" 1 "$(scrub_requests)"
+check "a warm poll is two fast requests" 13 "$(requests)"
 check "the disk rows still reach state from the cache" 5 "$(state '.disks | length')"
 check "with their temperature normalized" 38 \
   "$(state '.disks[] | select(.name=="sda") | .tempC')"
 check "the cached service rows still reach state" 8 "$(state '.services | length')"
 check "so do the cached apps" 5 "$(state '.apps | length')"
+check "so do the cached replication tasks" 2 "$(state '.replication | length')"
+check "and the cached snapshot tasks" 3 "$(state '.snapshotTasks | length')"
+check "and the cached scrub tasks" 2 "$(state '.scrubs | length')"
 teardown
 
 test_case "a cold and a warm poll render the same services and apps"
@@ -110,6 +131,10 @@ check "and one more disk fetch" 2 "$(disk_requests)"
 check "and one more temperatures fetch" 2 "$(disk_temp_requests)"
 check "and one more service fetch" 2 "$(service_requests)"
 check "and one more app fetch" 2 "$(app_requests)"
+check "and one more replication fetch" 2 "$(replication_requests)"
+check "and one more cloud sync fetch" 2 "$(cloudsync_requests)"
+check "and one more snapshot task fetch" 2 "$(snapshot_requests)"
+check "and one more scrub fetch" 2 "$(scrub_requests)"
 check "and reports the new version" 25.10.0 "$(state '.system.version')"
 check "the alerts are still polled every time" 3 "$(alert_requests)"
 teardown
@@ -250,19 +275,22 @@ poll
 # A cache from before this milestone: a usable system section, a fresh fetch
 # time, and one slow-section key at a time missing. The fresh age must not save
 # it; each presence predicate has to stand on its own.
-for missing in disks diskTemps services apps; do
+for missing in disks diskTemps services apps replication cloudSync snapshotTasks scrubs; do
   jq -c --arg k "$missing" 'del(.[$k])' \
     "$XDG_STATE_HOME/omarchy/truenas/meta.json" >"$WORK/meta-m1.json"
   cp "$WORK/meta-m1.json" "$XDG_STATE_HOME/omarchy/truenas/meta.json"
   : >"$STUB_CURL_LOG"
   poll
-  check "a cache missing $missing is stale and refetches all seven" 7 "$(requests)"
+  check "a cache missing $missing is stale and refetches all eleven" 11 "$(requests)"
   check "and $missing is written again" true "$(meta_file "has(\"$missing\")")"
 done
 check "the disk rows are cached again" 5 "$(meta_file '.disks.rows | length')"
 check "and the temperature map too" 5 "$(meta_file '.diskTemps.map | length')"
 check "and the service rows too" 8 "$(meta_file '.services.rows | length')"
 check "and the app rows too" 5 "$(meta_file '.apps.rows | length')"
+check "and the replication rows too" 2 "$(meta_file '.replication.rows | length')"
+check "and the snapshot task rows too" 3 "$(meta_file '.snapshotTasks.rows | length')"
+check "and the scrub rows too" 2 "$(meta_file '.scrubs.rows | length')"
 check "the old system data was not lost" 25.04.2 "$(state '.system.version')"
 teardown
 
@@ -271,12 +299,16 @@ setup; single_instance_config
 jq -c '[ .[] | . + { serial: "FAKE-SERIAL", identifier: "fake-id", lunid: "fake-lun" } ]' \
   "$ROOT/tests/fixtures/disks.json" >"$WORK/disks-with-ids.json"
 respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
 respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
 respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
 respond_add "/api/v2.0/disk/details" 0 200 "$WORK/disks-with-ids.json"
 respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
 respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
 respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
+respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
 poll
 check "no cached row carries a serial, identifier or lunid" 0 \
   "$(meta_file '[.disks.rows[] | select(has("serial") or has("identifier") or has("lunid"))] | length')"
@@ -317,12 +349,16 @@ setup; single_instance_config
 jq -c '[ .[] | if .name == "appc" then .metadata = "junk" else . end ]' \
   "$ROOT/tests/fixtures/apps.json" >"$WORK/apps-junk-meta.json"
 respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
 respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
 respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
 respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
 respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
 respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
 respond_add "/api/v2.0/app"         0 200 "$WORK/apps-junk-meta.json"
+respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
 poll
 check "the meta cache advanced anyway" true "$(meta_file 'has("apps")')"
 check "the junk metadata is cached as an empty object" null \
@@ -344,4 +380,44 @@ poll
 check "the cached reuse keeps uptime unknown" null "$(state '.system.uptimeSeconds')"
 check "and cores unknown" null "$(state '.system.cores')"
 check "and physmem unknown" null "$(state '.system.physmem')"
+teardown
+
+test_case "the meta cache keeps the consumed protection fields and drops secrets"
+setup; single_instance_config
+jq -nc '[ { id: 3, description: "clouda", path: "/mnt/storage",
+  enabled: true, direction: "PUSH", transfer_mode: "SYNC",
+  schedule: { minute: "0", hour: "2", dom: "*", month: "*", dow: "*" },
+  credentials: { id: 1, name: "clouda", provider: { secret_access_key: "FAKE-SECRET" } },
+  encryption_password: "FAKE-PW", encryption_salt: "FAKE-SALT",
+  pre_script: "echo FAKE-PRE", post_script: "echo FAKE-POST",
+  job: { id: 5, state: "SUCCESS", error: null,
+         logs_excerpt: "FAKE-LOGS", time_finished: { "$date": 1789358400000 } } } ]' \
+  >"$WORK/cloudsync-row.json"
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
+respond_add "/api/v2.0/pool/scrub" 0 200 "$ROOT/tests/fixtures/scrubs.json"
+respond_add "/api/v2.0/pool" 0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service" 0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app" 0 200 "$ROOT/tests/fixtures/apps.json"
+respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+respond_add "/api/v2.0/cloudsync" 0 200 "$WORK/cloudsync-row.json"
+poll
+check "the cloud sync row is cached" 1 "$(meta_file '.cloudSync.rows | length')"
+check "and it normalizes from the cache" clouda "$(state '.cloudSync[0].name')"
+check "with its job state" SUCCESS "$(state '.cloudSync[0].job.state')"
+check "no cloud sync row carries credentials or a password" 0 \
+  "$(meta_file '[.cloudSync.rows[] | select(has("credentials") or has("encryption_password") or has("encryption_salt") or has("pre_script") or has("post_script"))] | length')"
+check "nor a job log excerpt" 0 \
+  "$(meta_file '[.cloudSync.rows[] | select(.job | type == "object" and has("logs_excerpt"))] | length')"
+check "no replication row carries ssh_credentials or an encryption key" 0 \
+  "$(meta_file '[.replication.rows[] | select(has("ssh_credentials") or has("encryption_key"))] | length')"
+check "nor a job log excerpt or exception" 0 \
+  "$(meta_file '[.replication.rows[] | select(.job | type == "object" and (has("logs_excerpt") or has("exception")))] | length')"
+check "no secret reaches the meta file" 0 \
+  "$(grep -c -e 'FAKE-SECRET' -e 'FAKE-PW' -e 'FAKE-SALT' -e 'SECRET-LOGS' -e 'SECRET-STACK' "$XDG_STATE_HOME/omarchy/truenas/meta.json" || true)"
+check "nor the state file" 0 \
+  "$(grep -c -e 'FAKE-SECRET' -e 'SECRET-LOGS' "$STATE" || true)"
 teardown

@@ -1,8 +1,9 @@
 # Normalizes the TrueNAS REST v2.0 bodies a poll reads into the stable shape
 # state.json carries. Input: --slurpfile system, --slurpfile alerts,
 # --slurpfile pools, --slurpfile disks, --slurpfile diskTemps, --slurpfile
-# services and --slurpfile apps, each holding one response body (or null when
-# that request failed), plus --arg now.
+# services, --slurpfile apps, --slurpfile replication, --slurpfile cloudSync,
+# --slurpfile snapshotTasks and --slurpfile scrubs, each holding one response
+# body (or null when that request failed), plus --arg now.
 # `connection` is built by the poll, not here, because it is about the poll's
 # own reachability rather than the NAS's contents.
 
@@ -202,6 +203,118 @@ def app_norm:
       webui:            ((.portals? // {}) | portal_norm)
     };
 
+# A cron-like schedule, normalized to one shape whether the route carries a
+# begin/end window (replication, snapshot tasks) or not (cloud sync, scrub). A
+# missing window key is null, never dropped, so one renderer handles both. An
+# absent schedule is null, not a schedule of empty strings.
+def schedule_norm:
+  if type == "object" then
+    { minute: (.minute // null), hour: (.hour // null), dom: (.dom // null),
+      month: (.month // null), dow: (.dow // null),
+      begin: (.begin // null), end: (.end // null) }
+  else null end;
+
+# The replication task's nested state. It survives a cache round-trip because
+# the meta cache keeps exactly these keys; `datetime` is a Mongo object on the
+# wire and an ISO string after to_iso, and both are accepted. `lastSnapshot` is
+# null when the task is PENDING and carries none, never "".
+def rep_state_norm:
+  if type != "object" then null
+  else {
+    state:        (.state // ""),
+    datetime:     ((.datetime? // null) | to_iso),
+    warnings:     ((.warnings? // []) | if type == "array" then . else [] end),
+    lastSnapshot: (.last_snapshot? // null)
+  } end;
+
+# The periodic snapshot task's state, the same rule without a warnings list
+# (the route carries none).
+def snap_state_norm:
+  if type != "object" then null
+  else {
+    state:        (.state // ""),
+    datetime:     ((.datetime? // null) | to_iso),
+    lastSnapshot: (.last_snapshot? // null)
+  } end;
+
+# The last job, reduced to the three fields the plugin consumes. `logs_excerpt`
+# and `exception` are dropped on the fetch and the cache both, so they never
+# reach disk.
+def job_norm:
+  if type != "object" then null
+  else {
+    state:        (.state // ""),
+    timeFinished: ((.time_finished? // null) | to_iso),
+    error:        (.error? // null)
+  } end;
+
+# The replication row. `ssh_credentials` and `encryption_key` are secrets and
+# are never read; the row is built by naming what is consumed.
+def replication_norm:
+  {
+    id:              ((.id? // null) | num),
+    name:            (.name // ""),
+    direction:       (.direction // ""),
+    transport:       (.transport // ""),
+    sourceDatasets:  ((.source_datasets? // [])
+                      | if type == "array" then . else [] end),
+    targetDataset:   (.target_dataset // ""),
+    recursive:       (.recursive == true),
+    enabled:         (.enabled == true),
+    auto:            (.auto == true),
+    retentionPolicy: (.retention_policy // ""),
+    lifetimeValue:   ((.lifetime_value? // null) | num),
+    lifetimeUnit:    (.lifetime_unit // null),
+    schedule:        ((.schedule? // null) | schedule_norm),
+    retries:         ((.retries? // null) | num),
+    state:           ((.state? // null) | rep_state_norm),
+    job:             ((.job? // null) | job_norm)
+  };
+
+# The cloud sync row. There is no top-level state on the wire: the last run is
+# the job, so `job` is the only state this row carries. The wire label is
+# `description`; it is named `name` here so the views and Search share one
+# label field. Credentials, encryption password and salt are never read.
+def cloud_sync_norm:
+  {
+    id:           ((.id? // null) | num),
+    name:         (.description // ""),
+    path:         (.path // ""),
+    enabled:      (.enabled == true),
+    direction:    (.direction // ""),
+    transferMode: (.transfer_mode // ""),
+    schedule:     ((.schedule? // null) | schedule_norm),
+    job:          ((.job? // null) | job_norm)
+  };
+
+def snapshot_task_norm:
+  {
+    id:            ((.id? // null) | num),
+    dataset:       (.dataset // ""),
+    recursive:     (.recursive == true),
+    enabled:       (.enabled == true),
+    lifetimeValue: ((.lifetime_value? // null) | num),
+    lifetimeUnit:  (.lifetime_unit // null),
+    namingSchema:  (.naming_schema // ""),
+    allowEmpty:    (.allow_empty == true),
+    schedule:      ((.schedule? // null) | schedule_norm),
+    state:         ((.state? // null) | snap_state_norm)
+  };
+
+# The scrub row. It carries no run state: a pool's scrub progress lives on
+# pool.scan, which pool_norm already owns. The wire separates the numeric `pool`
+# id from the `pool_name` string; both are kept, the name under `pool`.
+def scrub_norm:
+  {
+    id:          ((.id? // null) | num),
+    poolId:      ((.pool? // null) | num),
+    pool:        (.pool_name // ""),
+    threshold:   ((.threshold? // null) | num),
+    description: (.description // ""),
+    enabled:     (.enabled == true),
+    schedule:    ((.schedule? // null) | schedule_norm)
+  };
+
 ($system[0]) as $sys
 | ($alerts[0] // []) as $alerts_raw
 | ($pools[0]  // []) as $pools_raw
@@ -209,11 +322,19 @@ def app_norm:
 | ($diskTemps[0] // {}) as $temps
 | ($services[0] // []) as $services_raw
 | ($apps[0]     // []) as $apps_raw
+| ($replication[0]   // []) as $replication_raw
+| ($cloudSync[0]     // []) as $cloudsync_raw
+| ($snapshotTasks[0] // []) as $snapshot_raw
+| ($scrubs[0]        // []) as $scrub_raw
 | ([ $alerts_raw[]? | alert_norm ]) as $alert_rows
 | ([ $pools_raw[]?  | pool_norm  ]) as $pool_rows
 | ([ $disks_raw[]?  | disk_norm($temps) ]) as $disk_rows
 | ([ $services_raw[]? | service_norm ]) as $service_rows
 | ([ $apps_raw[]?     | app_norm     ]) as $app_rows
+| ([ $replication_raw[]? | replication_norm ]) as $replication_rows
+| ([ $cloudsync_raw[]?   | cloud_sync_norm  ]) as $cloudsync_rows
+| ([ $snapshot_raw[]?     | snapshot_task_norm ]) as $snapshot_rows
+| ([ $scrub_raw[]?        | scrub_norm       ]) as $scrub_rows
 # Dismissed alerts stay in `alerts`, flagged, because a row that disappears when
 # it is dismissed is how a person loses track of what they silenced. They leave
 # `counts`, which is what the bar reads, and are counted as `dismissed` there.
@@ -236,5 +357,12 @@ def app_norm:
     # and the poll names the section in `warnings`; it never becomes an
     # empty-but-healthy list. Both sorted for stable tests and UI.
     services: ($service_rows | sort_by(.service)),
-    apps:     ($app_rows | sort_by(.name))
+    apps:     ($app_rows | sort_by(.name)),
+    # Protection. Each is sorted for stable tests and UI, and a failed fetch
+    # contributes no rows plus a warning; it never becomes an empty-but-healthy
+    # list. The scrub row carries no run state: pool.scan owns it.
+    replication:   ($replication_rows | sort_by(.name)),
+    cloudSync:     ($cloudsync_rows   | sort_by(.name)),
+    snapshotTasks: ($snapshot_rows    | sort_by(.dataset)),
+    scrubs:        ($scrub_rows       | sort_by(.pool))
   }
