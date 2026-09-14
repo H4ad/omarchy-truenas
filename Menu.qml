@@ -49,7 +49,32 @@ Ui.Panel {
   readonly property string mode: Model.mode(snapshot)
   readonly property var connection: (snapshot && snapshot.connection) || null
   readonly property bool connected: !!(connection && connection.ok)
-  readonly property bool configured: !!(snapshot && snapshot.schema)
+  readonly property var warnings: (snapshot && Model.arrayLike(snapshot.warnings)) ? snapshot.warnings : []
+
+  // A section failure names the section in `warnings`; only the failed request's
+  // own summary may turn into "I could not tell", exactly as Views/Alerts.qml and
+  // Views/Pools.qml decide it.
+  readonly property var alertWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "alert")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var poolWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "pool")
+        return root.warnings[i]
+    }
+    return null
+  }
+
+  // Configured means a base URL exists, or the state can name a reason other
+  // than "unconfigured". The poller writes schema:1 even when there is nothing
+  // to log in to, so schema alone would call an empty setup reachable.
+  readonly property bool configured:
+    root.baseUrl !== ""
+    || !!(connection && String(connection.error || "") !== "unconfigured")
 
   // The bar widget already reads config.json to know the base URL, so the menu
   // asks it rather than reading the same file a second time.
@@ -72,7 +97,7 @@ Ui.Panel {
   // sentence too, never a blank line that could read as "fine".
   readonly property string statusText: {
     if (!root.snapshot) return "no state yet, the poller has not run"
-    if (!root.configured) return "not configured yet"
+    if (!root.configured) return "not configured yet · run truenasctl login <url>"
     if (!root.connected) {
       var reason = Model.errorSentence(root.connection)
       return "unreachable" + (reason !== "" ? ": " + reason : "")
@@ -82,8 +107,16 @@ Ui.Panel {
     return "connected" + (host !== "" ? " to " + host : "")
   }
 
+  // An empty pool list is only "no pools" when a pool request actually answered;
+  // offline and a failed section each get the reason instead of a count.
   readonly property string poolsText: {
-    if (!root.snapshot) return ""
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
+    if (root.poolWarning) return "the pool state could not be read"
     if (!root.pools.length) return "no pools reported"
     var worst = Model.worstPool(root.pools)
     var text = root.pools.length + (root.pools.length === 1 ? " pool" : " pools")
@@ -91,8 +124,16 @@ Ui.Panel {
     return text
   }
 
+  // "Nothing firing" is only true of a connected NAS whose alert request
+  // answered; an offline or failed-alert state prints why, never the phrase.
   readonly property string alertsText: {
-    if (!root.snapshot) return ""
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (root.alertWarning) return "the alert list did not answer"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
     var phrase = Model.countPhrase(root.counts)
     return phrase === "" ? "nothing firing" : phrase
   }

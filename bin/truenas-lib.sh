@@ -221,8 +221,8 @@ tn_insecure_args() {
 
 # The API generation in use. REST `/api/v2.0` is deprecated from TrueNAS 25.04,
 # so every call goes through tn_http_request and this names the dialect a poll
-# used. Cached probing of meta.json arrives with the meta cadence task; until
-# then a fresh install is always rest-v2.0.
+# used. The meta cadence now caches system state, but dialect probing has not
+# shipped, so this is still the fixed rest-v2.0 rather than a cached value.
 tn_dialect() { printf '%s' 'rest-v2.0'; }
 
 # Request $2 from base $1. The key goes in on stdin as a curl config file so it

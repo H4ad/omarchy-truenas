@@ -179,6 +179,9 @@ Full        alerts + capacity
 Quiet       dimmed when all green (the "I am alive" proof)
 ```
 
+M1 subset: `Default`, `Icon`, `Alerts`, `Capacity`, `Pool` and `Full`. `Temp` and
+`Quiet` are deferred, and the manifest carries no option for them yet.
+
 Offline / unconfigured still overrides every variant with a plug or cog glyph,
 so "nothing is wrong" and "I cannot tell" never look the same.
 
