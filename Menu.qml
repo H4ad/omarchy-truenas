@@ -49,6 +49,10 @@ Ui.Panel {
   readonly property var disks: (snapshot && Model.arrayLike(snapshot.disks)) ? snapshot.disks : []
   readonly property var services: (snapshot && Model.arrayLike(snapshot.services)) ? snapshot.services : []
   readonly property var apps: (snapshot && Model.arrayLike(snapshot.apps)) ? snapshot.apps : []
+  readonly property var replication: (snapshot && Model.arrayLike(snapshot.replication)) ? snapshot.replication : []
+  readonly property var cloudSync: (snapshot && Model.arrayLike(snapshot.cloudSync)) ? snapshot.cloudSync : []
+  readonly property var snapshotTasks: (snapshot && Model.arrayLike(snapshot.snapshotTasks)) ? snapshot.snapshotTasks : []
+  readonly property var scrubs: (snapshot && Model.arrayLike(snapshot.scrubs)) ? snapshot.scrubs : []
   readonly property string mode: Model.mode(snapshot)
   readonly property var connection: (snapshot && snapshot.connection) || null
   readonly property bool connected: !!(connection && connection.ok)
@@ -95,6 +99,34 @@ Ui.Panel {
   readonly property var appWarning: {
     for (var i = 0; i < root.warnings.length; i++) {
       if (String(root.warnings[i] && root.warnings[i].section || "") === "app")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var replicationWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "replication")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var cloudSyncWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "cloudSync")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var snapshotWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "snapshotTasks")
+        return root.warnings[i]
+    }
+    return null
+  }
+  readonly property var scrubWarning: {
+    for (var i = 0; i < root.warnings.length; i++) {
+      if (String(root.warnings[i] && root.warnings[i].section || "") === "scrubs")
         return root.warnings[i]
     }
     return null
@@ -210,6 +242,28 @@ Ui.Panel {
     return "nothing down"
   }
 
+  // Protection: replication and cloud sync carry a job, so a failed one is a
+  // real failure; snapshot tasks and scrub tasks do not, so only the count is
+  // reported. A failed section prints why rather than a count.
+  readonly property string protectionText: {
+    if (!root.snapshot) return "no state yet, the poller has not run"
+    if (!root.configured) return "not configured yet"
+    if (!root.connected) {
+      var reason = Model.errorSentence(root.connection)
+      return "unreachable" + (reason !== "" ? ": " + reason : "")
+    }
+    if (root.replicationWarning || root.cloudSyncWarning
+        || root.snapshotWarning || root.scrubWarning)
+      return "the protection tasks could not be read"
+    var failed = Model.failedReplications(root.replication).length
+      + Model.failedCloudSync(root.cloudSync).length
+    if (failed > 0) return failed + (failed === 1 ? " task failed" : " tasks failed")
+    var total = root.replication.length + root.cloudSync.length
+      + root.snapshotTasks.length + root.scrubs.length
+    if (total === 0) return "no protection tasks reported"
+    return total + (total === 1 ? " task" : " tasks") + ", all healthy"
+  }
+
   // "Nothing firing" is only true of a connected NAS whose alert request
   // answered; an offline or failed-alert state prints why, never the phrase.
   readonly property string alertsText: {
@@ -244,6 +298,7 @@ Ui.Panel {
       { kind: "view", args: ["disks"], label: "Disks", detail: root.disksText },
       { kind: "view", args: ["services"], label: "Services", detail: root.servicesText },
       { kind: "view", args: ["apps"], label: "Apps", detail: root.appsText },
+      { kind: "view", args: ["protection"], label: "Protection", detail: root.protectionText },
       { kind: "view", args: ["alerts"], label: "Alerts", detail: root.alertsText },
       { kind: "view", args: ["config"], label: "Config", detail: root.configText },
       { kind: "poll", args: [], label: "Poll now", detail: root.pollText }
