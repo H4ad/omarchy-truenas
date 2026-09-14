@@ -106,6 +106,36 @@ while IFS= read -r entry; do
 done < <(jq -r '.entryPoints[]' "$ROOT/manifest.json")
 check "every manifest entryPoint file exists" "" "${qml_missing# }"
 
+# --------------------------------------------------------- view registration
+# The tabs list, the viewComponents map and Menu.qml's view rows all name the
+# same set of views. A view present in one and missing from another is a tab
+# that renders nothing or a menu row that opens nothing, and nothing else here
+# can see it: both files compile and lint clean. The three lists are regular
+# enough to compare as text, and a pattern that stops matching fails the check
+# rather than passing over empty sets.
+qml_tab_keys=$(sed -n 's/^    { key: "\([a-z]*\)", label:.*/\1/p' "$ROOT/Panel.qml")
+qml_view_keys=$(sed -n 's/^    "\([a-z]*\)": [A-Za-z]*View.*$/\1/p' "$ROOT/Panel.qml")
+qml_menu_keys=$(sed -n 's/^      { kind: "view", args: \["\([a-z]*\)"\].*/\1/p' "$ROOT/Menu.qml")
+qml_registration_missing=""
+[[ -n "$qml_tab_keys" ]] || qml_registration_missing="$qml_registration_missing Panel.qml:tabs"
+[[ -n "$qml_view_keys" ]] || qml_registration_missing="$qml_registration_missing Panel.qml:viewComponents"
+[[ -n "$qml_menu_keys" ]] || qml_registration_missing="$qml_registration_missing Menu.qml:views"
+while IFS= read -r key; do
+  [[ -n "$key" ]] || continue
+  grep -qx "$key" <<<"$qml_view_keys" \
+    || qml_registration_missing="$qml_registration_missing viewComponents:$key"
+  grep -qx "$key" <<<"$qml_menu_keys" \
+    || qml_registration_missing="$qml_registration_missing menu:$key"
+done <<<"$qml_tab_keys"
+while IFS= read -r key; do
+  [[ -n "$key" ]] || continue
+  grep -qx "$key" <<<"$qml_tab_keys" \
+    || qml_registration_missing="$qml_registration_missing tabs:$key"
+done <<<"$qml_view_keys
+$qml_menu_keys"
+check "every view is registered in the tabs, viewComponents and menu" "" \
+  "${qml_registration_missing# }"
+
 # -------------------------------------------------------------- scroll surface
 # A child of a Flickable is content, so a scroll indicator declared inside one
 # scrolls away with the rows it is describing. Both are declared as a sibling and

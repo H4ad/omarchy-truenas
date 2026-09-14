@@ -1,6 +1,6 @@
 .pragma library
 
-// List filtering for the panel's alert and pool rows. Pure functions only: no
+// List filtering for the panel's alert, pool and disk rows. Pure functions only: no
 // QML types, so the whole thing runs under node in tests/search.mjs. Every
 // filter returns a new array and never touches the one it was given.
 
@@ -60,6 +60,27 @@ function pools(list, needle) {
     var pool = items[i];
     if (!pool || typeof pool !== "object") continue;
     if (contains(pool.name, needle) || contains(pool.status, needle)) out.push(pool);
+  }
+  return out;
+}
+
+// A disk matches on its device name, its model, its type, the pool it belongs
+// to and its bus. Empty fields never match a non-empty needle, so a row the
+// poller could not describe is only ever reached by the empty needle.
+function disks(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var disk = items[i];
+    if (!disk || typeof disk !== "object") continue;
+    if (contains(disk.name, needle)
+        || contains(disk.model, needle)
+        || contains(disk.type, needle)
+        || contains(disk.pool, needle)
+        || contains(disk.bus, needle)) {
+      out.push(disk);
+    }
   }
   return out;
 }

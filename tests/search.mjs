@@ -115,5 +115,46 @@ Search.pools(pools, "storage");
 check("the input list is untouched", poolsBefore, JSON.stringify(pools));
 check("the empty-needle result is a copy", false, Search.pools(pools, "") === pools);
 
+const disks = [
+  { name: "nvme0n1", model: "NVMe_SSD_2T", type: "SSD",
+    size: 2000398934016, pool: "storage", bus: "UNKNOWN" },
+  { name: "sda", model: "SATA_HDD_500G", type: "HDD",
+    size: 500107862016, pool: "boot-pool", bus: "ATA" },
+  { name: "sdc", model: "SATA_HDD_4T", type: "HDD",
+    size: 4000787030016, pool: "Backup", bus: "ATA" }
+];
+
+test_case("disks matches name, model, type, pool and bus");
+
+check("name, case-insensitively", ["nvme0n1"],
+  Search.disks(disks, "NVME").map(function (d) { return d.name; }));
+check("model, case-insensitively", ["nvme0n1"],
+  Search.disks(disks, "nvme").map(function (d) { return d.name; }));
+check("type, across rows", ["sda", "sdc"],
+  Search.disks(disks, "hdd").map(function (d) { return d.name; }));
+check("pool", ["sda"],
+  Search.disks(disks, "boot").map(function (d) { return d.name; }));
+check("bus", ["sda", "sdc"],
+  Search.disks(disks, "ata").map(function (d) { return d.name; }));
+check("a needle nothing carries", 0,
+  Search.disks(disks, "archive").length);
+
+test_case("disks preserves order, copies and survives junk");
+
+check("an empty needle returns every disk", ["nvme0n1", "sda", "sdc"],
+  Search.disks(disks, "").map(function (d) { return d.name; }));
+const disksBefore = JSON.stringify(disks);
+Search.disks(disks, "nvme");
+check("the input list is untouched", disksBefore, JSON.stringify(disks));
+check("the empty-needle result is a copy", false, Search.disks(disks, "") === disks);
+check("a non-list is an empty list", [], Search.disks(null, "x"));
+check("a bare string is not walked", [], Search.disks("nvme", "x"));
+check("a row without fields does not throw", 0,
+  Search.disks([{}], "x").length);
+check("null rows are skipped, not fatal", 0,
+  Search.disks([null, undefined, 4], "x").length);
+check("an empty field never matches a needle", 0,
+  Search.disks([{ name: null, model: undefined, pool: "", bus: null, type: null }], "x").length);
+
 console.log("\nsearch: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
