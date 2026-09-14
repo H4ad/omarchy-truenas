@@ -39,29 +39,79 @@ Item {
   property var sections: [
     {
       title: "CONNECTION",
-      note: "The bar answers one question: is the NAS healthy right now. These are the states it can be in.",
+      note: "The bar answers one question: is the NAS healthy right now. Press the ? in the panel header to open this sheet.",
       terms: [
-        { term: "quiet", text: "Connected, every pool ONLINE, nothing firing. A dimmed glyph, which is how the plugin proves it is alive." },
-        { term: "firing", text: "Connected, with alerts below error. The bar prints the active alert count." },
-        { term: "degraded", text: "A pool is not ONLINE, or an alert is at error or worse. The bar tints red." },
-        { term: "offline", text: "The last poll could not reach the NAS. A plug glyph and no number: the plugin cannot vouch for a value it did not get." },
-        { term: "unconfigured", text: "No API key yet. A cog glyph; run truenasctl login <url> with the key on stdin." }
+        { term: "quiet", text: "Connected, every pool ONLINE and nothing firing, drawn as a dimmed glyph that proves the plugin is alive." },
+        { term: "firing", text: "Connected with alerts below error, so the bar prints the active alert count." },
+        { term: "degraded", text: "A pool is not ONLINE or an alert is at error or worse, so the bar tints red." },
+        { term: "offline", text: "The last poll could not reach the NAS, so the bar shows a plug glyph and no number it did not get." },
+        { term: "unconfigured", text: "No API key yet, so the bar shows a cog glyph and you run truenasctl login <url> with the key on stdin." }
       ]
     },
     {
       title: "POOLS",
       note: "Healthy is ONLINE only. A status the plugin does not recognise counts as worse than a known bad one, so it is never buried.",
       terms: [
-        { term: "capacity", text: "The fullest pool's used percentage. An unknown capacity is a sentence, never 0%." },
-        { term: "scrub", text: "The last scrub and its age. No scrub on record says so rather than inventing a date." },
-        { term: "vdev errors", text: "Read, write or checksum errors on a vdev, shown only when non-zero." }
+        { term: "capacity", text: "The fullest pool's used percentage, and an unknown capacity reads as a sentence rather than 0%." },
+        { term: "scrub", text: "The last scrub and its age, and no scrub on record says so rather than inventing a date." },
+        { term: "vdev errors", text: "Read, write or checksum errors on a vdev, shown only when they are non-zero." }
+      ]
+    },
+    {
+      title: "DISKS",
+      note: "One card per disk, ordered as the NAS reports them. The view exists to catch a disk running hot before it becomes the pool's problem.",
+      terms: [
+        { term: "temperature", text: "The disk's current reading in Celsius, and a missing reading says unknown rather than 0 degrees." },
+        { term: "tempState", text: "ok, warning or critical as set by the poll's threshold, so warning is amber and critical is red." },
+        { term: "threshold", text: "The temperature the NAS starts warning at, shown only when the poll reported it." }
+      ]
+    },
+    {
+      title: "SERVICES",
+      note: "One card per service and the three verbs that change it. Every write asks first and the panel re-polls afterwards.",
+      terms: [
+        { term: "state", text: "Whether the service runs now, and a word the plugin does not know reads as unknown rather than stopped." },
+        { term: "enabled", text: "Whether the service starts on boot, which is separate from whether it is running now." },
+        { term: "restart", text: "Stops and starts the service and drops existing connections, so the confirmation names that consequence first." }
+      ]
+    },
+    {
+      title: "APPS",
+      note: "The apps the NAS runs as containers, with their control verbs. An app write lands asynchronously, so the next poll catches up.",
+      terms: [
+        { term: "state", text: "Whether the app is deployed and serving, and a blank or transitional word reads as unknown rather than stopped." },
+        { term: "train", text: "The catalog generation the app came from, such as stable or community." },
+        { term: "update available", text: "The NAS reports a newer image for the app, and redeploy pulls it." },
+        { term: "redeploy", text: "Stops the app and rebuilds it from its image, so unsaved container state is lost." }
+      ]
+    },
+    {
+      title: "PROTECTION",
+      note: "The scheduled jobs that keep data safe: replication, cloud sync, snapshots and scrubs. Run now starts one immediately, after a confirmation.",
+      terms: [
+        { term: "replication", text: "A ZFS send and receive to another dataset or NAS, shown with its direction, transport and target." },
+        { term: "cloud sync", text: "A scheduled copy to or from a remote provider, shown with its direction and path." },
+        { term: "snapshot task", text: "A periodic point-in-time copy of a dataset, and the card names the last snapshot taken." },
+        { term: "scrub", text: "A full scan of a pool that checks every block against its checksum, which can take hours." },
+        { term: "run now", text: "Starts the task outside its schedule, after a confirmation and a re-poll so the panel reads the NAS back." }
+      ]
+    },
+    {
+      title: "SHARES AND NETWORK",
+      note: "What the NAS serves and the links it serves them over. Read-only: this milestone ships no share write, so every card here is a report.",
+      terms: [
+        { term: "SMB", text: "The share protocol Windows and macOS clients use, shown with its path and its enabled, locked or read-only flags." },
+        { term: "NFS", text: "The share protocol Unix clients use, shown by its path because NFS exports have no name." },
+        { term: "iSCSI", text: "A block-level target a client mounts as a disk, shown with its alias and mode." },
+        { term: "interface", text: "A physical or virtual network adapter, shown with its type, negotiated media and addresses." },
+        { term: "link state", text: "Whether the interface is up or down, and a state the plugin does not recognise reads as unknown rather than down." }
       ]
     },
     {
       title: "ALERTS",
       note: "Buckets worst first: critical, error, warning, notice, info. Counts are over non-dismissed alerts only.",
       terms: [
-        { term: "dismiss", text: "Hides an alert on the NAS itself. It is a write, so it asks first and the panel re-polls afterwards." },
+        { term: "dismiss", text: "Hides an alert on the NAS itself, and because it is a write it asks first and the panel re-polls afterwards." },
         { term: "restore", text: "Puts a dismissed alert back." }
       ]
     },
@@ -69,9 +119,19 @@ Item {
       title: "SECRETS",
       note: "The key travels on stdin to truenasctl, never in argv, a shell string or shell.json.",
       terms: [
-        { term: "key set", text: "A key resolves from the credentials file at mode 600. Its value is never read back into the panel." },
-        { term: "credentials_permissions", text: "The credentials file is readable by others. Fix it with: chmod 600 <file>." },
-        { term: "insecureTLS", text: "Off by default. A self-signed certificate is reported with the fix rather than quietly skipped." }
+        { term: "key set", text: "A key resolves from the credentials file at mode 600, and its value is never read back into the panel." },
+        { term: "credentials_permissions", text: "The credentials file is readable by others, so fix it with chmod 600 <file>." },
+        { term: "insecureTLS", text: "Off by default, and a self-signed certificate is reported with the fix rather than quietly skipped." }
+      ]
+    },
+    {
+      title: "WHEN SOMETHING FAILS",
+      note: "The plugin tells you what it could not read rather than showing a zero, so a failed section never looks like a healthy one.",
+      terms: [
+        { term: "warning", text: "One section did not answer, so the sentence names the section and the reason while the healthy rows stay up." },
+        { term: "unknown", text: "A fact the poll did not get is written as a word, never as 0 or 0%, so it cannot be mistaken for a real zero." },
+        { term: "no state yet", text: "The service writes state.json after the first poll, so run truenasctl poll to fill it now." },
+        { term: "filter", text: "A filter that matches nothing says no noun match the filter rather than showing an empty NAS." }
       ]
     }
   ]
