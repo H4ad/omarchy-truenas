@@ -97,6 +97,16 @@ tn_http_request POST "$base" "$path" "$key" "$timeout" "$payload"
 class=$(tn_classify)
 
 if [[ -z $class ]]; then
+  # A service control route answers the JSON boolean `false` on a 2xx when the
+  # NAS accepted the request but did not change the service. That is the action
+  # not taking effect, so it fails honestly rather than reporting ok. `null`
+  # (alert dismiss/restore), `true` (a landed service write) and a job id (an
+  # app write) are all accepted, and none of them print the raw body.
+  if [[ -s $TN_BODY && $(jq -c . "$TN_BODY" 2>/dev/null) == false ]]; then
+    rm -f "$payload" "$TN_BODY"
+    unset key resolved
+    fail action_failed "the NAS reported the action did not take effect"
+  fi
   rm -f "$payload" "$TN_BODY"
   unset key resolved
   printf '{"ok":true}\n'
