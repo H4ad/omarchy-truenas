@@ -1,12 +1,13 @@
 # Features
 
-What milestones 1 to 3 ship, and what the design defers. The split is the
+What milestones 1 to 4 ship, and what the design defers. The split is the
 design's: bar value against cost (API unknowns plus QML work). The design is
 [plans/2026-09-13-truenas-plugin-design.md](plans/2026-09-13-truenas-plugin-design.md);
 the task-by-task versions are
 [plans/2026-09-13-truenas-milestone-1.md](plans/2026-09-13-truenas-milestone-1.md),
-[plans/2026-09-13-truenas-milestone-2.md](plans/2026-09-13-truenas-milestone-2.md)
-and [plans/2026-09-13-truenas-milestone-3.md](plans/2026-09-13-truenas-milestone-3.md).
+[plans/2026-09-13-truenas-milestone-2.md](plans/2026-09-13-truenas-milestone-2.md),
+[plans/2026-09-13-truenas-milestone-3.md](plans/2026-09-13-truenas-milestone-3.md)
+and [plans/2026-09-14-truenas-milestone-4.md](plans/2026-09-14-truenas-milestone-4.md).
 The endpoints are in [02-truenas-api.md](02-truenas-api.md), and the traps that
 have already cost time are in [11-pitfalls.md](11-pitfalls.md).
 
@@ -132,12 +133,55 @@ dropped before the write.
 that was never learned, and the section's failure sentence instead of an empty
 table.
 
+## Milestone 4, what ships
+
+**Protection view.** One tab with four sections. Replication tasks show the
+name, direction, transport, target dataset, schedule, the last job state and
+its finish time. Cloud sync tasks show the name, direction, transfer mode, path,
+schedule and last job. Periodic snapshot tasks show the dataset, naming schema,
+schedule and the last snapshot, or `no snapshot on record` when the task is
+`PENDING`. Scrub tasks show the pool, whether it is enabled, its threshold and
+schedule; a pool's scrub progress itself stays on the Pools view, read from
+`pool.scan`. Every row's state is tinted by `Model.protectionStateRank`, so a
+blank or `RUNNING` job is dim `unknown` and never a failure. Each section has
+its own filter; a failed section says why and never renders as a NAS with no
+protection tasks.
+
+**Run-now writes.** Four verbs behind the panel's single confirmation:
+`replication-run <id>`, `cloudsync-sync <id>`, `snapshot-run <id>` and
+`scrub-start <pool>`. Each is one queued `bin/truenas-api` call followed by a
+forced re-poll, so the panel reads the NAS back. Replication and cloud sync runs
+answer a job id and land asynchronously; the snapshot task run answers `null`
+synchronously; the scrub start answers a job id. The scrub verb is the async
+`pool/scrub/scrub` with `action: START`, not the due-gated `pool/scrub/run`,
+because a run-now button that may quietly do nothing reads as broken.
+
+**Protection failure and recovery notifications.** A toast when a replication or
+cloud sync job enters `FAILED`, `ERROR` or `ABORTED`, or when a replication
+task's `state.warnings` is non-empty, and one when it returns to a success
+state. Deduped in `seen.json` under `.replication.<id>` / `.cloudSync.<id>` by
+the last decisive job state and a stable `failed` boolean; a `RUNNING`, `PENDING`
+or blank poll carries both forward, so it cannot erase the signal. A failed
+replication or cloud sync fetch leaves that half of `seen.json` untouched.
+Snapshot tasks and scrub tasks carry no job and do not toast.
+
+**Meta-cadence caching.** `/replication`, `/cloudsync`, `/pool/snapshottask` and
+`/pool/scrub` join the meta cadence: a cold poll spends eleven requests and a
+warm poll two. The cache holds only the wire fields the plugin consumes, with
+the nested `state`/`job` reduced and the schedule whitelisted; replication SSH
+credentials and encryption keys, cloud sync credentials and encryption secrets,
+and job log excerpts never reach disk. `meta_is_stale` now requires all nine
+sections.
+
+**`truenasctl replication` / `cloudsync` / `snapshots` / `scrubs`.**
+`NAME  DIRECTION  STATE  LAST RUN`, `NAME  DIRECTION  STATE  LAST RUN`,
+`DATASET  STATE  LAST SNAPSHOT` and `POOL  ENABLED  THRESHOLD  SCHEDULE`, with
+`unknown` for a value that was never learned and the section's failure sentence
+instead of an empty table.
+
 ## Planned
 
 Each of these is its own milestone and its own plan when it is reached.
-
-**M4 Protection.** `/api/v2.0/replication`, `/cloudsync`, `/pool/snapshottask`,
-`/pool/scrub`; states, last run, and run-now writes.
 
 **M5 Shares and network.** `/sharing/{smb,nfs,iscsi,webdav}`, `/smb/status`,
 `/network/interface`; counts, sessions, link state.

@@ -158,7 +158,7 @@ scripts/dev-install    Copy the tree into ~/.config/omarchy/plugins and restart.
                   "custom": false, "upgradeAvailable": false, "migrated": false,
                   "containers": null,
                   "webui": null } ],
-  "replication": [ ], "cloudsync": [ ], "snapshots": [ ],
+  "replication": [ ], "cloudSync": [ ], "snapshotTasks": [ ], "scrubs": [ ],
   "shares":   { "smb": 0, "nfs": 0, "iscsi": 0, "webdav": 0 },
   "sessions": { "smb": [ ] },
   "network":  [ { "name": "", "linkState": "", "addresses": [ ] } ],
@@ -201,7 +201,10 @@ so "nothing is wrong" and "I cannot tell" never look the same.
 
 Dismiss alert · restore alert · start/stop/restart service · start/stop/redeploy
 app (redeploy is the restart-like verb; the API has no `app/restart` route) ·
-run scrub · run replication · run cloud-sync · run snapshot task.
+run replication (`replication-run`) · run cloud sync (`cloudsync-sync`) · run
+snapshot task (`snapshot-run`) · start a scrub (`scrub-start <pool>`, the async
+`pool/scrub/scrub` with `action: START`; the due-gated `pool/scrub/run` is not
+used).
 
 Guardrails: every write is one queued `Process`; destructive ones pass through a
 `ConfirmAction` declared inside `PanelKeyCatcher` (a dialog at root scope
@@ -217,7 +220,7 @@ Deduped in `seen.json`, namespaced by stable key:
 | --- | --- | --- |
 | Alert new / cleared | `alert:<uuid>` | critical/error urgent, warning normal |
 | Pool state change | `pool:<name>:<status>` | worsening urgent, recovery low |
-| Scrub / replication / cloudsync finished | `scrub:<pool>:<start>`, `<task>:<id>:<state>` | failure urgent, success low |
+| Replication / cloud sync failed or recovered | `.replication.<id>`, `.cloudSync.<id>` | failure normal, recovery low |
 | Disk temp | `.disks.<name>` | warning/critical normal, cooled low |
 | App / service down | `.services.<name>`, `.apps.<name>` (the design's `service:<id>:state` / `app:<id>:state`) | normal |
 | Update available | `update:<version>` | low |
@@ -225,7 +228,10 @@ Deduped in `seen.json`, namespaced by stable key:
 M3 ships the app and service rows. The seen entry is keyed by the service or app
 name under `seen.services` / `seen.apps` and records the last decisive state, a
 stable `down` boolean and `lastNotifiedAt`, so a blank or transitional poll
-carries the signal forward instead of erasing it.
+carries the signal forward instead of erasing it. M4 ships the replication and
+cloud sync rows, keyed by task id under `seen.replication` / `seen.cloudSync`,
+with a stable `failed` boolean carried forward the same way; snapshot tasks and
+scrub tasks carry no job and do not toast.
 
 There is no SMART entry: SMART test results are not available on 25.04+ (`GET
 /api/v2.0/smart/test/results` is `404` on the live 25.10.6, and the API
