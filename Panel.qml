@@ -137,6 +137,10 @@ Panel {
     else root.open()
   }
 
+  // A close through the toggle, an outside click or an IPC hide must drop the
+  // sheet too, otherwise reopening shows a stale glossary.
+  onOpenedChanged: if (!root.opened) helpModal.opened = false
+
   // The glossary is a sheet inside the visible panel window, opened from the
   // header `?` and from the menu's Help row.
   function showHelp() { helpModal.opened = true }
@@ -146,6 +150,7 @@ Panel {
 
   function showView(name) {
     var next = String(name || "health")
+    helpModal.opened = false
     root.actionError = ""
     root.actionNotice = ""
     root.pendingConfirm = null
