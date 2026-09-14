@@ -339,6 +339,8 @@ else
   pool_warned=$(jq -r '[.[] | select(.section == "pool")] | length' <<<"$warnings")
   disk_warned=$(jq -r '[.[] | select(.section == "disk")] | length' <<<"$warnings")
   disk_temp_warned=$(jq -r '[.[] | select(.section == "diskTemp")] | length' <<<"$warnings")
+  service_warned=$(jq -r '[.[] | select(.section == "service")] | length' <<<"$warnings")
+  app_warned=$(jq -r '[.[] | select(.section == "app")] | length' <<<"$warnings")
   alerts_ok=$((normalize_ok == 1 && alert_warned == 0))
   pools_ok=$((normalize_ok == 1 && pool_warned == 0))
   # `disks_ok` above is the fetch flag the meta gate reads; this is the
@@ -346,6 +348,12 @@ else
   # answer worth recording: writing then would mark a hot disk unknown and
   # replay it as hot on the next good poll.
   disks_notify_ok=$((normalize_ok == 1 && disk_warned == 0 && disk_temp_warned == 0))
+  # A service or app answer that failed, or that normalization could not read,
+  # carries no current rows worth recording. Without its gate that half of
+  # seen.json is not written: a blip must not replay every service as stopped
+  # on the poll after it.
+  services_ok=$((normalize_ok == 1 && service_warned == 0))
+  apps_ok=$((normalize_ok == 1 && app_warned == 0))
 
   levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
   renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
@@ -557,6 +565,122 @@ else
           })) as $next
       | $seen + { disks: $next }')
     [[ -n $seen_disks ]] && seen=$seen_disks
+  fi
+
+  if ((services_ok)); then
+    # A service is down when its state is neither RUNNING nor blank; a blank
+    # state is "I cannot tell", not an outage. Reduce over the current rows only
+    # so a service dropped from the list does not leave a seen entry behind.
+    jq -c -n \
+      --slurpfile payload "$WORK/payload.json" \
+      --argjson seen "$seen" '
+      ($payload[0]) as $p
+      | ($seen.services // {}) as $prev
+      | {
+          stopped: [ ($p.services // [])[] as $svc
+                     | ($prev[$svc.service] // null) as $old
+                     | select($svc.state != "RUNNING" and $svc.state != "")
+                     | select($old != null and $old.state == "RUNNING")
+                     | { name: $svc.service, state: $svc.state } ],
+          recovered: [ ($p.services // [])[] as $svc
+                       | ($prev[$svc.service] // null) as $old
+                       | select($svc.state == "RUNNING")
+                       | select($old != null and $old.state != "RUNNING"
+                                and $old.state != "")
+                       | { name: $svc.service, state: $svc.state } ]
+        }' >"$WORK/service-decisions.json"
+
+    while IFS= read -r s; do
+      [[ -n $s ]] || continue
+      svc_state=$(jq -r '.state' <<<"$s")
+      notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" \
+        "Service $(jq -r '.name' <<<"$s") is $svc_state" \
+        "state changed from RUNNING to $svc_state"
+    done < <(jq -c '.stopped[]' "$WORK/service-decisions.json")
+
+    while IFS= read -r s; do
+      [[ -n $s ]] || continue
+      notify low "$GLYPH_OK" "$base" \
+        "Service $(jq -r '.name' <<<"$s") is running again" ""
+    done < <(jq -c '.recovered[]' "$WORK/service-decisions.json")
+
+    seen_services=$(jq -c -n \
+      --argjson seen "$seen" \
+      --slurpfile payload "$WORK/payload.json" \
+      --slurpfile decisions "$WORK/service-decisions.json" \
+      --arg now "$now" '
+      ($payload[0]) as $p
+      | ($decisions[0]) as $d
+      | ($seen.services // {}) as $prev
+      | (reduce ($p.services[]?) as $svc ({};
+          .[$svc.service] = {
+            state: $svc.state,
+            lastNotifiedAt: (
+              if (($d.stopped | map(.name) | index($svc.service)) != null)
+                 or (($d.recovered | map(.name) | index($svc.service)) != null)
+              then $now
+              else ($prev[$svc.service].lastNotifiedAt // $now) end)
+          })) as $next
+      | $seen + { services: $next }')
+    [[ -n $seen_services ]] && seen=$seen_services
+  fi
+
+  if ((apps_ok)); then
+    # An app is down only in a terminal failure state. DEPLOYING, STARTING,
+    # STOPPING and a blank state are transitions, not outages, so they neither
+    # toast as stopped nor recover from one. Reduce over the current rows only.
+    jq -c -n \
+      --slurpfile payload "$WORK/payload.json" \
+      --argjson seen "$seen" '
+      ($payload[0]) as $p
+      | ($seen.apps // {}) as $prev
+      | (["STOPPED","CRASHED","FAILED","EXITED"]) as $down
+      | {
+          stopped: [ ($p.apps // [])[] as $app
+                     | ($prev[$app.name] // null) as $old
+                     | select($down | index($app.state))
+                     | select($old != null and $old.state == "RUNNING")
+                     | { name: $app.name, state: $app.state } ],
+          recovered: [ ($p.apps // [])[] as $app
+                       | ($prev[$app.name] // null) as $old
+                       | select($app.state == "RUNNING")
+                       | select($old != null and ($down | index($old.state)))
+                       | { name: $app.name, state: $app.state } ]
+        }' >"$WORK/app-decisions.json"
+
+    while IFS= read -r a; do
+      [[ -n $a ]] || continue
+      app_state=$(jq -r '.state' <<<"$a")
+      notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" \
+        "App $(jq -r '.name' <<<"$a") is $app_state" \
+        "state changed from RUNNING to $app_state"
+    done < <(jq -c '.stopped[]' "$WORK/app-decisions.json")
+
+    while IFS= read -r a; do
+      [[ -n $a ]] || continue
+      notify low "$GLYPH_OK" "$base" \
+        "App $(jq -r '.name' <<<"$a") is running again" ""
+    done < <(jq -c '.recovered[]' "$WORK/app-decisions.json")
+
+    seen_apps=$(jq -c -n \
+      --argjson seen "$seen" \
+      --slurpfile payload "$WORK/payload.json" \
+      --slurpfile decisions "$WORK/app-decisions.json" \
+      --arg now "$now" '
+      ($payload[0]) as $p
+      | ($decisions[0]) as $d
+      | ($seen.apps // {}) as $prev
+      | (reduce ($p.apps[]?) as $app ({};
+          .[$app.name] = {
+            state: $app.state,
+            lastNotifiedAt: (
+              if (($d.stopped | map(.name) | index($app.name)) != null)
+                 or (($d.recovered | map(.name) | index($app.name)) != null)
+              then $now
+              else ($prev[$app.name].lastNotifiedAt // $now) end)
+          })) as $next
+      | $seen + { apps: $next }')
+    [[ -n $seen_apps ]] && seen=$seen_apps
   fi
 fi
 
