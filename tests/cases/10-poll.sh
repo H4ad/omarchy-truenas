@@ -156,6 +156,21 @@ check "so the state is unknown" unknown \
   "$(state '.disks[] | select(.name=="sda") | .tempState')"
 teardown
 
+test_case "the temperature bands are pinned at the threshold and ten below"
+setup; single_instance_config
+printf '{ "sda": [60.0, 60.0], "sdb": [50.0, 60.0] }\n' >"$WORK/temps-bands.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$WORK/temps-bands.json"
+poll
+check "at the critical threshold is critical" critical \
+  "$(state '.disks[] | select(.name=="sda") | .tempState')"
+check "exactly ten below is warning" warning \
+  "$(state '.disks[] | select(.name=="sdb") | .tempState')"
+teardown
+
 test_case "an unreachable NAS is unknown, not zero"
 setup; single_instance_config
 respond "/api/v2.0/alert/list" 7 0 /dev/null

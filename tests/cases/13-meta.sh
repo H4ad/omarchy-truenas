@@ -155,21 +155,62 @@ check "the meta file is byte-for-byte the previous one" "$before" \
   "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
 teardown
 
-test_case "an M1 meta.json without the disk keys self-heals on the next poll"
+test_case "a failed temperatures fetch leaves the previous meta byte-for-byte intact"
 setup; single_instance_config
 meta_responses
 poll
-# A cache from before this milestone: a usable system section and no disk
-# keys at all. The fresh fetch time must not save it; presence is checked too.
-jq -c 'del(.disks, .diskTemps)' \
-  "$XDG_STATE_HOME/omarchy/truenas/meta.json" >"$WORK/meta-m1.json"
-cp "$WORK/meta-m1.json" "$XDG_STATE_HOME/omarchy/truenas/meta.json"
-: >"$STUB_CURL_LOG"
+before=$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 500 "$ROOT/tests/fixtures/err-500.json"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+check "the forced poll asked for the temperatures" 2 "$(disk_temp_requests)"
+check "a warning names the diskTemp section" diskTemp \
+  "$(state '.warnings[] | select(.section=="diskTemp") | .section')"
+check "the meta file is byte-for-byte the previous one" "$before" \
+  "$(cat "$XDG_STATE_HOME/omarchy/truenas/meta.json")"
+teardown
+
+test_case "a meta.json missing either disk key self-heals on the next poll"
+setup; single_instance_config
+meta_responses
 poll
-check "the incomplete cache is stale, so the poll refetches all five" 5 "$(requests)"
+# A cache from before this milestone: a usable system section, a fresh fetch
+# time, and one disk key at a time missing. The fresh age must not save it;
+# each presence predicate has to stand on its own.
+for missing in disks diskTemps; do
+  jq -c --arg k "$missing" 'del(.[$k])' \
+    "$XDG_STATE_HOME/omarchy/truenas/meta.json" >"$WORK/meta-m1.json"
+  cp "$WORK/meta-m1.json" "$XDG_STATE_HOME/omarchy/truenas/meta.json"
+  : >"$STUB_CURL_LOG"
+  poll
+  check "a cache missing $missing is stale and refetches all five" 5 "$(requests)"
+  check "and $missing is written again" true "$(meta_file "has(\"$missing\")")"
+done
 check "the disk rows are cached again" 5 "$(meta_file '.disks.rows | length')"
 check "and the temperature map too" 5 "$(meta_file '.diskTemps.map | length')"
 check "the old system data was not lost" 25.04.2 "$(state '.system.version')"
+teardown
+
+test_case "the meta cache keeps the consumed disk fields and drops identifiers"
+setup; single_instance_config
+jq -c '[ .[] | . + { serial: "FAKE-SERIAL", identifier: "fake-id", lunid: "fake-lun" } ]' \
+  "$ROOT/tests/fixtures/disks.json" >"$WORK/disks-with-ids.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$WORK/disks-with-ids.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+poll
+check "no cached row carries a serial, identifier or lunid" 0 \
+  "$(meta_file '[.disks.rows[] | select(has("serial") or has("identifier") or has("lunid"))] | length')"
+check "the consumed fields survive the filter" boot-pool \
+  "$(meta_file '.disks.rows[] | select(.name=="sda") | .imported_zpool')"
+check "the filtered rows still normalize" 5 "$(state '.disks | length')"
+check "with the temperature from the raw map" 38 \
+  "$(state '.disks[] | select(.name=="sda") | .tempC')"
 teardown
 
 test_case "the meta cache round-trips a null system field"

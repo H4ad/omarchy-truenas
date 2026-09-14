@@ -485,7 +485,18 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
     | if $s == null then $meta
       else $meta + {
         system: { fetchedAt: $now, data: $s },
-        disks: { fetchedAt: $now, rows: $disks[0] },
+        # Only the fields the plugin consumes are cached, under their wire
+        # names. disk/details also carries serials, identifiers and lunids;
+        # those never leave the NAS.
+        disks: {
+          fetchedAt: $now,
+          rows: [ $disks[0][]? | { name:          (.name // null),
+                                   model:         (.model // null),
+                                   type:          (.type // null),
+                                   size:          (.size // null),
+                                   imported_zpool: (.imported_zpool // null),
+                                   bus:           (.bus // null) } ]
+        },
         diskTemps: { fetchedAt: $now, map: $diskTemps[0] }
       } end')
   printf '%s\n' "$meta" | tn_write_json "$TN_META_FILE"
