@@ -32,6 +32,8 @@ truenasctl <command>
   cloudsync                  each cloud sync task, direction, state and last run
   snapshots                  each periodic snapshot task, state and last snapshot
   scrubs                     each scrub task, its enabled flag and schedule
+  shares                     each SMB, NFS and iSCSI share
+  network                    each network interface, its link, media and addresses
   poll [--quiet]             run one poll now
   config list                configuration as JSON, never the key value
   config set <key> <value>   write one scalar setting
@@ -264,11 +266,12 @@ cmd_test() {
 }
 
 # Why one half of the state is unknown, or "" when it is not. `$2` is the
-# section name the poller uses: "alert", "pool", "disk", "diskTemp", "service"
-# or "app". A missing answer (offline), a failed request for that section, and a
-# failed normalize all leave the half unknowable, and each gets a reason rather
-# than a zero. The offline sentence is the same one the `connection` line
-# carries, so the verbs name the same cause.
+# section name the poller uses: "alert", "pool", "disk", "diskTemp", "service",
+# "app", "replication", "cloudSync", "snapshotTasks", "scrubs", "smb", "nfs",
+# "iscsi" or "network". A missing answer (offline), a failed request for that
+# section, and a failed normalize all leave the half unknowable, and each gets a
+# reason rather than a zero. The offline sentence is the same one the
+# `connection` line carries, so the verbs name the same cause.
 state_unknown_reason() {
   jq -r --arg section "$2" '
     def down:
@@ -591,6 +594,91 @@ cmd_scrubs() {
   ' "$file"
 }
 
+# Why one share type is unknown, or "" when it is not. `$2` is the section token
+# the poller uses: smb, nfs or iscsi. A failed fetch leaves a warning; a state
+# written before M5 has no shares object at all, so an absent or non-list sublist
+# is named the same way a failed one is, rather than printed as an empty table.
+share_unknown_reason() {
+  local file=$1 section=$2 reason
+  reason=$(state_unknown_reason "$file" "$section")
+  if [[ -z $reason ]]; then
+    jq -e --arg s "$section" '.shares[$s] | type == "array"' "$file" >/dev/null 2>&1 \
+      || reason="the $section section did not answer"
+  fi
+  printf '%s' "$reason"
+}
+
+# One row per SMB, NFS and iSCSI share, grouped in that order and sorted within
+# each type the way the poller wrote them (SMB by name, NFS by path, iSCSI by
+# name). TYPE is the share type; NFS has no name and iSCSI has no path, enabled
+# or read-only flag, so those cells are `-`. ENABLED and RO are yes/no, and
+# `unknown` for a field the type has but the poll did not learn. A type whose
+# section warned prints its reason on its own line before the table and its rows
+# are omitted, so a failed section never reads as "no shares".
+cmd_shares() {
+  local file smb_reason nfs_reason iscsi_reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  smb_reason=$(share_unknown_reason "$file" smb)
+  nfs_reason=$(share_unknown_reason "$file" nfs)
+  iscsi_reason=$(share_unknown_reason "$file" iscsi)
+  [[ -z $smb_reason ]] || printf 'smb shares unknown: %s\n' "$smb_reason"
+  [[ -z $nfs_reason ]] || printf 'nfs shares unknown: %s\n' "$nfs_reason"
+  [[ -z $iscsi_reason ]] || printf 'iscsi shares unknown: %s\n' "$iscsi_reason"
+  jq -r --arg smb "$smb_reason" --arg nfs "$nfs_reason" --arg iscsi "$iscsi_reason" '
+    def yesno($v): if ($v | type) == "boolean" then (if $v then "yes" else "no" end) else "unknown" end;
+    def carried($v): if $v == null or $v == "" then "unknown" else $v end;
+    "TYPE  NAME  PATH  ENABLED  RO",
+    (select($smb == "") | (.shares.smb // [])[]
+     | [ "smb", carried(.name), carried(.path), yesno(.enabled), yesno(.readonly) ] | join("  ")),
+    (select($nfs == "") | (.shares.nfs // [])[]
+     | [ "nfs", "-", carried(.path), yesno(.enabled), yesno(.readonly) ] | join("  ")),
+    (select($iscsi == "") | (.shares.iscsi // [])[]
+     | [ "iscsi", carried(.name), "-", "-", "-" ] | join("  "))
+  ' "$file"
+}
+
+# One row per interface, sorted by name. LINK is up/down/unknown derived from the
+# raw linkState; MEDIA is the negotiated mediaSubtype, falling back to mediaType,
+# or `unknown`; ADDRESSES is every address/netmask joined with `,`, or `-` when
+# the interface has none. A failed interface section prints its reason instead of
+# an empty table.
+cmd_network() {
+  local file reason
+  file="$TN_STATE_FILE"
+  [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
+    return 1
+  fi
+  if ! jq -e '.network | type == "array"' "$file" >/dev/null 2>&1; then
+    printf 'network unknown: the network section did not answer\n'
+    return 0
+  fi
+  reason=$(state_unknown_reason "$file" network)
+  if [[ -n $reason ]]; then
+    printf 'network unknown: %s\n' "$reason"
+    return 0
+  fi
+  jq -r '
+    def link: if . == "LINK_STATE_UP" then "up" elif . == "LINK_STATE_DOWN" then "down" else "unknown" end;
+    def text($v): if $v == null or $v == "" then "unknown" else $v end;
+    "NAME  TYPE  LINK  MEDIA  ADDRESSES",
+    (.network[] | [
+        text(.name),
+        text(.type),
+        (.linkState | link),
+        (if (.mediaSubtype // "") != "" then .mediaSubtype else text(.mediaType) end),
+        (([ (.addresses // [])[]? | "\(.address)/\(.netmask)" ] | join(",")) as $a
+         | if $a == "" then "-" else $a end)
+      ] | join("  "))
+  ' "$file"
+}
+
 cmd_poll() { exec "$TN_PLUGIN_DIR/bin/truenas-poll" "$@"; }
 
 cmd_open() {
@@ -721,6 +809,8 @@ case ${1:-} in
   cloudsync)   cmd_cloudsync ;;
   snapshots)   cmd_snapshots ;;
   scrubs)      cmd_scrubs ;;
+  shares)      cmd_shares ;;
+  network)     cmd_network ;;
   poll)    shift; cmd_poll "$@" ;;
   config)  shift; cmd_config "$@" ;;
   open)    shift; cmd_open "$@" ;;

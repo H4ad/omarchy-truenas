@@ -778,3 +778,120 @@ check "scrubs runs" 0 "$(ctl scrubs >/dev/null 2>&1; echo $?)"
 check "scrubs says unknown" 1 "$(grep -c '^scrubs unknown:' <<<"$out")"
 check "scrubs prints no jq error" 0 "$(grep -ci 'jq: error' <<<"$out")"
 teardown
+
+test_case "shares prints one row per share, grouped by type"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "shares": {
+    "smb": [
+      { "id": 1, "name": "default", "path": "/mnt/storage/default",
+        "enabled": true, "readonly": false },
+      { "id": 2, "name": "media", "path": "/mnt/storage/plex",
+        "enabled": false, "readonly": true }
+    ],
+    "nfs": [
+      { "id": 1, "path": "/mnt/storage/default", "enabled": true, "readonly": false }
+    ],
+    "iscsi": [ { "id": 1, "name": "iqn.2005-10.org.freenas.ctl:target0" } ]
+  },
+  "warnings": [] }
+JSON
+out=$(ctl shares)
+check "shares runs" 0 "$(ctl shares >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^TYPE  NAME  PATH  ENABLED  RO$' <<<"$out")"
+check "one row per share" 4 \
+  "$(grep -c '^\(smb\|nfs\|iscsi\)  ' <<<"$out")"
+check "an enabled writable SMB share is yes no" 1 \
+  "$(grep -c '^smb  default  /mnt/storage/default  yes  no$' <<<"$out")"
+check "a disabled read-only SMB share is no yes" 1 \
+  "$(grep -c '^smb  media  /mnt/storage/plex  no  yes$' <<<"$out")"
+check "NFS has no name, so that cell is a dash" 1 \
+  "$(grep -c '^nfs  -  /mnt/storage/default  yes  no$' <<<"$out")"
+check "iSCSI has no path or flags, so those cells are dashes" 1 \
+  "$(grep -c '^iscsi  iqn.2005-10.org.freenas.ctl:target0  -  -  -$' <<<"$out")"
+teardown
+
+test_case "shares names a failed type instead of printing its rows"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "shares": {
+    "smb": [ { "id": 1, "name": "default", "path": "/mnt/storage/default",
+               "enabled": true, "readonly": false } ],
+    "nfs": [ { "id": 1, "path": "/mnt/storage/default", "enabled": true, "readonly": false } ],
+    "iscsi": [ { "id": 1, "name": "iqn.2005-10.org.freenas.ctl:target0" } ]
+  },
+  "warnings": [ { "section": "smb", "error": "timeout", "message": "" } ] }
+JSON
+out=$(ctl shares)
+check "shares still runs" 0 "$(ctl shares >/dev/null 2>&1; echo $?)"
+check "says the smb type is unknown" 1 \
+  "$(grep -c '^smb shares unknown: the smb section did not answer$' <<<"$out")"
+check "the smb rows are omitted" 0 "$(grep -c '^smb  ' <<<"$out")"
+check "the header still prints" 1 "$(grep -c '^TYPE  NAME' <<<"$out")"
+check "the NFS rows still print" 1 "$(grep -c '^nfs  ' <<<"$out")"
+check "the iSCSI rows still print" 1 "$(grep -c '^iscsi  ' <<<"$out")"
+teardown
+
+test_case "shares calls an absent shares object unknown for every type"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true }, "warnings": [] }
+JSON
+out=$(ctl shares 2>&1)
+check "shares runs" 0 "$(ctl shares >/dev/null 2>&1; echo $?)"
+check "smb is named" 1 \
+  "$(grep -c '^smb shares unknown: the smb section did not answer$' <<<"$out")"
+check "nfs is named" 1 \
+  "$(grep -c '^nfs shares unknown: the nfs section did not answer$' <<<"$out")"
+check "iscsi is named" 1 \
+  "$(grep -c '^iscsi shares unknown: the iscsi section did not answer$' <<<"$out")"
+check "the header still prints" 1 "$(grep -c '^TYPE  NAME' <<<"$out")"
+check "no data row is invented" 0 "$(grep -c '^\(smb\|nfs\|iscsi\)  [a-z-]' <<<"$out")"
+check "shares prints no jq error" 0 "$(grep -ci 'jq: error' <<<"$out")"
+teardown
+
+test_case "network prints interface link, media and addresses"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "network": [
+    { "name": "enp4s0", "type": "PHYSICAL", "linkState": "LINK_STATE_UP",
+      "mediaType": "Ethernet", "mediaSubtype": "1000Mb/s Twisted Pair",
+      "addresses": [ { "type": "INET", "address": "192.0.2.10", "netmask": 24 },
+                     { "type": "INET6", "address": "2001:db8::10", "netmask": 64 } ] },
+    { "name": "br0", "type": "BRIDGE", "linkState": "LINK_STATE_DOWN",
+      "mediaType": "Ethernet", "mediaSubtype": "", "addresses": [] }
+  ],
+  "warnings": [] }
+JSON
+out=$(ctl network)
+check "network runs" 0 "$(ctl network >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^NAME  TYPE  LINK  MEDIA  ADDRESSES$' <<<"$out")"
+check "an up interface prints its negotiated media and addresses" 1 \
+  "$(grep -c '^enp4s0  PHYSICAL  up  1000Mb/s Twisted Pair  192.0.2.10/24,2001:db8::10/64$' <<<"$out")"
+check "a down interface falls back to the media type" 1 \
+  "$(grep -c '^br0  BRIDGE  down  Ethernet  -$' <<<"$out")"
+teardown
+
+test_case "network names a failed interface section instead of an empty table"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true }, "network": [],
+  "warnings": [ { "section": "network", "error": "timeout", "message": "" } ] }
+JSON
+out=$(ctl network)
+check "network still runs" 0 "$(ctl network >/dev/null 2>&1; echo $?)"
+check "says unknown" 1 "$(grep -c '^network unknown:' <<<"$out")"
+check "names the failed section" 1 \
+  "$(grep -c 'the network section did not answer' <<<"$out")"
+check "draws no header over an empty table" 0 "$(grep -c '^NAME' <<<"$out")"
+teardown
