@@ -617,3 +617,164 @@ check "config gone" 0 "$([[ -e $TRUENAS_CONFIG_FILE ]] && echo 1 || echo 0)"
 check "credentials gone" 0 "$([[ -e $TRUENAS_CREDENTIALS_FILE ]] && echo 1 || echo 0)"
 check "state directory gone" 0 "$([[ -d $XDG_STATE_HOME/omarchy/truenas ]] && echo 1 || echo 0)"
 teardown
+
+# --------------------------------------------------------------- protection
+# The four protection tables read state.json, print `unknown` for a value the
+# poller did not learn, and print the section's failure sentence rather than an
+# empty table.
+test_case "replication prints name, direction, state and last run"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "replication": [
+    { "id": 1, "name": "storage-to-backup", "direction": "PUSH",
+      "state": { "state": "FINISHED" },
+      "job": { "state": "SUCCESS", "timeFinished": "2026-09-14T03:05:18Z" } },
+    { "id": 2, "name": "backup-to-offsite", "direction": "PULL",
+      "state": { "state": "PENDING" }, "job": null },
+    { "id": 3, "name": "", "direction": "", "state": null, "job": null }
+  ], "warnings": [] }
+JSON
+out=$(ctl replication)
+check "replication runs" 0 "$(ctl replication >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^NAME  DIRECTION  STATE  LAST RUN$' <<<"$out")"
+check "one row per task" 3 \
+  "$(grep -c '^\(storage-to-backup\|backup-to-offsite\|unknown\) ' <<<"$out")"
+check "the job state wins" 1 \
+  "$(grep -c '^storage-to-backup  PUSH  SUCCESS  2026-09-14T03:05:18Z$' <<<"$out")"
+check "the task state is the fallback" 1 \
+  "$(grep -c '^backup-to-offsite  PULL  PENDING  unknown$' <<<"$out")"
+check "a blank row is unknown, never blank" 1 \
+  "$(grep -c '^unknown  unknown  unknown  unknown$' <<<"$out")"
+teardown
+
+test_case "cloudsync prints name, direction, state and last run"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "cloudSync": [
+    { "id": 3, "name": "clouda", "direction": "PUSH",
+      "job": { "state": "SUCCESS", "timeFinished": "2026-09-14T02:00:00Z" } },
+    { "id": 4, "name": "b2", "direction": "PULL", "job": null }
+  ], "warnings": [] }
+JSON
+out=$(ctl cloudsync)
+check "cloudsync runs" 0 "$(ctl cloudsync >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^NAME  DIRECTION  STATE  LAST RUN$' <<<"$out")"
+check "a successful job shows its state and finish" 1 \
+  "$(grep -c '^clouda  PUSH  SUCCESS  2026-09-14T02:00:00Z$' <<<"$out")"
+check "a jobless task is unknown" 1 \
+  "$(grep -c '^b2  PULL  unknown  unknown$' <<<"$out")"
+teardown
+
+test_case "snapshots prints dataset, state and last snapshot"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "snapshotTasks": [
+    { "id": 1, "dataset": "storage",
+      "state": { "state": "FINISHED", "lastSnapshot": "storage@auto-hourly-1" } },
+    { "id": 6, "dataset": "Backup",
+      "state": { "state": "PENDING", "lastSnapshot": null } },
+    { "id": 7, "dataset": "", "state": null }
+  ], "warnings": [] }
+JSON
+out=$(ctl snapshots)
+check "snapshots runs" 0 "$(ctl snapshots >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^DATASET  STATE  LAST SNAPSHOT$' <<<"$out")"
+check "a finished task shows its snapshot" 1 \
+  "$(grep -c '^storage  FINISHED  storage@auto-hourly-1$' <<<"$out")"
+check "a pending task has no snapshot, never a blank" 1 \
+  "$(grep -c '^Backup  PENDING  unknown$' <<<"$out")"
+check "a blank row is unknown" 1 \
+  "$(grep -c '^unknown  unknown  unknown$' <<<"$out")"
+teardown
+
+test_case "scrubs prints pool, enabled, threshold and schedule"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "scrubs": [
+    { "id": 1, "pool": "storage", "threshold": 35, "enabled": true,
+      "schedule": { "minute": "00", "hour": "00", "dow": "7" } },
+    { "id": 2, "pool": "Backup", "threshold": 35, "enabled": false,
+      "schedule": null }
+  ], "warnings": [] }
+JSON
+out=$(ctl scrubs)
+check "scrubs runs" 0 "$(ctl scrubs >/dev/null 2>&1; echo $?)"
+check "the header names every column" 1 \
+  "$(grep -c '^POOL  ENABLED  THRESHOLD  SCHEDULE$' <<<"$out")"
+check "an enabled task shows yes and its schedule" 1 \
+  "$(grep -c '^storage  yes  35  7 00 00$' <<<"$out")"
+check "a disabled task shows no and an unknown schedule" 1 \
+  "$(grep -c '^Backup  no  35  unknown$' <<<"$out")"
+teardown
+
+test_case "protection verbs on an empty list print just the header"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "replication": [], "cloudSync": [], "snapshotTasks": [], "scrubs": [],
+  "warnings": [] }
+JSON
+out=$(ctl replication)
+check "replication is exactly the header" 1 "$(wc -l <<<"$out")"
+check "replication prints the header" 1 \
+  "$(grep -c '^NAME  DIRECTION  STATE  LAST RUN$' <<<"$out")"
+out=$(ctl cloudsync)
+check "cloudsync is exactly the header" 1 "$(wc -l <<<"$out")"
+out=$(ctl snapshots)
+check "snapshots is exactly the header" 1 "$(wc -l <<<"$out")"
+check "snapshots prints the header" 1 \
+  "$(grep -c '^DATASET  STATE  LAST SNAPSHOT$' <<<"$out")"
+out=$(ctl scrubs)
+check "scrubs is exactly the header" 1 "$(wc -l <<<"$out")"
+check "scrubs prints the header" 1 \
+  "$(grep -c '^POOL  ENABLED  THRESHOLD  SCHEDULE$' <<<"$out")"
+teardown
+
+test_case "protection verbs name a failed section instead of an empty table"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true },
+  "replication": [], "cloudSync": [], "snapshotTasks": [], "scrubs": [],
+  "warnings": [ { "section": "replication", "error": "timeout", "message": "" } ] }
+JSON
+out=$(ctl replication)
+check "replication still runs" 0 "$(ctl replication >/dev/null 2>&1; echo $?)"
+check "says unknown" 1 "$(grep -c '^replication unknown:' <<<"$out")"
+check "names the failed section" 1 \
+  "$(grep -c 'the replication section did not answer' <<<"$out")"
+check "draws no header over an empty table" 0 "$(grep -c '^NAME' <<<"$out")"
+out=$(ctl cloudsync)
+check "the cloud sync half is unaffected" 1 \
+  "$(grep -c '^NAME  DIRECTION  STATE  LAST RUN$' <<<"$out")"
+teardown
+
+test_case "protection verbs call an absent section unknown, never an empty table"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "connection": { "ok": true }, "warnings": [] }
+JSON
+out=$(ctl snapshots)
+check "snapshots runs" 0 "$(ctl snapshots >/dev/null 2>&1; echo $?)"
+check "snapshots says unknown" 1 "$(grep -c '^snapshots unknown:' <<<"$out")"
+check "snapshots names the absent section" 1 \
+  "$(grep -c 'the snapshotTasks section did not answer' <<<"$out")"
+check "snapshots draws no header" 0 "$(grep -c '^DATASET' <<<"$out")"
+out=$(ctl scrubs 2>&1)
+check "scrubs runs" 0 "$(ctl scrubs >/dev/null 2>&1; echo $?)"
+check "scrubs says unknown" 1 "$(grep -c '^scrubs unknown:' <<<"$out")"
+check "scrubs prints no jq error" 0 "$(grep -ci 'jq: error' <<<"$out")"
+teardown
