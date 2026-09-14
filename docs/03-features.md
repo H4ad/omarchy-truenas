@@ -36,9 +36,8 @@ state and age, and vdev error counts when non-zero. A pool with no scrub data
 says "no scrub on record" rather than inventing a date.
 
 **Alerts view.** A row per alert: level glyph, text, node, age, and `dismiss` /
-`restore` where the alert allows it. The write verbs are planned, not yet
-implemented in this build (there is no `bin/truenas-api` yet): when they land,
-writes will go through it behind a confirmation, and the panel will re-poll with
+`restore` where the alert allows it. The write verbs go through `bin/truenas-api`:
+dismiss behind a confirmation, restore straight out. The panel re-polls with
 `--force-meta` before it believes them.
 
 **Config view.** The bar settings plus the credentials flow: `pollSeconds`,
@@ -56,8 +55,8 @@ to urgency; a critical toast never sticks by default. A failed poll leaves
 / forbidden / not JSON / timed out), `status`, `alerts`, `pools`, `poll`,
 `config list|set|set-key`, `open` and `purge`.
 
-**Menu.** A `TrueNAS` summon menu that reaches the popout, each view, poll-now,
-notification pause/resume and the NAS UI.
+**Menu.** A `TrueNAS` summon menu that reaches the popout, each view, poll-now
+and the NAS UI.
 
 ## Planned
 
