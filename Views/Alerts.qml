@@ -23,6 +23,8 @@ Column {
   readonly property var nasState: view.panel.state
   readonly property var connection: (view.nasState && view.nasState.connection) || null
   readonly property bool connected: !!(view.connection && view.connection.ok)
+  readonly property bool unconfigured: view.panel.mode === "unconfigured"
+    || !!(view.connection && String(view.connection.error || "") === "unconfigured")
   readonly property var alerts: (view.nasState && Model.arrayLike(view.nasState.alerts)) ? view.nasState.alerts : []
   readonly property var rows: Model.alertRows(view.alerts)
   readonly property var warnings: (view.nasState && Model.arrayLike(view.nasState.warnings)) ? view.nasState.warnings : []
@@ -58,6 +60,7 @@ Column {
   readonly property string statusLine: {
     if (view.alertFailed) return ""
     if (!view.nasState) return "No state yet. The service writes it after the first poll."
+    if (view.unconfigured) return "not configured yet · run truenasctl login <url>"
     if (!view.connected)
       return "No answer from the NAS: " + (Model.errorSentence(view.connection) || "the poll failed")
     if (view.rows.length === 0) {
@@ -154,7 +157,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.statusLine !== ""
     text: view.statusLine
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }

@@ -24,6 +24,8 @@ Column {
   readonly property var nasState: view.panel.state
   readonly property var connection: (view.nasState && view.nasState.connection) || null
   readonly property bool connected: !!(view.connection && view.connection.ok)
+  readonly property bool unconfigured: view.panel.mode === "unconfigured"
+    || !!(view.connection && String(view.connection.error || "") === "unconfigured")
   readonly property var apps: (view.nasState && Model.arrayLike(view.nasState.apps))
     ? view.nasState.apps : []
   readonly property var warnings: (view.nasState && Model.arrayLike(view.nasState.warnings))
@@ -62,6 +64,7 @@ Column {
   // why the list is missing, and a filter that matches nothing says so itself.
   readonly property string emptyText: {
     if (!view.nasState) return "No state yet. The service writes it after the first poll."
+    if (view.unconfigured) return "not configured yet · run truenasctl login <url>"
     if (!view.connected)
       return "No answer from the NAS: " + (Model.errorSentence(view.connection) || "the poll failed")
     if (view.apps.length > 0 && view.rows.length === 0) return "no apps match the filter"
@@ -215,7 +218,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyText !== ""
     text: view.emptyText
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }

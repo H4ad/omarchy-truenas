@@ -22,6 +22,8 @@ Column {
   readonly property var nasState: view.panel.state
   readonly property var connection: (view.nasState && view.nasState.connection) || null
   readonly property bool connected: !!(view.connection && view.connection.ok)
+  readonly property bool unconfigured: view.panel.mode === "unconfigured"
+    || !!(view.connection && String(view.connection.error || "") === "unconfigured")
   readonly property var warnings: (view.nasState && Model.arrayLike(view.nasState.warnings))
     ? view.nasState.warnings : []
 
@@ -65,6 +67,7 @@ Column {
   // why the list is missing, and a filter that matches nothing says so itself.
   function emptyFor(section, total, shown, noun) {
     if (!view.nasState) return "No state yet. The service writes it after the first poll."
+    if (view.unconfigured) return "not configured yet · run truenasctl login <url>"
     if (!view.connected)
       return "No answer from the NAS: " + (Model.errorSentence(view.connection) || "the poll failed")
     if (total > 0 && shown === 0) return "no " + noun + " match the filter"
@@ -207,7 +210,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("smb", view.smb.length, view.smbRows.length, "SMB shares") !== ""
     text: view.emptyFor("smb", view.smb.length, view.smbRows.length, "SMB shares")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -274,7 +277,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("nfs", view.nfs.length, view.nfsRows.length, "NFS exports") !== ""
     text: view.emptyFor("nfs", view.nfs.length, view.nfsRows.length, "NFS exports")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -332,7 +335,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("iscsi", view.iscsi.length, view.iscsiRows.length, "iSCSI targets") !== ""
     text: view.emptyFor("iscsi", view.iscsi.length, view.iscsiRows.length, "iSCSI targets")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -401,7 +404,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces") !== ""
     text: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }

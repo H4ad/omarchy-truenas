@@ -181,22 +181,42 @@ check "the help scrim swallows the wheel" "1" \
 check "only jumpTo writes contentY" "1" \
   "$(grep -c 'root.flickable.contentY =' "$ROOT/Ui/ScrollIndicator.qml")"
 
+# -------------------------------------------------------------- helper callers
+# The two helpers Task C keeps each need a live caller, or the only match in the
+# repo is the library definition.
+check "the Apps view gives appsUpgradeable a caller" "1" \
+  "$(grep -c 'Model.appsUpgradeable(view.apps)' "$ROOT/Views/Apps.qml")"
+check "the Shares view gives unknownInterfaces a caller" "1" \
+  "$(grep -c 'Model.unknownInterfaces(view.network)' "$ROOT/Views/Shares.qml")"
+
 # ---------------------------------------------------------------- state lines
-# Every view that reads polled data answers the seven-case state contract with a
-# state declaration: no-state, offline, its own failed section, an empty route
-# answer and (for the list views) a filter that matched nothing each print a
-# sentence rather than a blank list or a fabricated zero. The declaration is
-# `readonly property string emptyText`, `readonly property string statusLine` or
-# a `function emptyFor`. Views/Config.qml is the one exemption: it reads no
-# polled list, only truenasctl's config, so it has no no-state, offline or empty
-# route answer to give. A grep over the source is the strongest check available,
-# because nothing in CI runs QML.
+# Each data view declares `readonly property string emptyText|statusLine` or a
+# `function emptyFor`. Views/Config.qml is the one exemption: it reads no polled
+# list. The declaration must start the line so a commented-out one cannot pass.
 qml_state_missing=""
+qml_state_scanned=0
 for file in "$ROOT"/Views/*.qml; do
   name=$(basename "$file")
   [[ $name == "Config.qml" ]] && continue
-  grep -qE 'readonly property string (emptyText|statusLine)|function emptyFor' "$file" \
+  [[ -f "$file" ]] || continue
+  qml_state_scanned=$((qml_state_scanned + 1))
+  grep -qE '^[[:space:]]*readonly property string (emptyText|statusLine)|^[[:space:]]*function emptyFor' "$file" \
     || qml_state_missing="$qml_state_missing $name"
 done
+[[ $qml_state_scanned -gt 0 ]] || qml_state_missing="$qml_state_missing Views:no-files-scanned"
 check "every data view declares a state line (Views/Config.qml exempt: no polled list)" \
   "" "${qml_state_missing# }"
+
+# The contract's unconfigured sentence, in every data view but Config. A view
+# that folds "not configured" into the offline branch prints "No answer from the
+# NAS: not configured yet" instead. The check names each offending file.
+qml_unconfigured_missing=""
+for file in "$ROOT"/Views/*.qml; do
+  name=$(basename "$file")
+  [[ $name == "Config.qml" ]] && continue
+  [[ -f "$file" ]] || continue
+  grep -qF 'not configured yet · run truenasctl login <url>' "$file" \
+    || qml_unconfigured_missing="$qml_unconfigured_missing $name"
+done
+check "every data view names the not-configured sentence (Views/Config.qml exempt)" \
+  "" "${qml_unconfigured_missing# }"

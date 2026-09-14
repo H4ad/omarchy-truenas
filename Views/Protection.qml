@@ -21,6 +21,8 @@ Column {
   readonly property var nasState: view.panel.state
   readonly property var connection: (view.nasState && view.nasState.connection) || null
   readonly property bool connected: !!(view.connection && view.connection.ok)
+  readonly property bool unconfigured: view.panel.mode === "unconfigured"
+    || !!(view.connection && String(view.connection.error || "") === "unconfigured")
   readonly property var warnings: (view.nasState && Model.arrayLike(view.nasState.warnings))
     ? view.nasState.warnings : []
 
@@ -66,6 +68,7 @@ Column {
   // why the list is missing, and a filter that matches nothing says so itself.
   function emptyFor(section, total, shown, noun) {
     if (!view.nasState) return "No state yet. The service writes it after the first poll."
+    if (view.unconfigured) return "not configured yet · run truenasctl login <url>"
     if (!view.connected)
       return "No answer from the NAS: " + (Model.errorSentence(view.connection) || "the poll failed")
     if (total > 0 && shown === 0) return "no " + noun + " match the filter"
@@ -171,7 +174,7 @@ Column {
                            "replication tasks") !== ""
     text: view.emptyFor("replication", view.replication.length, view.replicationRows.length,
                         "replication tasks")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -307,7 +310,7 @@ Column {
                            "cloud sync tasks") !== ""
     text: view.emptyFor("cloudSync", view.cloudSync.length, view.cloudSyncRows.length,
                         "cloud sync tasks")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -443,7 +446,7 @@ Column {
                            "snapshot tasks") !== ""
     text: view.emptyFor("snapshotTasks", view.snapshotTasks.length, view.snapshotRows.length,
                         "snapshot tasks")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -568,7 +571,7 @@ Column {
     visible: view.emptyFor("scrubs", view.scrubs.length, view.scrubRows.length,
                            "scrub tasks") !== ""
     text: view.emptyFor("scrubs", view.scrubs.length, view.scrubRows.length, "scrub tasks")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
