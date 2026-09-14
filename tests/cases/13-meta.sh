@@ -529,3 +529,15 @@ check "nor the state file" 0 \
 check "the filtered share rows still normalize" 3 "$(state '.shares.smb | length')"
 check "and the filtered interface still normalizes" 1 "$(state '.network | length')"
 teardown
+
+test_case "the history grows on a warm poll too and spends no extra request"
+setup; single_instance_config
+meta_responses
+poll
+check "the cold poll appends one sample" 1 "$(history '.capacityPct | length')"
+before=$(requests)
+poll
+check "the warm poll appends too" 2 "$(history '.capacityPct | length')"
+check "and adds only the usual two fast requests" 2 "$(( $(requests) - before ))"
+check "the samples agree" "71,71" "$(history '.capacityPct | join(",")')"
+teardown

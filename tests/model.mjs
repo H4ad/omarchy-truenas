@@ -587,5 +587,85 @@ test_case("tooltipFor");
 
 check("unconfigured points at login", "TrueNAS: run truenasctl login <url>", Model.tooltipFor({}, "unconfigured"));
 
+test_case("capacityBarFill");
+
+check("a known percent rounds to the nearest cell", 4, Model.capacityBarFill(71, 6));
+check("half fills to the nearer cell", 3, Model.capacityBarFill(50, 6));
+check("zero fills nothing", 0, Model.capacityBarFill(0, 6));
+check("a full pool fills every cell", 6, Model.capacityBarFill(100, 6));
+check("beyond full is clamped", 6, Model.capacityBarFill(140, 6));
+check("negative is clamped", 0, Model.capacityBarFill(-5, 6));
+check("unknown is no fill, never a guess", 0, Model.capacityBarFill(null, 6));
+check("a blank is no fill", 0, Model.capacityBarFill("", 6));
+check("a non-number is no fill", 0, Model.capacityBarFill("lots", 6));
+check("NaN is no fill", 0, Model.capacityBarFill(NaN, 6));
+check("no cells is no fill", 0, Model.capacityBarFill(50, 0));
+check("a non-number cells is no fill", 0, Model.capacityBarFill(50, "six"));
+
+test_case("sparkColumns");
+
+check("fractions, oldest first", [0.1, 0.5, 1], Model.sparkColumns([10, 50, 100], 30));
+check("a null sample is a gap", [0.1, null, 0.5], Model.sparkColumns({ capacityPct: [10, null, 50] }, 30));
+check("a blank sample is a gap", [null], Model.sparkColumns({ capacityPct: [""] }, 30));
+check("a non-number is a gap", [null], Model.sparkColumns({ capacityPct: ["junk"] }, 30));
+check("only the last cells survive", [0.7, 0.8], Model.sparkColumns([10, 60, 70, 80], 2));
+check("values are clamped to 0..100", [0, 1], Model.sparkColumns({ capacityPct: [-5, 900] }, 30));
+check("a real zero is a real zero", [0], Model.sparkColumns({ capacityPct: [0] }, 30));
+check("a missing history is empty", [], Model.sparkColumns(null, 30));
+check("a history without a list is empty", [], Model.sparkColumns({ at: [] }, 30));
+check("no cells is empty", [], Model.sparkColumns([10, 20], 0));
+
+test_case("downTotal");
+
+check("services and apps together", 3,
+  Model.downTotal({ services: [{ state: "STOPPED" }, { state: "RUNNING" }],
+    apps: [{ state: "CRASHED" }, { state: "FAILED" }] }));
+check("no state is zero", 0, Model.downTotal(null));
+check("an empty state is zero", 0, Model.downTotal({}));
+check("a transitional app is not down", 0,
+  Model.downTotal({ services: [], apps: [{ state: "DEPLOYING" }] }));
+
+test_case("protectionFailures");
+
+check("replication, cloud sync and snapshot failures count", 3,
+  Model.protectionFailures({
+    replication: [replication("a", "FAILED", 0), replication("b", "SUCCESS", 0)],
+    cloudSync: [cloudSync("c", "ERROR")],
+    snapshotTasks: [{ state: { state: "ABORTED" } }],
+    scrubs: [{}]
+  }));
+check("a running or blank row is unknown, not a failure", 0,
+  Model.protectionFailures({
+    replication: [replication("a", "RUNNING", 0)],
+    cloudSync: [cloudSync("c", "RUNNING")],
+    snapshotTasks: [{ state: { state: "" } }],
+    scrubs: [{}]
+  }));
+check("a failed replication job counts", 1,
+  Model.protectionFailures({ replication: [replication("a", "FAILED", 0)] }));
+check("warnings alone do not count here, only the job state", 0,
+  Model.protectionFailures({ replication: [replication("a", "SUCCESS", 2)] }));
+check("an empty state is zero", 0, Model.protectionFailures(null));
+check("missing lists are zero", 0, Model.protectionFailures({}));
+
+test_case("poolDotSeverity");
+
+check("ONLINE is untinted", "", Model.poolDotSeverity("ONLINE"));
+check("DEGRADED is a warning", "warning", Model.poolDotSeverity("DEGRADED"));
+check("OFFLINE is an error", "error", Model.poolDotSeverity("OFFLINE"));
+check("FAULTED is critical", "critical", Model.poolDotSeverity("FAULTED"));
+check("an unknown status is critical, not healthy", "critical", Model.poolDotSeverity("SUSPENDED"));
+check("a missing status is critical, not healthy", "critical", Model.poolDotSeverity(null));
+check("the status is case-insensitive", "warning", Model.poolDotSeverity("degraded"));
+
+test_case("diskDotSeverity");
+
+check("critical is critical", "critical", Model.diskDotSeverity("critical"));
+check("warning is warning", "warning", Model.diskDotSeverity("warning"));
+check("ok is untinted", "", Model.diskDotSeverity("ok"));
+check("an unknown band is untinted", "", Model.diskDotSeverity("unknown"));
+check("a blank band is untinted", "", Model.diskDotSeverity(""));
+check("a missing band is untinted", "", Model.diskDotSeverity(null));
+
 console.log("\nmodel: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

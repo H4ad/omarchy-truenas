@@ -32,9 +32,9 @@
         "key": "variant",
         "type": "enum",
         "label": "What the bar shows",
-        "options": ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full"],
+        "options": ["Default", "Icon", "Alerts", "Capacity", "Pool", "Temp", "Full", "Severity", "Down", "Protection", "Uptime", "CapacityBar", "Pools", "DiskHeat", "Sparkline"],
         "defaultValue": "Default",
-        "description": "Default is the active alert count when anything is firing, otherwise the fullest pool's capacity. Icon is the glyph alone, tinted by the worst state. Alerts is the active alert count. Capacity is the fullest pool. Pool is the worst pool status word. Temp is the hottest disk, or nothing when no temperature is known. Full adds alerts and capacity. An unreachable or unconfigured NAS overrides every variant with a plug or cog: a number the plugin cannot vouch for is never printed as one."
+        "description": "Default is the active alert count when anything is firing, otherwise the fullest pool's capacity. Icon is the glyph alone, tinted by the worst state. Alerts is the active alert count. Capacity is the fullest pool. Pool is the worst pool status word. Temp is the hottest disk, or nothing when no temperature is known. Full adds alerts and capacity. Severity prints the worst two alert buckets, each tinted by its own level. Down counts the services and apps not running, and Protection the failed protection jobs, each blank when there is nothing to say. Uptime is the time since boot. The four chart variants draw in the icon slot: CapacityBar fills cells to the fullest pool's used percent with the percent beside them, Pools shows one square per pool coloured by status, DiskHeat one square per disk coloured by temperature band, and Sparkline a micro column chart of the fullest pool's recent capacity. An unreachable or unconfigured NAS overrides every variant with a plug or cog: a number the plugin cannot vouch for is never printed as one, and a chart with nothing to draw is empty."
       },
       {
         "key": "hideWhenHealthy",

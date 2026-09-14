@@ -80,6 +80,26 @@ function poolStatusRank(status) {
   return -1;
 }
 
+// The tint one pool square carries, read from the same status word the Pool
+// variant prints. ONLINE is untinted because a healthy pool has nothing to say;
+// DEGRADED is a warning, the three offline-ish states are errors, and FAULTED and
+// any status this file has not heard of are critical: "I cannot tell" must read
+// as bad, not as healthy.
+var POOL_DOT_SEVERITY = {
+  "ONLINE":   "",
+  "DEGRADED": "warning",
+  "UNAVAIL":  "error",
+  "OFFLINE":  "error",
+  "REMOVED":  "error",
+  "FAULTED":  "critical"
+};
+
+function poolDotSeverity(status) {
+  var key = String(status || "").toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(POOL_DOT_SEVERITY, key)) return POOL_DOT_SEVERITY[key];
+  return "critical";
+}
+
 // The single worst pool, or null when there is none. Ties go to the first pool
 // in the list, so the answer is stable across polls that did not reorder them.
 function worstPool(pools) {
@@ -112,6 +132,48 @@ function capacityPct(state) {
   return best;
 }
 
+// How many of `cells` squares a capacity bar fills for `pct`. Rounded to the
+// nearest cell so the bar cannot sit one cell below the percent it is beside.
+// Unknown (`null`, blank, non-finite) is 0, never a fabricated fill, and the
+// caller decides "unknown" from the capacity text, not from this. A real 0 is 0.
+function capacityBarFill(pct, cells) {
+  var total = Math.floor(Number(cells));
+  if (!isFinite(total) || total <= 0) return 0;
+  if (pct === null || pct === undefined || pct === "") return 0;
+  var value = Number(pct);
+  if (!isFinite(value)) return 0;
+  if (value < 0) value = 0;
+  if (value > 100) value = 100;
+  var filled = Math.round(value / 100 * total);
+  if (filled < 0) return 0;
+  if (filled > total) return total;
+  return filled;
+}
+
+// The sparkline columns: the last `cells` capacity samples as fractions 0..1,
+// oldest first. A missing, blank or non-finite sample is null, so a gap in the
+// history stays a gap rather than collapsing to a zero-height 0% column. The
+// list is whatever the history file carries (`capacityPct`) or a bare array, so
+// a reader that already unpacked the file can pass either.
+function sparkColumns(history, cells) {
+  var total = Math.floor(Number(cells));
+  if (!isFinite(total) || total <= 0) return [];
+  var list = arrayLike(history) ? history
+    : (history && arrayLike(history.capacityPct) ? history.capacityPct : []);
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var raw = list[i];
+    if (raw === null || raw === undefined || raw === "") { out.push(null); continue; }
+    var value = Number(raw);
+    if (!isFinite(value)) { out.push(null); continue; }
+    if (value < 0) value = 0;
+    if (value > 100) value = 100;
+    out.push(value / 100);
+  }
+  if (out.length > total) out = out.slice(out.length - total);
+  return out;
+}
+
 // Temperature states, worst first. A state this file does not recognise ranks
 // with `unknown` at the bottom: "I cannot tell" must never sort above a known
 // ok. The states are share/normalize.jq's, which computes them once for both
@@ -126,6 +188,22 @@ function tempStateRank(state) {
   var key = String(state || "");
   if (Object.prototype.hasOwnProperty.call(TEMP_STATE_RANK, key)) return TEMP_STATE_RANK[key];
   return 0;
+}
+
+// The tint one disk square carries. A critical disk is critical, a warning one is
+// a warning, and an ok or unknown one is untinted: the heat square says "look at
+// me" only when there is something to look at, and a disk that did not answer is
+// not drawn as hot.
+var DISK_DOT_SEVERITY = {
+  "critical": "critical",
+  "warning":  "warning",
+  "ok":       ""
+};
+
+function diskDotSeverity(tempState) {
+  var key = String(tempState || "");
+  if (Object.prototype.hasOwnProperty.call(DISK_DOT_SEVERITY, key)) return DISK_DOT_SEVERITY[key];
+  return "";
 }
 
 // The worst temperature state across the rows, or "" when nothing is hot.
@@ -238,6 +316,14 @@ function downApps(apps) {
     if (appStateRank(list[i] && list[i].state) === 1) out.push(list[i]);
   }
   return out;
+}
+
+// Both down counts as one number for the Down bar variant: a down service and a
+// down app are the same thing to a reader on the bar. The two reductions stay
+// separate so a caller can still tell them apart.
+function downTotal(state) {
+  return downServices(state && state.services).length
+    + downApps(state && state.apps).length;
 }
 
 // The unknown services, in input order, as a new list. A blank state is unknown,
@@ -414,6 +500,24 @@ function failedCloudSync(rows) {
     if (cloudSyncFailed(list[i])) out.push(list[i]);
   }
   return out;
+}
+
+// How many protection rows sit in a failure state, across the four lists the
+// Protection view shows. The rule is protectionStateRank: a row is failed only
+// when protectionState names FAILED, ERROR or ABORTED. A blank or transitional
+// state is unknown and never counts, and scrub rows carry no state at all, so
+// they can fail only if the wire ever grows one. A list that did not answer is
+// empty and contributes nothing, which the section warning already names.
+function protectionFailures(state) {
+  var sections = ["replication", "cloudSync", "snapshotTasks", "scrubs"];
+  var count = 0;
+  for (var s = 0; s < sections.length; s++) {
+    var list = arrayLike(state && state[sections[s]]) ? state[sections[s]] : [];
+    for (var i = 0; i < list.length; i++) {
+      if (protectionStateRank(protectionState(list[i])) === 1) count += 1;
+    }
+  }
+  return count;
 }
 
 // The label for a protection card: the name when it has one, else the dataset,

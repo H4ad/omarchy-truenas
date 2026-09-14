@@ -44,6 +44,23 @@ check "BarWidget guards the single tint on that severity" "1" \
 check "BarWidget tints the single tint with that severity" "1" \
   "$(grep -c 'root.colorForSeverity(root.soleSeverity)' "$ROOT/BarWidget.qml")"
 
+# --------------------------------------------------------------- bar chart path
+# The chart variants draw with Rectangles in the icon slot. The node suites load
+# BarVariants.js alone and cannot see this wiring, so the renderer is pinned here:
+# the widget must ask the JS for the kind, build the spec, and hand a component to
+# the slot. If the renderer goes missing the chart variants silently fall back to
+# the text path and draw nothing while every model test still passes.
+check "BarWidget asks for the chart kind" "1" \
+  "$(grep -c 'BarVariants.chartKind(root.variantChoice)' "$ROOT/BarWidget.qml")"
+check "BarWidget builds the chart spec" "1" \
+  "$(grep -c 'BarVariants.chartFor(root.variantChoice, root.barView)' "$ROOT/BarWidget.qml")"
+check "BarWidget gives the icon slot the chart component" "1" \
+  "$(grep -c 'iconComponent: root.showChart' "$ROOT/BarWidget.qml")"
+check "BarWidget sizes the chart from the sizing twin" "1" \
+  "$(grep -c 'chartSizer.implicitWidth' "$ROOT/BarWidget.qml")"
+check "all three chart components are declared" "3" \
+  "$(grep -c 'id: chartBar\|id: chartDots\|id: chartSpark' "$ROOT/BarWidget.qml")"
+
 # ------------------------------------------------------------------ functions
 # Two `function` declarations with the same name in one object collide, and the
 # whole file fails to load rather than the second one losing. Root-scope members
@@ -120,6 +137,26 @@ while IFS= read -r entry; do
   [[ -n "$entry" && ! -f "$ROOT/$entry" ]] && qml_missing="$qml_missing $entry"
 done < <(jq -r '.entryPoints[]' "$ROOT/manifest.json")
 check "every manifest entryPoint file exists" "" "${qml_missing# }"
+
+# Every variant the JS resolves must be selectable in the manifest, and the
+# manifest must not offer one the JS would fall back to Default for. Both lists
+# come from their source, and the check names the side each missing entry is on.
+bar_variants=$(sed -n 's/^var VARIANTS = \[\(.*\)\];$/\1/p' "$ROOT/BarVariants.js" \
+  | tr ',' '\n' | tr -d '"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
+manifest_variants=$(jq -r '.barWidget.schema[] | select(.key == "variant") | .options[]' "$ROOT/manifest.json")
+qml_variant_missing=""
+while IFS= read -r variant; do
+  [[ -n "$variant" ]] || continue
+  grep -qx "$variant" <<<"$manifest_variants" \
+    || qml_variant_missing="$qml_variant_missing js:$variant"
+done <<<"$bar_variants"
+while IFS= read -r variant; do
+  [[ -n "$variant" ]] || continue
+  grep -qx "$variant" <<<"$bar_variants" \
+    || qml_variant_missing="$qml_variant_missing manifest:$variant"
+done <<<"$manifest_variants"
+check "the manifest offers exactly the variants the JS resolves" "" \
+  "${qml_variant_missing# }"
 
 # --------------------------------------------------------- view registration
 # The tabs list, the viewComponents map and Menu.qml's view rows all name the

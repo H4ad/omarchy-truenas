@@ -156,6 +156,26 @@ protection_notify() {
   [[ -n $seen_next ]] && seen=$seen_next
 }
 
+# Appends one capacity sample to the sparkline history: the fullest pool's used
+# percent, or null when no pool reports one. A null is a gap in the chart, not a
+# fabricated 0 percent. The list is capped at HISTORY_MAX, oldest dropped first,
+# and `at` carries the matching timestamps. Called only after a successful poll,
+# so a failed poll leaves the file alone rather than recording a gap it did not
+# observe.
+HISTORY_MAX=60
+append_capacity_history() {
+  local pct next
+  pct=$(jq -r '([.pools[]? | .usedPct | select(type == "number")] | if length == 0 then null else max end)' \
+    "$WORK/state.json")
+  next=$(tn_read_json "$TN_HISTORY_FILE" '{"capacityPct":[],"at":[]}' \
+    | jq -c --argjson pct "$pct" --arg now "$now" --argjson cap "$HISTORY_MAX" '
+        { capacityPct: ((.capacityPct // []) + [$pct]
+                        | if length > $cap then .[length - $cap:] else . end),
+          at:          ((.at // []) + [$now]
+                        | if length > $cap then .[length - $cap:] else . end) }')
+  tn_write_json "$TN_HISTORY_FILE" <<<"$next"
+}
+
 now=$(tn_now)
 previous=$(tn_read_json "$TN_STATE_FILE" '{}')
 seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
@@ -1164,4 +1184,8 @@ jq -n \
     }' >"$WORK/state.json"
 
 tn_write_json "$TN_STATE_FILE" <"$WORK/state.json"
+# The sparkline's history is fed only by a poll that reached the NAS. A failed
+# connection records nothing at all, so the chart does not grow a gap it cannot
+# tell from an unknown capacity.
+[[ -z $error ]] && append_capacity_history
 ((QUIET)) || cat "$TN_STATE_FILE"
