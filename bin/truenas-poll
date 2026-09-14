@@ -81,6 +81,81 @@ glyph_for() {
   esac
 }
 
+# Replication and cloud sync share one reduction. `kind` names both the payload
+# section and the seen.json key; `use_warnings` includes a replication row's
+# state.warnings as a failure. A job state outside the terminal set (RUNNING,
+# WAITING, PENDING, blank) is non-decisive and carries the previous decisive
+# state and failure forward untouched, so a transitional poll cannot clobber the
+# signal a later failure is read against.
+protection_notify() {
+  local kind=$1 use_warnings=$2 noun=$3
+  jq -c -n \
+    --slurpfile payload "$WORK/payload.json" \
+    --argjson seen "$seen" \
+    --arg kind "$kind" \
+    --argjson useWarnings "$use_warnings" \
+    --arg now "$now" '
+    ($payload[0][$kind] // []) as $rows_in
+    | ($seen[$kind] // {}) as $prev
+    | (["SUCCESS","FINISHED","FAILED","ERROR","ABORTED"]) as $terminal
+    | (["FAILED","ERROR","ABORTED"]) as $bad
+    | [ $rows_in[]? as $row
+        | ($row.id | if . == null then "" else tostring end) as $id
+        | select($id != "")
+        | ($row.job.state // "") as $js
+        | (($row.state.warnings // []) | if type == "array" then . else [] end) as $warn
+        | ($prev[$id] // null) as $old
+        | (($terminal | index($js)) != null) as $terminalJob
+        | (($warn | length) > 0) as $warned
+        | { id: $id, name: ($row.name // ""), cur: $js,
+            error: ($row.job.error // ""),
+            prevState: ($old.state // ""),
+            prevFailed: ($old.failed // false),
+            existed: ($old != null),
+            decisive: ($terminalJob or (($useWarnings == 1) and $warned)) }
+        | . + { failure: ((.cur as $c | ($bad | index($c)) != null)
+                          or (($useWarnings == 1) and $warned)) }
+        | . + { wentBad: (.existed and (.prevFailed == false) and (.failure == true)),
+                cameBack: (.existed and (.prevFailed == true) and (.failure == false)) }
+      ] as $rows
+    | {
+        decisions: {
+          failed: [ $rows[] | select(.decisive and .wentBad)
+                    | { id: .id, name: .name, state: .cur, error: .error } ],
+          recovered: [ $rows[] | select(.decisive and .cameBack)
+                       | { id: .id, name: .name, state: .cur } ]
+        },
+        entries: (reduce $rows[] as $r ({};
+          .[$r.id] = {
+            state: (if $r.decisive then $r.cur else $r.prevState end),
+            failed: (if $r.decisive then $r.failure else $r.prevFailed end),
+            lastNotifiedAt: (
+              if ($r.decisive and ($r.wentBad or $r.cameBack)) then $now
+              else ($prev[$r.id].lastNotifiedAt // $now) end)
+          }))
+      }' >"$WORK/$kind-notify.json"
+
+  local name state err body
+  while IFS= read -r t; do
+    [[ -n $t ]] || continue
+    name=$(jq -r '.name' <<<"$t")
+    state=$(jq -r '.state' <<<"$t")
+    err=$(jq -r '.error // ""' <<<"$t")
+    if [[ -n $err ]]; then body=$err; else body="job state $state"; fi
+    notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" "$noun $name failed" "$body"
+  done < <(jq -c '.decisions.failed[]' "$WORK/$kind-notify.json")
+
+  while IFS= read -r t; do
+    [[ -n $t ]] || continue
+    notify low "$GLYPH_OK" "$base" "$noun $(jq -r '.name' <<<"$t") recovered" ""
+  done < <(jq -c '.decisions.recovered[]' "$WORK/$kind-notify.json")
+
+  local seen_next
+  seen_next=$(jq -c --argjson seen "$seen" --arg kind "$kind" \
+    '. as $d | $seen + { ($kind): $d.entries }' "$WORK/$kind-notify.json")
+  [[ -n $seen_next ]] && seen=$seen_next
+}
+
 now=$(tn_now)
 previous=$(tn_read_json "$TN_STATE_FILE" '{}')
 seen=$(tn_read_json "$TN_SEEN_FILE" '{}')
@@ -391,6 +466,12 @@ else
   # on the poll after it.
   services_notify_ok=$((normalize_ok == 1 && service_warned == 0))
   apps_notify_ok=$((normalize_ok == 1 && app_warned == 0))
+  # A replication or cloud sync answer that failed carries no current rows
+  # worth recording. Without its gate that half of seen.json is not written.
+  replication_warned=$(jq -r '[.[] | select(.section == "replication")] | length' <<<"$warnings")
+  cloudsync_warned=$(jq -r '[.[] | select(.section == "cloudSync")] | length' <<<"$warnings")
+  replication_notify_ok=$((normalize_ok == 1 && replication_warned == 0))
+  cloudsync_notify_ok=$((normalize_ok == 1 && cloudsync_warned == 0))
 
   levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
   renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
@@ -736,6 +817,14 @@ else
     seen_apps=$(jq -c --argjson seen "$seen" \
       '. as $d | $seen + { apps: $d.apps }' "$WORK/app-notify.json")
     [[ -n $seen_apps ]] && seen=$seen_apps
+  fi
+
+  if ((replication_notify_ok)); then
+    protection_notify replication 1 "Replication"
+  fi
+
+  if ((cloudsync_notify_ok)); then
+    protection_notify cloudSync 0 "Cloud sync"
   fi
 fi
 
