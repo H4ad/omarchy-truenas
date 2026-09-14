@@ -70,6 +70,14 @@ function disk(name, tempC, tempCriticalC, tempState) {
   return { name: name, tempC: tempC, tempCriticalC: tempCriticalC, tempState: tempState };
 }
 
+function service(name, state) {
+  return { service: name, state: state };
+}
+
+function app(name, title, state, upgradeAvailable) {
+  return { name: name, title: title, state: state, upgradeAvailable: upgradeAvailable };
+}
+
 const ok = { ok: true };
 
 // A QVariantList reaches a plain JS function as an object with indexed members
@@ -191,6 +199,124 @@ check("no threshold is blank", "", Model.tempThresholdText({ tempCriticalC: null
 check("a missing field is blank", "", Model.tempThresholdText({}));
 check("no disk is blank", "", Model.tempThresholdText(null));
 check("a blank disk is blank", "", Model.tempThresholdText(""));
+
+test_case("serviceStateRank");
+
+check("RUNNING is healthy", 0, Model.serviceStateRank("RUNNING"));
+check("the state is case-insensitive", 0, Model.serviceStateRank("running"));
+check("a stopped service is down", 1, Model.serviceStateRank("STOPPED"));
+check("an unknown service state is down", 1, Model.serviceStateRank("SOMETHING"));
+check("a blank state is unknown, not down", 2, Model.serviceStateRank(""));
+check("a missing state is unknown, not down", 2, Model.serviceStateRank(null));
+
+test_case("appStateRank");
+
+check("RUNNING is healthy", 0, Model.appStateRank("RUNNING"));
+check("the state is case-insensitive", 0, Model.appStateRank("running"));
+check("a stopped app is down", 1, Model.appStateRank("STOPPED"));
+check("a crashed app is down", 1, Model.appStateRank("CRASHED"));
+check("a failed app is down", 1, Model.appStateRank("FAILED"));
+check("an exited app is down", 1, Model.appStateRank("EXITED"));
+check("DEPLOYING is transitional, not down", 2, Model.appStateRank("DEPLOYING"));
+check("STARTING is transitional, not down", 2, Model.appStateRank("STARTING"));
+check("STOPPING is transitional, not down", 2, Model.appStateRank("STOPPING"));
+check("a blank state is unknown, not down", 2, Model.appStateRank(""));
+check("a missing state is unknown, not down", 2, Model.appStateRank(null));
+
+test_case("worstServiceLevel");
+
+check("a down service warns", "warning",
+  Model.worstServiceLevel([service("cifs", "RUNNING"), service("ups", "STOPPED")]));
+check("a warning outranks an unknown", "warning",
+  Model.worstServiceLevel([service("ups", "STOPPED"), service("cifs", "")]));
+check("blank states are unknown, not a warning", "unknown",
+  Model.worstServiceLevel([service("cifs", "RUNNING"), service("ups", "")]));
+check("all running is no level", "",
+  Model.worstServiceLevel([service("cifs", "RUNNING")]));
+check("a row without a state is unknown, never a warning", "unknown",
+  Model.worstServiceLevel([{}]));
+check("no rows is no level", "", Model.worstServiceLevel([]));
+check("not a list is no level", "", Model.worstServiceLevel(null));
+check("a blank is no level", "", Model.worstServiceLevel(""));
+
+test_case("worstAppLevel");
+
+check("a crashed app warns", "warning",
+  Model.worstAppLevel([app("appc", "appc", "RUNNING"), app("appb", "appb", "CRASHED")]));
+check("a warning outranks an unknown", "warning",
+  Model.worstAppLevel([app("appb", "appb", "FAILED"), app("appc", "appc", "DEPLOYING")]));
+check("a transitional state is unknown, not a warning", "unknown",
+  Model.worstAppLevel([app("appc", "appc", "RUNNING"), app("appb", "appb", "DEPLOYING")]));
+check("all running is no level", "",
+  Model.worstAppLevel([app("appc", "appc", "RUNNING")]));
+check("a row without a state is unknown, never a warning", "unknown",
+  Model.worstAppLevel([{}]));
+check("no rows is no level", "", Model.worstAppLevel([]));
+check("not a list is no level", "", Model.worstAppLevel(null));
+check("a blank is no level", "", Model.worstAppLevel(""));
+
+test_case("downServices");
+
+check("only down rows are copied", ["ups"],
+  Model.downServices([service("cifs", "RUNNING"), service("ups", "STOPPED")])
+    .map(function (s) { return s.service; }));
+check("input order survives", ["ftp", "ups"],
+  Model.downServices([service("ftp", "STOPPED"), service("cifs", "RUNNING"), service("ups", "STOPPED")])
+    .map(function (s) { return s.service; }));
+const serviceRows = [service("cifs", "RUNNING"), service("ups", "STOPPED")];
+check("the result is a copy, not the input", false, Model.downServices(serviceRows) === serviceRows);
+check("the input is untouched", 2, serviceRows.length);
+check("a blank state is unknown, not down", 0,
+  Model.downServices([service("cifs", "")]).length);
+check("blind rows are skipped, not down", 0,
+  Model.downServices([{}, null, undefined, 4]).length);
+check("not a list is an empty list", [], Model.downServices(null));
+check("a blank is an empty list", [], Model.downServices(""));
+
+test_case("downApps");
+
+check("only down rows are copied", ["appb"],
+  Model.downApps([app("appc", "appc", "RUNNING"), app("appb", "appb", "CRASHED")])
+    .map(function (a) { return a.name; }));
+check("input order survives", ["alpha", "appb"],
+  Model.downApps([app("alpha", "Alpha", "FAILED"), app("appc", "appc", "RUNNING"), app("appb", "appb", "EXITED")])
+    .map(function (a) { return a.name; }));
+const appRows = [app("appc", "appc", "RUNNING"), app("appb", "appb", "CRASHED")];
+check("the result is a copy, not the input", false, Model.downApps(appRows) === appRows);
+check("the input is untouched", 2, appRows.length);
+check("a transitional state is not down", 0,
+  Model.downApps([app("appb", "appb", "DEPLOYING")]).length);
+check("a blank state is unknown, not down", 0,
+  Model.downApps([app("appb", "appb", "")]).length);
+check("blind rows are skipped, not down", 0,
+  Model.downApps([{}, null, undefined, 4]).length);
+check("not a list is an empty list", [], Model.downApps(null));
+check("a blank is an empty list", [], Model.downApps(""));
+
+test_case("appsUpgradeable");
+
+check("counts only true flags", 1,
+  Model.appsUpgradeable([app("appc", "appc", "RUNNING", true), app("appb", "appb", "RUNNING", false)]));
+check("a missing flag is not true", 0,
+  Model.appsUpgradeable([app("appb", "appb", "RUNNING")]));
+check("blind rows never count", 0, Model.appsUpgradeable([{}, null, 4]));
+check("an empty list is zero", 0, Model.appsUpgradeable([]));
+check("a non-list is zero", 0, Model.appsUpgradeable(null));
+check("a blank is zero", 0, Model.appsUpgradeable(""));
+
+test_case("appLabel");
+
+check("the title wins", "appc", Model.appLabel(app("appc", "appc", "RUNNING")));
+check("the name is the fallback", "appc", Model.appLabel(app("appc", "", "RUNNING")));
+check("a blank title falls through to the name", "appc",
+  Model.appLabel({ name: "appc", title: "" }));
+check("a title with no name still wins", "appc",
+  Model.appLabel({ title: "appc" }));
+check("no title and no name is blank", "", Model.appLabel({}));
+check("undefined fields are blank, never the word undefined", "",
+  Model.appLabel({ name: undefined, title: undefined }));
+check("no app is blank", "", Model.appLabel(null));
+check("a blank app is blank", "", Model.appLabel(""));
 
 test_case("mode");
 

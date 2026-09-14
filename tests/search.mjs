@@ -156,5 +156,83 @@ check("null rows are skipped, not fatal", 0,
 check("an empty field never matches a needle", 0,
   Search.disks([{ name: null, model: undefined, pool: "", bus: null, type: null }], "x").length);
 
+const services = [
+  { id: 4, service: "cifs", state: "RUNNING", enable: true },
+  { id: 5, service: "ups", state: "STOPPED", enable: false },
+  { id: 6, service: "nvmet", state: "STOPPED", enable: false }
+];
+
+test_case("services matches service, state and id");
+
+check("name, case-insensitively", ["cifs"],
+  Search.services(services, "CIFS").map(function (s) { return s.service; }));
+check("state, across rows", ["ups", "nvmet"],
+  Search.services(services, "stopped").map(function (s) { return s.service; }));
+check("id, stringified from a number", ["ups"],
+  Search.services(services, "5").map(function (s) { return s.service; }));
+check("a needle nothing carries", 0, Search.services(services, "archive").length);
+
+test_case("services preserves order, copies and survives junk");
+
+check("an empty needle returns every service", ["cifs", "ups", "nvmet"],
+  Search.services(services, "").map(function (s) { return s.service; }));
+check("matching order is input order", ["ups", "nvmet"],
+  Search.services(services, "stopped").map(function (s) { return s.service; }));
+const servicesBefore = JSON.stringify(services);
+Search.services(services, "cifs");
+check("the input list is untouched", servicesBefore, JSON.stringify(services));
+check("the empty-needle result is a copy", false, Search.services(services, "") === services);
+check("a non-list is an empty list", [], Search.services(null, "x"));
+check("a bare string is not walked", [], Search.services("cifs", "x"));
+check("a row without fields does not throw", 0, Search.services([{}], "x").length);
+check("null rows are skipped, not fatal", 0,
+  Search.services([null, undefined, 4], "x").length);
+check("an empty field never matches a needle", 0,
+  Search.services([{ service: null, state: undefined, id: null }], "x").length);
+
+const apps = [
+  { id: "appc", name: "appc", title: "appc", state: "RUNNING",
+    train: "community", appVersion: "16.0.4-rootless", version: "16.0.4-rootless_1.2.39" },
+  { id: "appb", name: "appb", title: "appb", state: "STOPPED",
+    train: "community", appVersion: "2.1.0", version: "2.1.0_1.0.0" },
+  { id: "appa", name: "appa", title: "AI Memory", state: "RUNNING",
+    train: "custom", appVersion: "1.0.0", version: "1.0.0_1.0.0" }
+];
+
+test_case("apps matches name, title, state, train, appVersion and version");
+
+check("name, case-insensitively", ["appb"],
+  Search.apps(apps, "appb").map(function (a) { return a.name; }));
+check("title when the name misses", ["appa"],
+  Search.apps(apps, "AI Memory").map(function (a) { return a.name; }));
+check("state, across rows", ["appc", "appa"],
+  Search.apps(apps, "running").map(function (a) { return a.name; }));
+check("train", ["appa"],
+  Search.apps(apps, "custom").map(function (a) { return a.name; }));
+check("appVersion", ["appb"],
+  Search.apps(apps, "2.1.0").map(function (a) { return a.name; }));
+check("version", ["appc"],
+  Search.apps(apps, "rootless_1.2.39").map(function (a) { return a.name; }));
+check("a needle nothing carries", 0, Search.apps(apps, "archive").length);
+
+test_case("apps preserves order, copies and survives junk");
+
+check("an empty needle returns every app", ["appc", "appb", "appa"],
+  Search.apps(apps, "").map(function (a) { return a.name; }));
+check("matching order is input order", ["appc", "appa"],
+  Search.apps(apps, "running").map(function (a) { return a.name; }));
+const appsBefore = JSON.stringify(apps);
+Search.apps(apps, "appc");
+check("the input list is untouched", appsBefore, JSON.stringify(apps));
+check("the empty-needle result is a copy", false, Search.apps(apps, "") === apps);
+check("a non-list is an empty list", [], Search.apps(null, "x"));
+check("a bare string is not walked", [], Search.apps("appc", "x"));
+check("a row without fields does not throw", 0, Search.apps([{}], "x").length);
+check("null rows are skipped, not fatal", 0,
+  Search.apps([null, undefined, 4], "x").length);
+check("an empty field never matches a needle", 0,
+  Search.apps([{ name: null, title: "", state: null, train: undefined,
+    appVersion: null, version: "" }], "x").length);
+
 console.log("\nsearch: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

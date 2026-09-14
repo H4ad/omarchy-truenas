@@ -84,3 +84,43 @@ function disks(list, needle) {
   }
   return out;
 }
+
+// A service matches on its name, its state and its id. The id is a number on
+// the wire and contains stringifies it, so a search for "4" finds it.
+function services(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var service = items[i];
+    if (!service || typeof service !== "object") continue;
+    if (contains(service.service, needle)
+        || contains(service.state, needle)
+        || contains(service.id, needle)) {
+      out.push(service);
+    }
+  }
+  return out;
+}
+
+// An app matches on its name, title, state, train, appVersion and version.
+// Empty fields never match a non-empty needle, so a row the poller could not
+// describe is only ever reached by the empty needle.
+function apps(list, needle) {
+  var items = arrayLike(list) ? list : [];
+  if (text(needle) === "") return copy(items);
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var app = items[i];
+    if (!app || typeof app !== "object") continue;
+    if (contains(app.name, needle)
+        || contains(app.title, needle)
+        || contains(app.state, needle)
+        || contains(app.train, needle)
+        || contains(app.appVersion, needle)
+        || contains(app.version, needle)) {
+      out.push(app);
+    }
+  }
+  return out;
+}
