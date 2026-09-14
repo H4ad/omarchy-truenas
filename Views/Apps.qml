@@ -48,6 +48,16 @@ Column {
     return "the app list could not be read" + (reason !== "" ? ": " + reason : "")
   }
 
+  // The updates summary prints only when the app list itself is trustworthy and
+  // at least one row carries an update. A failed app request already prints its
+  // reason above; a zero count is the absence of this line, never a "0".
+  readonly property string updatesLine: {
+    if (view.appWarning) return ""
+    var count = Model.appsUpgradeable(view.apps)
+    if (count === 0) return ""
+    return count + (count === 1 ? " update available" : " updates available")
+  }
+
   // Empty only while there is something to show: the warning line already says
   // why the list is missing, and a filter that matches nothing says so itself.
   readonly property string emptyText: {
@@ -168,6 +178,18 @@ Column {
       cursorShape: Qt.PointingHandCursor
       onClicked: view.panel.openUrl(view.appsUrl)
     }
+  }
+
+  // The updates summary, under the header: how many of the listed apps the NAS
+  // reports an update for. Nothing at all when the count is zero.
+  Text {
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.updatesLine !== ""
+    text: view.updatesLine
+    color: Color.accent
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
   }
 
   Local.FilterField {

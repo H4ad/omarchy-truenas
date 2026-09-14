@@ -73,6 +73,23 @@ Column {
     return "no " + noun + " reported"
   }
 
+  // The network summary names the links that are down and the ones whose state
+  // the poll could not read, so a list of unknown rows never reads as every link
+  // up. It counts the raw list, not the filtered rows, and a count at zero
+  // prints nothing.
+  readonly property string interfaceSummary: {
+    var parts = []
+    var down = Model.downInterfaces(view.network).length
+    var unknown = Model.unknownInterfaces(view.network).length
+    if (down > 0) parts.push(down + (down === 1 ? " link down" : " links down"))
+    if (unknown > 0) parts.push(unknown + (unknown === 1 ? " link unknown" : " links unknown"))
+    return parts.join(" · ")
+  }
+
+  // A down link is a real fault; an unknown link is not, so it stays dim.
+  readonly property color interfaceSummaryColor: Model.downInterfaces(view.network).length > 0
+    ? view.panel.urgentColor : view.panel.dimForeground
+
   // 0 up keeps the plain foreground, 1 down is urgent, and 2 (blank or
   // LINK_STATE_UNKNOWN) is dim: "I cannot tell" must not look like a dead link.
   function linkColor(iface) {
@@ -385,6 +402,16 @@ Column {
     visible: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces") !== ""
     text: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces")
     color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.interfaceSummary !== ""
+    text: view.interfaceSummary
+    color: view.interfaceSummaryColor
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }

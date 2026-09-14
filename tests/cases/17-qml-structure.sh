@@ -180,3 +180,23 @@ check "the help scrim swallows the wheel" "1" \
 # StopAtBounds walked it back.
 check "only jumpTo writes contentY" "1" \
   "$(grep -c 'root.flickable.contentY =' "$ROOT/Ui/ScrollIndicator.qml")"
+
+# ---------------------------------------------------------------- state lines
+# Every view that reads polled data answers the seven-case state contract with a
+# state declaration: no-state, offline, its own failed section, an empty route
+# answer and (for the list views) a filter that matched nothing each print a
+# sentence rather than a blank list or a fabricated zero. The declaration is
+# `readonly property string emptyText`, `readonly property string statusLine` or
+# a `function emptyFor`. Views/Config.qml is the one exemption: it reads no
+# polled list, only truenasctl's config, so it has no no-state, offline or empty
+# route answer to give. A grep over the source is the strongest check available,
+# because nothing in CI runs QML.
+qml_state_missing=""
+for file in "$ROOT"/Views/*.qml; do
+  name=$(basename "$file")
+  [[ $name == "Config.qml" ]] && continue
+  grep -qE 'readonly property string (emptyText|statusLine)|function emptyFor' "$file" \
+    || qml_state_missing="$qml_state_missing $name"
+done
+check "every data view declares a state line (Views/Config.qml exempt: no polled list)" \
+  "" "${qml_state_missing# }"
