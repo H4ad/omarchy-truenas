@@ -77,6 +77,7 @@ Panel {
     { key: "disks", label: "Disks" },
     { key: "services", label: "Services" },
     { key: "apps", label: "Apps" },
+    { key: "shares", label: "Shares" },
     { key: "protection", label: "Protection" },
     { key: "alerts", label: "Alerts" },
     { key: "config", label: "Config" }
@@ -88,6 +89,7 @@ Panel {
     "disks": disksView,
     "services": servicesView,
     "apps": appsView,
+    "shares": sharesView,
     "protection": protectionView,
     "alerts": alertsView,
     "config": configView
@@ -578,6 +580,7 @@ Panel {
   Component { id: disksView; Views.Disks { panel: root } }
   Component { id: servicesView; Views.Services { panel: root } }
   Component { id: appsView; Views.Apps { panel: root } }
+  Component { id: sharesView; Views.Shares { panel: root } }
   Component { id: protectionView; Views.Protection { panel: root } }
   Component { id: alertsView; Views.Alerts { panel: root } }
   Component { id: configView; Views.Config { panel: root } }
