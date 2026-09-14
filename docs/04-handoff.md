@@ -12,8 +12,12 @@ TrueNAS 25.10.6, installed and enabled on the desk. Milestone 6 was the release
 milestone: the glossary is reachable from the panel `?` and the menu Help row,
 the menu header shows the version, every data view satisfies the empty and error
 state contract, the four uncalled Model helpers are gone, and the manifest ships
-as version `1.0.0`. The design's v1 feature set is finished. Nothing
-blocks publication except the manual steps below.
+as version `1.0.0`. The design's v1 feature set is finished.
+
+**Publication is on hold.** The owner asked that this not be pushed to a public
+GitHub repository and not be submitted to the Omarchy marketplace. The manual
+steps at the end are not authorised; they are the record of what remains if the
+owner lifts the hold.
 
 - Repo: `~/Projects/omarchy-truenas` (hub-only; remote `hub` =
   `forge:h4ad/omarchy-truenas.git`). No GitHub remote yet.
@@ -297,9 +301,11 @@ variants 149, links 27, for 1623 assertions.
 
 ## Remaining manual steps
 
-These are human actions with the exact command; none blocks the merge.
+These are human actions with the exact command; none blocks the merge. Steps 1
+and 3 are on hold: do not run them without an explicit request from the owner.
 
 1. **Create the public GitHub repository and push only finished `master`.**
+   (On hold.)
    ```bash
    gh repo create h4ad/omarchy-truenas --public --source ~/Projects/omarchy-truenas --remote origin
    git -C ~/Projects/omarchy-truenas push origin master
@@ -317,9 +323,9 @@ These are human actions with the exact command; none blocks the merge.
    ```
    The panel is a layer-shell surface and the crop is a judgement, which is why
    the region is chosen by hand.
-3. **Submit to the marketplace.** Open the submission form linked from
-   `https://omarchyplugins.com/develop.html` and complete it with the repo URL,
-   the `MIT` license and `preview.png`.
+3. **Submit to the marketplace.** (On hold.) Open the submission form linked
+   from `https://omarchyplugins.com/develop.html` and complete it with the repo
+   URL, the `MIT` license and `preview.png`.
 4. **A visual click-through** on a real session after `./scripts/dev-install
    --restart`: every tab, the help `?`, its scroll and Escape handling, the
    menu's Help row and version caption, and a filter that matches nothing on each
@@ -348,7 +354,8 @@ These are human actions with the exact command; none blocks the merge.
 
 ## Finishing / publishing
 
-This is a hub-only project, so `git push hub master` is how work is stored. If a
-GitHub remote is added, only clean finished commits go to `origin`; never a
-`wip/*` or `agent/*` ref. The GitHub repo, the `preview.png` refresh and the
-marketplace form are the remaining manual gates above.
+This is a hub-only project, so `git push hub master` is how work is stored. The
+private `hub` is fine; the public `origin` is not, and no agent may create the
+GitHub repository or submit to the marketplace without an explicit owner
+request. The GitHub repo, the `preview.png` refresh and the marketplace form are
+the remaining manual gates above, currently on hold.

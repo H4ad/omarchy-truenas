@@ -45,11 +45,16 @@ not replay them as new.
 
 ## Install
 
-From the Omarchy marketplace, or:
+The plugin is not published yet: there is no marketplace listing and no public
+repository, so install from a local checkout:
 
 ```
-omarchy plugin add https://github.com/h4ad/omarchy-truenas.git --enable
+./scripts/dev-install --restart
 ```
+
+If it is published later, the marketplace listing and
+`omarchy plugin add https://github.com/h4ad/omarchy-truenas.git --enable` will be
+the install paths. That URL is the intended home, not a live repository today.
 
 ## Setup
 
