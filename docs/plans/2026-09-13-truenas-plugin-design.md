@@ -92,10 +92,14 @@ every pollSeconds (floor 15, default 30):
     alert/list · pool · core/get_jobs
 every ~300s (META_MAX_AGE):
     system/info · disk/details · disk/temperatures
-    service · app · replication · cloudsync · pool/snapshottask
-    pool/scrub · sharing/{smb,nfs,iscsi,webdav} · smb/status
-    network/interface · update
+    service · app · sharing/smb · sharing/nfs · iscsi/target · interface
+    replication · cloudsync · pool/snapshottask · pool/scrub · update
 ```
+
+The M5 read path corrected the design's guess: the interface route is
+`/interface` (not `/network/interface`), iSCSI lives under `/iscsi/target` (not
+`/sharing/iscsi`), and there is no WebDAV route and no SMB status/sessions route
+on 25.10, so `sharing/webdav` and `smb/status` are dropped.
 
 Static answers live in `meta.json` beside the poll, exactly as SigNoz caches
 `/service_accounts/me` and `/rules`.
@@ -119,7 +123,8 @@ bin/truenas-lib.sh     Config load, credential resolve, tn_call, classify.
 bin/truenas-poll       Read path: poll, normalize, write state.json, notify.
 bin/truenas-api        Write path: one verb per call, JSON on stdout.
 bin/truenasctl         login / logout / test / status / alerts / pools / disks /
-                       apps / services / protect / shares / dismiss / open / purge
+                       apps / services / replication / cloudsync / snapshots /
+                       scrubs / shares / network / poll / config / open / purge
 share/normalize.jq     Version-variable API shapes -> one stable schema.
 docs/plans/            This document and the implementation plan.
 tests/                 run.sh + cases/*.sh (bash) + *.mjs (node) + qml6 runtime.
@@ -159,9 +164,15 @@ scripts/dev-install    Copy the tree into ~/.config/omarchy/plugins and restart.
                   "containers": null,
                   "webui": null } ],
   "replication": [ ], "cloudSync": [ ], "snapshotTasks": [ ], "scrubs": [ ],
-  "shares":   { "smb": 0, "nfs": 0, "iscsi": 0, "webdav": 0 },
-  "sessions": { "smb": [ ] },
-  "network":  [ { "name": "", "linkState": "", "addresses": [ ] } ],
+  "shares":   { "smb": [ { "id": null, "name": "", "path": "", "enabled": false,
+                            "locked": false, "readonly": false, "purpose": "",
+                            "comment": "" } ],
+                "nfs": [ { "id": null, "path": "", "enabled": false,
+                           "locked": false, "readonly": false, "comment": "" } ],
+                "iscsi": [ { "id": null, "name": "", "alias": "", "mode": "" } ] },
+  "network":  [ { "name": "", "type": "", "linkState": "",
+                  "mediaType": "", "mediaSubtype": "",
+                  "addresses": [ { "type": "", "address": "", "netmask": null } ] } ],
   "jobs":     [ { "id": 0, "method": "", "state": "", "percent": 0,
                   "description": "" } ],
   "warnings": [ { "section": "", "error": "", "message": "" } ]
@@ -190,9 +201,9 @@ Quiet       dimmed when all green (the "I am alive" proof)
 ```
 
 M1 shipped `Default`, `Icon`, `Alerts`, `Capacity`, `Pool` and `Full`; M2 adds
-`Temp`, the hottest disk's temperature (blank when no disk reports one). M3 adds
-no variant; the seven options above stand. `Quiet` remains deferred, and the
-manifest carries no option for it yet.
+`Temp`, the hottest disk's temperature (blank when no disk reports one). M3, M4
+and M5 add no variant; the seven options above stand. `Quiet` remains deferred,
+and the manifest carries no option for it yet.
 
 Offline / unconfigured still overrides every variant with a plug or cog glyph,
 so "nothing is wrong" and "I cannot tell" never look the same.

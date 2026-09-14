@@ -16,5 +16,6 @@ and what does not in [docs/03-features.md](docs/03-features.md), and the traps
 that have already cost time in [docs/11-pitfalls.md](docs/11-pitfalls.md); read
 the pitfalls before changing anything, most of them fail silently.
 
-**Planned:** shares and network are a later milestone and are not implemented
-yet.
+**Planned:** milestone 6 is polish (menu completeness, the in-panel glossary, a
+fresh preview image and the marketplace submission); shares and network shipped
+in milestone 5.
