@@ -9,6 +9,8 @@ all_healthy() {
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
   respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
   respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+  respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+  respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
 }
 
 test_case "a healthy NAS reports the pools and a quiet count"
@@ -28,7 +30,117 @@ check "and the memory" 68719476736 "$(state '.system.physmem')"
 check "connection carries the version" 25.04.2 "$(state '.connection.version')"
 check "the dialect is named" rest-v2.0 "$(state '.connection.dialect')"
 check "a healthy scan is FINISHED" FINISHED "$(state '.pools[] | select(.name=="storage") | .scan.state')"
+check "five disks" 5 "$(state '.disks | length')"
+check "rows sorted by name" nvme0n1 "$(state '.disks[0].name')"
+check "pool mapping" boot-pool "$(state '.disks[] | select(.name=="sda") | .pool')"
+check "temperature" 38 "$(state '.disks[] | select(.name=="sda") | .tempC')"
+check "critical" 60 "$(state '.disks[] | select(.name=="sda") | .tempCriticalC')"
+check "state ok" ok "$(state '.disks[] | select(.name=="sda") | .tempState')"
+check "the model is carried" SATA_HDD_500G "$(state '.disks[] | select(.name=="sda") | .model')"
+check "the size is a number" 500107862016 "$(state '.disks[] | select(.name=="sda") | .size')"
+check "the details request is a POST" 2 "$(grep -o 'POST' "$STUB_METHOD_LOG" | wc -l)"
+check "with the USED type" 1 "$(grep -c '"type":"USED"' "$STUB_PAYLOAD_LOG" || true)"
+check "and temperatures asked per disk, with thresholds" 1 \
+  "$(grep -c '"name":\["nvme0n1","sda","sdb","sdc","sdd"\],"include_thresholds":true' "$STUB_PAYLOAD_LOG" || true)"
 check "no warnings on a clean poll" 0 "$(state '.warnings | length')"
+teardown
+
+test_case "a failed disk details call leaves disks empty and skips temperatures"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 500 "$ROOT/tests/fixtures/err-500.json"
+poll
+check "disks are empty, not fabricated rows" "[]" "$(state '.disks')"
+check "no disk carries a fabricated 0" 0 \
+  "$(state '[.disks[]? | select(.tempC == 0)] | length')"
+check "a warning names the disk section" disk \
+  "$(state '.warnings[] | select(.section=="disk") | .section')"
+check "the temperatures request is skipped" 0 \
+  "$(grep -c '/api/v2.0/disk/temperatures' "$STUB_CURL_LOG" || true)"
+check "and no diskTemp warning claims an answer" 0 \
+  "$(state '[.warnings[] | select(.section=="diskTemp")] | length')"
+teardown
+
+test_case "a 200 with an object disk body is not a disk list"
+setup; single_instance_config
+printf '{}\n' >"$WORK/disks-wrong.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$WORK/disks-wrong.json"
+poll
+check "no rows are read from an object" "[]" "$(state '.disks')"
+check "a warning names the disk section" disk \
+  "$(state '.warnings[] | select(.section=="disk") | .section')"
+teardown
+
+test_case "a 200 with an array temperatures body is not a temperature map"
+setup; single_instance_config
+printf '[]\n' >"$WORK/temps-wrong.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$WORK/temps-wrong.json"
+poll
+check "the disk rows survive" 5 "$(state '.disks | length')"
+check "every state is unknown" 0 \
+  "$(state '[.disks[] | select(.tempState != "unknown")] | length')"
+check "a warning names the diskTemp section" diskTemp \
+  "$(state '.warnings[] | select(.section=="diskTemp") | .section')"
+teardown
+
+test_case "a failed temperatures call is unknown, never a zero"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 500 "$ROOT/tests/fixtures/err-500.json"
+poll
+check "the disk rows survive" 5 "$(state '.disks | length')"
+check "every temperature is null" 0 \
+  "$(state '[.disks[] | select(.tempC != null)] | length')"
+check "every threshold is null too" 0 \
+  "$(state '[.disks[] | select(.tempCriticalC != null)] | length')"
+check "every state is unknown" 0 \
+  "$(state '[.disks[] | select(.tempState != "unknown")] | length')"
+check "no temperature zero is invented" 0 \
+  "$(state '[.disks[] | select(.tempC == 0)] | length')"
+check "a warning names the diskTemp section" diskTemp \
+  "$(state '.warnings[] | select(.section=="diskTemp") | .section')"
+teardown
+
+test_case "a hot disk is critical and a warm one is warning"
+setup; single_instance_config
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures-hot.json"
+poll
+check "sda is critical" critical "$(state '.disks[] | select(.name=="sda") | .tempState')"
+check "sdc is in the warning band" warning "$(state '.disks[] | select(.name=="sdc") | .tempState')"
+check "sdb is still ok" ok "$(state '.disks[] | select(.name=="sdb") | .tempState')"
+teardown
+
+test_case "a bare temperature without a threshold is unknown, not ok"
+setup; single_instance_config
+printf '{ "sda": 38.0 }\n' >"$WORK/temps-bare.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$WORK/temps-bare.json"
+poll
+check "the bare temperature is read" 38 \
+  "$(state '.disks[] | select(.name=="sda") | .tempC')"
+check "the missing threshold is null" null \
+  "$(state '.disks[] | select(.name=="sda") | .tempCriticalC')"
+check "so the state is unknown" unknown \
+  "$(state '.disks[] | select(.name=="sda") | .tempState')"
 teardown
 
 test_case "an unreachable NAS is unknown, not zero"
@@ -229,6 +341,7 @@ poll
 check "not connected" false "$(state '.connection.ok')"
 check "named as unconfigured" unconfigured "$(state '.connection.error')"
 check "no pools" 0 "$(state '.pools | length')"
+check "and no disks" 0 "$(state '.disks | length')"
 check "the schema is still present" 1 "$(state '.schema')"
 teardown
 
@@ -237,7 +350,7 @@ setup; single_instance_config
 all_healthy
 "$ROOT/bin/truenas-poll" --quiet --force-meta
 check "connected" true "$(state '.connection.ok')"
-check "one request per endpoint" 3 "$(requests)"
+check "five requests on a cold poll" 5 "$(requests)"
 teardown
 
 test_case "failures accumulate, hold lastOkAt, and reset on recovery"

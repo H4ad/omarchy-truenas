@@ -1,0 +1,12 @@
+[
+  { "name": "nvme0n1", "model": "NVMe_SSD_2T", "type": "SSD",
+    "size": 2000398934016, "imported_zpool": "storage", "bus": "UNKNOWN" },
+  { "name": "sda", "model": "SATA_HDD_500G", "type": "HDD",
+    "size": 500107862016, "imported_zpool": "boot-pool", "bus": "ATA" },
+  { "name": "sdb", "model": "SATA_HDD_500G", "type": "HDD",
+    "size": 500107862016, "imported_zpool": "boot-pool", "bus": "ATA" },
+  { "name": "sdc", "model": "SATA_HDD_4T", "type": "HDD",
+    "size": 4000787030016, "imported_zpool": "Backup", "bus": "ATA" },
+  { "name": "sdd", "model": "SATA_HDD_4T", "type": "HDD",
+    "size": 4000787030016, "imported_zpool": "Backup", "bus": "ATA" }
+]
