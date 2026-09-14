@@ -22,6 +22,8 @@ Column {
   readonly property var nasState: view.panel.state
   readonly property var connection: (view.nasState && view.nasState.connection) || null
   readonly property bool connected: !!(view.connection && view.connection.ok)
+  readonly property bool unconfigured: view.panel.mode === "unconfigured"
+    || !!(view.connection && String(view.connection.error || "") === "unconfigured")
   readonly property var warnings: (view.nasState && Model.arrayLike(view.nasState.warnings))
     ? view.nasState.warnings : []
 
@@ -65,6 +67,7 @@ Column {
   // why the list is missing, and a filter that matches nothing says so itself.
   function emptyFor(section, total, shown, noun) {
     if (!view.nasState) return "No state yet. The service writes it after the first poll."
+    if (view.unconfigured) return "not configured yet · run truenasctl login <url>"
     if (!view.connected)
       return "No answer from the NAS: " + (Model.errorSentence(view.connection) || "the poll failed")
     if (total > 0 && shown === 0) return "no " + noun + " match the filter"
@@ -72,6 +75,23 @@ Column {
     if (view.sectionWarning(section)) return ""
     return "no " + noun + " reported"
   }
+
+  // The network summary names the links that are down and the ones whose state
+  // the poll could not read, so a list of unknown rows never reads as every link
+  // up. It counts the raw list, not the filtered rows, and a count at zero
+  // prints nothing.
+  readonly property string interfaceSummary: {
+    var parts = []
+    var down = Model.downInterfaces(view.network).length
+    var unknown = Model.unknownInterfaces(view.network).length
+    if (down > 0) parts.push(down + (down === 1 ? " link down" : " links down"))
+    if (unknown > 0) parts.push(unknown + (unknown === 1 ? " link unknown" : " links unknown"))
+    return parts.join(" · ")
+  }
+
+  // A down link is a real fault; an unknown link is not, so it stays dim.
+  readonly property color interfaceSummaryColor: Model.downInterfaces(view.network).length > 0
+    ? view.panel.urgentColor : view.panel.dimForeground
 
   // 0 up keeps the plain foreground, 1 down is urgent, and 2 (blank or
   // LINK_STATE_UNKNOWN) is dim: "I cannot tell" must not look like a dead link.
@@ -190,7 +210,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("smb", view.smb.length, view.smbRows.length, "SMB shares") !== ""
     text: view.emptyFor("smb", view.smb.length, view.smbRows.length, "SMB shares")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -257,7 +277,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("nfs", view.nfs.length, view.nfsRows.length, "NFS exports") !== ""
     text: view.emptyFor("nfs", view.nfs.length, view.nfsRows.length, "NFS exports")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -315,7 +335,7 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("iscsi", view.iscsi.length, view.iscsiRows.length, "iSCSI targets") !== ""
     text: view.emptyFor("iscsi", view.iscsi.length, view.iscsiRows.length, "iSCSI targets")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
@@ -384,7 +404,17 @@ Column {
     wrapMode: Text.WordWrap
     visible: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces") !== ""
     text: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces")
-    color: (view.connected || !view.nasState) ? view.panel.contentForeground : view.panel.urgentColor
+    color: (view.connected || !view.nasState) ? view.panel.contentForeground : (view.unconfigured ? Color.accent : view.panel.urgentColor)
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.interfaceSummary !== ""
+    text: view.interfaceSummary
+    color: view.interfaceSummaryColor
     font.family: view.panel.contentFontFamily
     font.pixelSize: Style.font.caption
   }
