@@ -437,7 +437,7 @@ this one on top.
   `sharing/webdav`, no `smb/status`), the `state.json` sketch (`shares` as rows,
   `sessions` removed, the `network` row shape), the Files view list, and note
   that no bar variant is added in M5.
-- `manifest.json`: version `0.3.0` → `0.4.0`.
+- `manifest.json`:     version `0.4.0` → `0.5.0`.
 - `README.md`: remove shares and network from the **Planned** sentence.
 - `docs/04-handoff.md`: mark M5 done, update the data flow and the live
   environment notes with the four routes.
