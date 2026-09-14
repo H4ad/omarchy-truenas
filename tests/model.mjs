@@ -667,5 +667,57 @@ check("an unknown band is untinted", "", Model.diskDotSeverity("unknown"));
 check("a blank band is untinted", "", Model.diskDotSeverity(""));
 check("a missing band is untinted", "", Model.diskDotSeverity(null));
 
+test_case("entrySettingsEqual");
+
+check("same settings match", true, Model.entrySettingsEqual({ id: "x", variant: "Temp" }, { variant: "Temp" }));
+check("the id is ignored", true, Model.entrySettingsEqual({ id: "x", variant: "Temp" }, { id: "x", variant: "Temp" }));
+check("a differing value does not match", false, Model.entrySettingsEqual({ id: "x", variant: "Temp" }, { variant: "Pool" }));
+check("a missing key equals an absent key", true, Model.entrySettingsEqual({ id: "x" }, {}));
+check("a missing key differs from a set one", false, Model.entrySettingsEqual({ id: "x" }, { variant: "Temp" }));
+check("null and absent are the same absence", true, Model.entrySettingsEqual({ id: "x", variant: null }, {}));
+check("nested values compare", false,
+  Model.entrySettingsEqual({ id: "x", extra: { a: 1 } }, { extra: { a: 2 } }));
+check("non-objects have equal empty settings", true, Model.entrySettingsEqual(null, undefined));
+
+test_case("entrySelector");
+
+const barLayout = [
+  { id: "omarchy.clock" },
+  { id: "io.github.h4ad.truenas", variant: "Full" },
+  { id: "io.github.h4ad.truenas", variant: "Temp" },
+  { id: "io.github.h4ad.truenas", variant: "CapacityBar" }
+];
+check("the first instance resolves to its index", 1,
+  Model.entrySelector(barLayout, "io.github.h4ad.truenas", { variant: "Full" }));
+check("the second instance resolves to its own index", 2,
+  Model.entrySelector(barLayout, "io.github.h4ad.truenas", { variant: "Temp" }));
+check("the third instance resolves to its own index", 3,
+  Model.entrySelector(barLayout, "io.github.h4ad.truenas", { variant: "CapacityBar" }));
+check("an unset value is no match", -1,
+  Model.entrySelector(barLayout, "io.github.h4ad.truenas", { variant: "Pool" }));
+check("an unknown id is no match", -1,
+  Model.entrySelector(barLayout, "io.github.h4ad.other", { variant: "Full" }));
+check("identical entries resolve to the first, index 0", 0,
+  Model.entrySelector([{ id: "x" }, { id: "x" }], "x", {}));
+check("not a list is no match", -1, Model.entrySelector(null, "x", {}));
+
+test_case("entryLocation");
+
+const barSections = {
+  left: [{ id: "omarchy.menu" }],
+  center: [{ id: "omarchy.clock" }],
+  right: [
+    { id: "io.github.h4ad.truenas", variant: "Full" },
+    { id: "io.github.h4ad.truenas", variant: "Pool" }
+  ]
+};
+check("the region and index are returned", { section: "right", index: 1 },
+  Model.entryLocation(barSections, "io.github.h4ad.truenas", { variant: "Pool" }));
+check("a left entry resolves there", { section: "left", index: 0 },
+  Model.entryLocation(barSections, "omarchy.menu", {}));
+check("no matching entry is null", null,
+  Model.entryLocation(barSections, "io.github.h4ad.truenas", { variant: "Temp" }));
+check("no layout is null", null, Model.entryLocation(null, "x", {}));
+
 console.log("\nmodel: " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

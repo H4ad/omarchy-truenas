@@ -194,8 +194,20 @@ Panel {
     for (var key in current) entry[key] = current[key]
     entry[String(name)] = value
     root.settings = entry
-    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
-      root.bar.shell.updateEntryInline(root.moduleName, entry)
+    var bar = root.bar
+    if (!bar) return
+    // The widget can be on the bar more than once and every instance shares this
+    // id, so a write keyed on the id alone lands on the first item. Locate this
+    // panel's own entry and write by selector; fall back to the id write when
+    // the layout is not reachable.
+    var registry = bar.shell ? bar.shell.pluginRegistry : null
+    var location = Model.entryLocation(bar.layoutConfig, root.moduleName, current)
+    if (location && registry && typeof registry.setBarWidget === "function") {
+      registry.setBarWidget(root.moduleName, String(name), value,
+        { section: location.section, index: location.index })
+    } else if (bar.shell && typeof bar.shell.updateEntryInline === "function") {
+      bar.shell.updateEntryInline(root.moduleName, entry)
+    }
   }
 
   // ------------------------------------------------------------------ writes

@@ -228,6 +228,21 @@ BarWidget {
     Quickshell.execDetached(["xdg-open", url])
   }
 
+  // An IPC target routes to one handler, and with this widget on the bar more
+  // than once that handler belongs to an arbitrary item. Relay the verb to the
+  // item the bar would open (the drawn one on the focused monitor), the same
+  // resolution the shell uses for its own summon hotkeys. `refresh` is the
+  // exception: it broadcasts to every instance, because every item is stale.
+  function route(method, arg) {
+    var target = (root.bar && typeof root.bar.findPanelWidget === "function")
+      ? root.bar.findPanelWidget(root.moduleName) : null
+    if (target && target !== root && typeof target[method] === "function") {
+      target[method](arg)
+      return
+    }
+    if (typeof root[method] === "function") root[method](arg)
+  }
+
   function configuredBase() {
     var doc = root.configDoc
     if (!doc) return ""
@@ -334,14 +349,14 @@ BarWidget {
   IpcHandler {
     target: "io.github.h4ad.truenas"
 
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function toggle(): void { root.toggle() }
+    function open(): void { root.route("open") }
+    function close(): void { root.route("close") }
+    function show(): void { root.route("open") }
+    function hide(): void { root.route("close") }
+    function toggle(): void { root.route("toggle") }
     function refresh(): void { root.broadcast("refresh") }
-    function view(name: string): void { root.openView(name) }
-    function help(): void { root.openHelp() }
+    function view(name: string): void { root.route("openView", name) }
+    function help(): void { root.route("openHelp") }
   }
 
   // The visible row is loaded inside BarIconButton's icon slot, where no width

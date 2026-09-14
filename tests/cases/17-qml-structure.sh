@@ -138,6 +138,19 @@ while IFS= read -r entry; do
 done < <(jq -r '.entryPoints[]' "$ROOT/manifest.json")
 check "every manifest entryPoint file exists" "" "${qml_missing# }"
 
+# The widget can sit on the bar more than once, and every instance shares the
+# module id, so a settings write keyed on the id alone would edit the first item.
+# The panel locates its own entry and writes by {section, index} selector; the
+# bar item relays an IPC verb to the instance the bar would open.
+check "the manifest allows more than one bar item" "true" \
+  "$(jq -r '.barWidget.allowMultiple' "$ROOT/manifest.json")"
+check "the panel locates its own layout entry" "1" \
+  "$(grep -c 'Model.entryLocation(bar.layoutConfig' "$ROOT/Panel.qml")"
+check "the panel writes a widget setting by selector" "1" \
+  "$(grep -c 'registry.setBarWidget(' "$ROOT/Panel.qml")"
+check "the bar item relays ipc to the opened instance" "1" \
+  "$(grep -c 'root.bar.findPanelWidget(root.moduleName)' "$ROOT/BarWidget.qml")"
+
 # Every variant the JS resolves must be selectable in the manifest, and the
 # manifest must not offer one the JS would fall back to Default for. Both lists
 # come from their source, and the check names the side each missing entry is on.

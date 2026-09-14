@@ -746,3 +746,56 @@ function glyphFor(mode, counts) {
     default:             return severe ? GLYPH.critical : GLYPH.firing;
   }
 }
+
+// ---------------------------------------------------------------- bar entries
+// The bar allows this widget more than once, and every instance shares one
+// module id (the host's settings write is keyed on the id). A write from one
+// instance's panel would therefore land on the first instance unless it carries
+// a selector, so these resolve which entry the calling instance owns.
+
+// The inline settings of an entry with the id removed, so two entries compare on
+// what the widget actually receives. A missing key and an explicit null are the
+// same absence, because the host injects only the keys that are set.
+function entrySettingsEqual(left, right) {
+  var a = left && typeof left === "object" ? left : {};
+  var b = right && typeof right === "object" ? right : {};
+  var keys = {};
+  var key;
+  for (key in a) if (key !== "id") keys[key] = true;
+  for (key in b) if (key !== "id") keys[key] = true;
+  for (key in keys) {
+    var leftValue = a[key] === undefined ? null : a[key];
+    var rightValue = b[key] === undefined ? null : b[key];
+    if (JSON.stringify(leftValue) !== JSON.stringify(rightValue)) return false;
+  }
+  return true;
+}
+
+// The index of the layout entry this instance belongs to, or -1 when nothing
+// matches (a write that has not landed yet) and the first of several identical
+// entries, which are indistinguishable by design.
+function entrySelector(entries, id, settings) {
+  var list = arrayLike(entries) ? entries : [];
+  var wanted = String(id || "");
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i];
+    var entryName = (entry && typeof entry === "object")
+      ? String(entry.id || "") : String(entry || "");
+    if (entryName !== wanted) continue;
+    if (entrySettingsEqual(entry, settings)) return i;
+  }
+  return -1;
+}
+
+// The region and index of the entry, or null. The host's per-entry write takes
+// a {section, index} selector; without one it edits the first entry that
+// carries the id, which is the wrong item once the widget is on the bar twice.
+function entryLocation(layout, id, settings) {
+  var sections = ["left", "center", "right"];
+  var config = layout && typeof layout === "object" ? layout : {};
+  for (var i = 0; i < sections.length; i++) {
+    var index = entrySelector(config[sections[i]], id, settings);
+    if (index !== -1) return { section: sections[i], index: index };
+  }
+  return null;
+}

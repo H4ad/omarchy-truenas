@@ -16,10 +16,10 @@
   },
   "barWidget": {
     "displayName": "TrueNAS",
-    "description": "Pool health, disk temperatures, alerts and capacity, with a popout for pools, disks, services, apps, protection, shares, network and alerts.",
+    "description": "Pool health, disk temperatures, alerts, capacity, services, apps, protection and shares, with a popout for all of it. The item can be added to the bar more than once, each with its own variant.",
     "category": "Monitoring",
     "aliases": ["truenas", "nas", "zfs", "pools", "storage"],
-    "allowMultiple": false,
+    "allowMultiple": true,
     "defaultSection": "right",
     "defaults": {
       "variant": "Default",

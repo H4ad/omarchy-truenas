@@ -47,6 +47,14 @@ Landed after the 1.0.0 milestone, before any publication. Version stays `1.0.0`.
   `~/.local/state/omarchy/truenas/history.json`, appended by the poller (capped
   at 60, `null` gaps, never a fake zero). Design:
   `docs/plans/2026-09-14-truenas-bar-variants-design.md`.
+- The manifest sets `allowMultiple`, so the item can sit on the bar more than
+  once, each entry with its own variant, all sharing the one poller and one
+  `state.json`. Per-item writes go through `Model.entryLocation` plus the shell's
+  `setBarWidget` `{section, index}` selector (`Panel.setWidgetSetting`), because
+  a write by id alone edits the first item. IPC verbs relay to the item the bar
+  would open (`BarWidget.route` via `bar.findPanelWidget`); `refresh` broadcasts
+  to all. The duplicate `IpcHandler` warning is the shell's normal pattern, the
+  same one bluetooth and network show.
 
 ## How to continue (the process that worked)
 

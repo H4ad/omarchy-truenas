@@ -302,6 +302,19 @@ helpers with a state argument, `protectionFailures` and `downTotal`, plus
 and the widget maps it to the theme. The manifest lists all fifteen and the
 variant picker names each one.
 
+**More than one item.** The manifest sets `allowMultiple`, so the widget can sit
+on the bar more than once, each entry with its own variant. Every instance shares
+the one poller and the one `state.json`, so it is still one poll per machine and
+one notification per event. Settings stay per item: the panel locates its own
+entry with `Model.entryLocation` and writes through the shell's
+`setBarWidget {section, index}` selector, because a write keyed on the shared
+plugin id alone edits the first item. An IPC verb is relayed to the item the bar
+would open (`BarWidget.route` via `bar.findPanelWidget`); `refresh` broadcasts to
+all of them. Two items with byte-identical settings are indistinguishable, so an
+in-panel change lands on the first; give each a different variant, or use Bar
+Settings. Add another in Bar Settings, or
+`omarchy bar set io.github.h4ad.truenas variant Temp --section right --index N`.
+
 ## Screenshot
 
 `preview.png` is a live screenshot of the bar item and the Health popout taken
