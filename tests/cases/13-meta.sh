@@ -107,3 +107,18 @@ check "the cached data is not overwritten" 25.04.2 "$(meta_file '.system.data.ve
 check "nor is its fetch time advanced" "$good_fetched" "$(meta_file '.system.fetchedAt')"
 check "the alerts answered, so the connection is up" true "$(state '.connection.ok')"
 teardown
+
+test_case "the meta cache round-trips a null system field"
+setup; single_instance_config
+jq -c 'del(.uptime_seconds, .cores, .physmem)' \
+  "$ROOT/tests/fixtures/system-info.json" >"$WORK/system.json"
+meta_responses 0 200 "$WORK/system.json"
+poll
+check "the fresh poll reports an unknown uptime" null "$(state '.system.uptimeSeconds')"
+check "and caches it as null, not 0" null "$(meta_file '.system.data.uptimeSeconds')"
+check "the version still round-trips" 25.04.2 "$(state '.system.version')"
+poll
+check "the cached reuse keeps uptime unknown" null "$(state '.system.uptimeSeconds')"
+check "and cores unknown" null "$(state '.system.cores')"
+check "and physmem unknown" null "$(state '.system.physmem')"
+teardown

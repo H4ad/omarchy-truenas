@@ -54,6 +54,16 @@ def scan_norm:
     endTime:    ((.end_time? // null) | to_iso)
   } end;
 
+# A vdev error category totals only when every data vdev reports it as a
+# number. One vdev whose field is absent makes that total unknown, not a
+# smaller number.
+def vdev_sum($field):
+  [ .[] | .[$field]? | num ] as $vals
+  | if ($vals | length) == length
+       and ([$vals[] | select(. == null)] | length) == 0
+    then ($vals | add)
+    else null end;
+
 # The pool's own error_count, when a build carries one, else the sum of every
 # data vdev's stats. Absent on both counts is null, not three zeroes.
 def vdev_errors:
@@ -65,9 +75,9 @@ def vdev_errors:
     ([ ((.topology? // {}).data? // [])[]? | (.stats? // {}) ]) as $stats
     | if ($stats | length) == 0 then null
       else {
-        read:     ([$stats[] | .read_errors?     // 0] | add // 0),
-        write:    ([$stats[] | .write_errors?    // 0] | add // 0),
-        checksum: ([$stats[] | .checksum_errors? // 0] | add // 0)
+        read:     ($stats | vdev_sum("read_errors")),
+        write:    ($stats | vdev_sum("write_errors")),
+        checksum: ($stats | vdev_sum("checksum_errors"))
       } end
   end;
 
@@ -99,10 +109,13 @@ def system_norm:
   {
     hostname:      (.hostname // ""),
     version:       (.version // ""),
-    uptimeSeconds: (((.uptime_seconds? // 0) | num) // 0),
-    cores:         (((.cores? // 0)         | num) // 0),
-    physmem:       (((.physmem? // 0)       | num) // 0),
-    loadavg:       ((.loadavg? // []) | if type == "array" then . else [] end)
+    # An absent or non-numeric field is unknown, never 0: "up 0s" is a claim
+    # the poll cannot make. A real numeric 0 survives tonumber.
+    uptimeSeconds: ((.uptime_seconds? // null) | num),
+    cores:         ((.cores?          // null) | num),
+    physmem:       ((.physmem?        // null) | num),
+    loadavg:       ((.loadavg? // null)
+                    | if type == "array" then map(num) else null end)
   };
 
 def alert_rank:
