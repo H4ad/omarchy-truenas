@@ -22,6 +22,9 @@ check "storage is used" 71 "$(state '.pools[] | select(.name=="storage") | .used
 check "boot-pool is used" 19 "$(state '.pools[] | select(.name=="boot-pool") | .usedPct')"
 check "the version came from system.info" 25.04.2 "$(state '.system.version')"
 check "and the hostname too" nas "$(state '.system.hostname')"
+check "the uptime is the real number" 3629000 "$(state '.system.uptimeSeconds')"
+check "so are the cores" 16 "$(state '.system.cores')"
+check "and the memory" 68719476736 "$(state '.system.physmem')"
 check "connection carries the version" 25.04.2 "$(state '.connection.version')"
 check "the dialect is named" rest-v2.0 "$(state '.connection.dialect')"
 check "a healthy scan is FINISHED" FINISHED "$(state '.pools[] | select(.name=="storage") | .scan.state')"
@@ -82,6 +85,33 @@ check "a warning names the system section" system \
   "$(state '.warnings[] | select(.section=="system") | .section')"
 check "counts are still present" 0 "$(state '.counts.total')"
 check "pools are still present" 2 "$(state '.pools | length')"
+teardown
+
+test_case "a system that omits a field is unknown, never zero"
+setup; single_instance_config
+jq -c 'del(.uptime_seconds, .cores, .physmem)' \
+  "$ROOT/tests/fixtures/system-info.json" >"$WORK/system.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$WORK/system.json"
+poll
+check "the system is still present" 25.04.2 "$(state '.system.version')"
+check "an absent uptime is null, not an up 0s" null "$(state '.system.uptimeSeconds')"
+check "an absent core count is null, not 0" null "$(state '.system.cores')"
+check "absent memory is null, not 0" null "$(state '.system.physmem')"
+teardown
+
+test_case "a numeric zero stays zero while a non-number is unknown"
+setup; single_instance_config
+jq -c '.uptime_seconds = 0 | .cores = "sixteen" | .physmem = null' \
+  "$ROOT/tests/fixtures/system-info.json" >"$WORK/system.json"
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info" 0 200 "$WORK/system.json"
+poll
+check "a real zero is not lost" 0 "$(state '.system.uptimeSeconds')"
+check "a non-numeric core count is null" null "$(state '.system.cores')"
+check "an explicit null memory is null" null "$(state '.system.physmem')"
 teardown
 
 test_case "a 200 with an object pool body is not a pool list"
@@ -243,4 +273,25 @@ poll
 check "no size" null "$(state '.pools[0].size')"
 check "no percentage invented" null "$(state '.pools[0].usedPct')"
 check "no vdev errors invented" null "$(state '.pools[0].vdevErrors')"
+teardown
+
+test_case "a vdev missing an error field makes that total unknown, not smaller"
+setup; single_instance_config
+cat >"$WORK/pools.json" <<'JSON'
+[ { "name": "storage", "status": "ONLINE", "healthy": true,
+    "size": 1000, "allocated": 100, "free": 900,
+    "topology": { "data": [
+      { "name": "mirror-0", "type": "MIRROR",
+        "stats": { "read_errors": 3, "write_errors": 0, "checksum_errors": 9 } },
+      { "name": "mirror-1", "type": "MIRROR",
+        "stats": { "write_errors": 1, "checksum_errors": 1 } } ] } } ]
+JSON
+respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool"        0 200 "$WORK/pools.json"
+respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
+poll
+check "the un-reported read count is null, not a partial 3" null \
+  "$(state '.pools[0].vdevErrors.read')"
+check "the fully reported writes are summed" 1 "$(state '.pools[0].vdevErrors.write')"
+check "so are the checksums" 10 "$(state '.pools[0].vdevErrors.checksum')"
 teardown
