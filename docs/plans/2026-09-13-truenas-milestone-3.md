@@ -159,27 +159,38 @@ intact.
 `seen.json` gains:
 
 ```jsonc
-"services": { "cifs": { "state": "RUNNING", "lastNotifiedAt": "…" } },
-"apps":     { "appc": { "state": "RUNNING", "lastNotifiedAt": "…" } }
+"services": { "cifs": { "state": "RUNNING", "down": false, "lastNotifiedAt": "…" } },
+"apps":     { "appc": { "state": "RUNNING", "down": false, "lastNotifiedAt": "…" } }
 ```
 
-- Gates: `services_ok = normalize_ok && no "service" warning`; `apps_ok =
-  normalize_ok && no "app" warning`. Without its gate, that half of `seen.json`
-  is not written (a network blip must not replay every service as stopped on
-  recovery).
-- A service is **down** when its state is neither `RUNNING` nor `""`; an app is
-  **down** when its state is one of `STOPPED`, `CRASHED`, `FAILED`, `EXITED`.
-  A transitional or blank app state (`DEPLOYING`, `STARTING`, `STOPPING`, `""`)
-  is not down.
-- `stopped`: a row that is down now where the previous recorded state was
-  `RUNNING`. Toast: `Service cifs is STOPPED` / body `state changed from
+- Gates: `services_notify_ok = normalize_ok && no "service" warning`;
+  `apps_notify_ok = normalize_ok && no "app" warning`. Without its gate, that
+  half of `seen.json` is not written (a network blip must not replay every
+  service as stopped on recovery).
+- The entry stores the last **decisive** state and a stable `down` boolean, not
+  the raw observation. A decisive service state is any non-empty state; a
+  decisive app state is one of `RUNNING`, `STOPPED`, `CRASHED`, `FAILED`,
+  `EXITED`. `DEPLOYING`, `STARTING`, `STOPPING` and `""` are non-decisive for an
+  app. A service is **down** when its decisive state is not `RUNNING`; an app is
+  **down** when its decisive state is one of `STOPPED`, `CRASHED`, `FAILED`,
+  `EXITED`.
+- On a decisive poll the entry's `state` and `down` are set from the current
+  row; on a non-decisive poll both are carried forward untouched and nothing
+  toasts. Carrying the last decisive values forward is what stops a blank or
+  transitional poll from erasing the signal, which otherwise produced missed
+  crashes (the poll after the gap was read against the gap) and phantom
+  recoveries.
+- `stopped`: the previous entry exists, its `down` is `false`, and the current
+  `down` is `true`. Toast: `Service cifs is STOPPED` / body `state changed from
   RUNNING to STOPPED` (and `App appc is CRASHED` / `state changed from
-  RUNNING to CRASHED`), `GLYPH_ALERT`, urgency `urgency_for warning`.
-- `recovered`: a row whose state is `RUNNING` now where the previous recorded
-  state was down. Toast: `Service cifs is running again` / `App appc is
-  running again`, low urgency, `GLYPH_OK`.
-- Reduce over the **current** rows only, like `seen.pools`/`seen.disks`, so a
-  removed service or app entry does not linger.
+  RUNNING to CRASHED`), `GLYPH_ALERT`, urgency `urgency_for warning`. When the
+  previous decisive state is empty the body is `state changed to <cur>` rather
+  than an empty `from`.
+- `recovered`: the previous `down` is `true` and the current `down` is `false`.
+  Toast: `Service cifs is running again` / `App appc is running again`, low
+  urgency, `GLYPH_OK`.
+- A first sighting never toasts. Reduce over the **current** rows only, like
+  `seen.pools`/`seen.disks`, so a removed service or app entry does not linger.
 
 ### Model.js helpers
 
