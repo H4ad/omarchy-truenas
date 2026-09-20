@@ -5,7 +5,7 @@
 # rather than a second parser.
 set -uo pipefail
 
-TN_PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+TN_PLUGIN_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # shellcheck source=./truenas-lib.sh
 . "$TN_PLUGIN_DIR/bin/truenas-lib.sh"
 

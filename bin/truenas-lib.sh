@@ -10,7 +10,7 @@ TN_STATE_FILE="$TN_STATE_HOME/state.json"
 TN_SEEN_FILE="$TN_STATE_HOME/seen.json"
 TN_META_FILE="$TN_STATE_HOME/meta.json"
 TN_HISTORY_FILE="$TN_STATE_HOME/history.json"
-TN_PLUGIN_DIR="${TN_PLUGIN_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+TN_PLUGIN_DIR="${TN_PLUGIN_DIR:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
 
 tn_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 tn_warn() { printf 'truenas: %s\n' "$*" >&2; }
