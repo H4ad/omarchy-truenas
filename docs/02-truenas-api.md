@@ -36,7 +36,9 @@ Every call in this repo goes through one helper, `tn_http_request` (reached as
 `tn_http_get`; the design names this shim `tn_call`). `tn_dialect()` reports the
 generation a poll used -- `rest-v2.0` today -- and the poll records it in
 `state.connection.dialect`. Migrating to the websocket API is a change to that
-one function and a websocket client, not a rewrite of every endpoint.
+one function and a websocket client, not a rewrite of every endpoint. The scope,
+step order and the parts the seam does not cover are in
+[12-websocket-migration.md](12-websocket-migration.md).
 
 ## Endpoints milestone 1 uses
 

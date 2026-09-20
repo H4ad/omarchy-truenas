@@ -94,6 +94,8 @@ TrueNAS 25.10, one NAS, one API key.
 - What ships and what does not: [docs/03-features.md](docs/03-features.md)
 - The TrueNAS API surface: [docs/02-truenas-api.md](docs/02-truenas-api.md)
 - The traps that have already cost time: [docs/11-pitfalls.md](docs/11-pitfalls.md)
+- Off the deprecated REST API, when the time comes:
+  [docs/12-websocket-migration.md](docs/12-websocket-migration.md)
 - The handoff, including the shapes that were never measured live:
   [docs/04-handoff.md](docs/04-handoff.md)
 
