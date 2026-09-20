@@ -3,16 +3,14 @@
 Scope and step order for moving the plugin from REST `/api/v2.0` to the
 JSON-RPC 2.0 API over WebSocket at `/api/current`, and for dropping the REST
 path once that is done. This is a plan, not a report: nothing here has been
-measured live yet except where it cites `docs/02-truenas-api.md`.
+measured live yet except where it cites [truenas-api.md](truenas-api.md).
 
 ## When this matters
 
 REST was deprecated in TrueNAS 25.04 and is removed in TrueNAS 26. The plugin
 pins 25.10, so nothing forces the move today. The trigger is a 26 release
 candidate, or a decision to remove REST regardless. Until then the seam below
-keeps the cost contained, and the `1.0.0` question in
-[plans/2026-09-14-truenas-milestone-6.md](plans/2026-09-14-truenas-milestone-6.md)
-stays open.
+keeps the cost contained.
 
 ## The seam today
 
@@ -25,19 +23,18 @@ Every request goes through one helper, so the transport change is small:
 - Consumers: `bin/truenas-poll` (`fetch`, `:255`), `bin/truenas-api`
   (`:125`, `:127`), `bin/truenasctl:227`.
 
-The design claim that the migration is "a change to one function"
-(`plans/2026-09-13-truenas-plugin-design.md:70`) holds for the transport. It does
-not hold for the operation map, the error model, or the test harness, which are
-the three work items below.
+The claim that the migration is "a change to one function" holds for the
+transport. It does not hold for the operation map, the error model, or the test
+harness, which are the three work items below.
 
 ## Operations to map
 
 15 read paths in `bin/truenas-poll` and 12 write verbs in `bin/truenas-api`. The
-JSON-RPC method names are confirmed for milestone 1 in `docs/02-truenas-api.md`
-(`system.info`, `alert.list`, `pool.query`, `alert.dismiss`, `alert.restore`).
-The rest follow the same namespace pattern but must be confirmed against a live
-`/api/current` before they are written down as fact. No table of guesses belongs
-in `docs/02`.
+JSON-RPC method names are confirmed for the alert, system and pool routes in
+[truenas-api.md](truenas-api.md) (`system.info`, `alert.list`, `pool.query`,
+`alert.dismiss`, `alert.restore`). The rest follow the same namespace pattern but
+must be confirmed against a live `/api/current` before they are written down as
+fact. No table of guesses belongs in [truenas-api.md](truenas-api.md).
 
 Shape changes to expect, from the REST quirks already recorded:
 
@@ -52,11 +49,10 @@ Shape changes to expect, from the REST quirks already recorded:
 
 ## The blocker: a WebSocket client
 
-This is the reason WS-only was rejected up front
-(`plans/2026-09-13-truenas-plugin-design.md:75`). The plugin needs only `curl`
-and `jq` today. WebSocket needs a client that is not on the desktop by default:
-`websocat` and `wscat` are not installed here, and neither Python `websockets`
-nor `websocket-client` is present.
+This is the reason a WebSocket-only approach was rejected up front. The plugin
+needs only `curl` and `jq` today. WebSocket needs a client that is not on the
+desktop by default: `websocat` and `wscat` are not installed here, and neither
+Python `websockets` nor `websocket-client` is present.
 
 Pick one and record the decision before writing transport code:
 
@@ -79,7 +75,7 @@ ids, response correlation, event frames, teardown. A poll is a short-lived
 process that issues 15 reads, so the natural shape is one connection per poll
 that runs the reads back to back and closes, not a resident daemon. A cold poll
 also becomes one handshake and one auth instead of 15 stateless requests, which
-relieves the rate limit in `docs/11-pitfalls.md:691`.
+relieves the rate limit in [pitfalls.md](pitfalls.md).
 
 ## Error model
 
@@ -99,16 +95,8 @@ already reads that field.
 
 The largest piece of work, and the one the "one function" claim misses.
 `tests/stubs/curl` fakes REST by matching `/api/v2.0/...` paths, and six case
-files drive it:
-
-| Case | Size |
-| --- | --- |
-| `tests/cases/10-poll.sh` | 41K |
-| `tests/cases/11-notify.sh` | 49K |
-| `tests/cases/12-config.sh` | 8.5K |
-| `tests/cases/13-meta.sh` | 31K |
-| `tests/cases/14-ctl.sh` | 43K |
-| `tests/cases/15-api.sh` | 16K |
+files drive it: `tests/cases/10-poll.sh`, `11-notify.sh`, `12-config.sh`,
+`13-meta.sh`, `14-ctl.sh` and `15-api.sh`.
 
 The stub boundary moves. Either stub the new WebSocket helper and re-express
 each expected call as a JSON-RPC request, or keep `curl` and route the helper
@@ -119,7 +107,7 @@ here than for the transport and the operation map combined.
 
 1. Spike. Stand up the chosen WS client on the desktop against the live NAS.
    Prove auth, one read (`system.info`) and one write (`alert.dismiss`). Record
-   the exact handshake and params shapes in `docs/02-truenas-api.md`. This
+   the exact handshake and params shapes in [truenas-api.md](truenas-api.md). This
    settles the dependency and the method map before any real edit.
 2. Transport. Add the WS call path behind `tn_http_request`'s name, or beside it,
    so call sites do not change until the map does.
@@ -131,8 +119,8 @@ here than for the transport and the operation map combined.
 6. Tests. Migrate the harness.
 7. Remove REST. Only once every section is confirmed on `/api/current`: delete
    the fallback, the REST paths, the `curl` stub and the `rest-v2.0` branch.
-8. Docs. Update `docs/02-truenas-api.md`, `docs/11-pitfalls.md:677`,
-   `README.md:83` and this file.
+8. Docs. Update [truenas-api.md](truenas-api.md), [pitfalls.md](pitfalls.md),
+   `README.md` and this file.
 
 ## Acceptance
 

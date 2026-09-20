@@ -43,10 +43,9 @@ the settings form. Types seen in the wild: `string`, `integer` (with
 `min`/`max`/`step`), `boolean`, `enum` (with `options`). Each entry takes
 `key`, `label`, `description`, `defaultValue`.
 
-Reference manifests worth copying from, all installed here:
-`~/.config/omarchy/plugins/jankeesvw.notification-center/manifest.json` (rich
-schema, badge enum), `io.github.kristoferlund.webcam` (bar widget plus panel),
-`/usr/share/omarchy/shell/plugins/services/battery/manifest.json` (service).
+The built-in plugins under `/usr/share/omarchy/shell/plugins/` and any installed
+third-party plugins under `~/.config/omarchy/plugins/` are working manifest
+examples: the battery service, the weather panel, the notification centre.
 
 ## What the host injects
 
@@ -86,10 +85,10 @@ entry alone.** That is the combination this plugin wants.
 Per-widget settings are inline on the layout entry, no sub-object:
 
 ```json
-{ "id": "io.github.h4ad.truenas", "variant": "Default", "panelWidth": 460 }
+{ "id": "io.github.h4ad.truenas", "variant": "Default", "panelWidth": 520 }
 ```
 
-## Building blocks we will use
+## Building blocks
 
 From `/usr/share/omarchy/shell/Ui/`: `BarIconButton`, `BarIndicator`,
 `KeyboardPanel`, `PanelKeyCatcher`, `PanelSectionHeader`, `PanelSeparator`,
@@ -147,7 +146,7 @@ It tags the toast with `-a <app-name>` so it pops through do-not-disturb, and
 design in the notification stack: the shell does not run a command that came in
 on the notification, because a stored notification command is an attacker's
 command waiting for a click. We apply the same rule to URLs coming from the
-TrueNAS API (see [02-truenas-api.md](02-truenas-api.md), and the origin gate in
+TrueNAS API (see [truenas-api.md](truenas-api.md), and the origin gate in
 `Links.js`).
 
 ## Dev loop
@@ -172,5 +171,5 @@ manifest at its root.
 omarchy plugin add https://github.com/h4ad/omarchy-truenas.git --enable
 ```
 
-Before release: replace any cloned id, drop `omarchy.clonedFrom`, add `README.md`,
-`LICENSE`, `preview.png`, then submit to the marketplace issue form.
+Before publishing, replace any cloned id, drop `omarchy.clonedFrom`, and make
+sure `README.md`, `LICENSE` and `preview.png` are present.
