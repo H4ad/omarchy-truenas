@@ -128,6 +128,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: name
         anchors.left: parent.left
         anchors.leftMargin: Style.space(3)
@@ -141,6 +142,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: blurb
         anchors.left: name.right
         anchors.verticalCenter: parent.verticalCenter
@@ -163,6 +165,7 @@ Column {
           model: row.segments
 
           Text {
+            textFormat: Text.PlainText
             required property var modelData
             text: modelData.text
             color: root.colorForSeverity(modelData.severity)
@@ -177,6 +180,7 @@ Column {
       // type, so it is left out here rather than faked; the row is about what the
       // composer reads, not the exact pixels.
       Text {
+        textFormat: Text.PlainText
         visible: row.composed
         anchors.right: parent.right
         anchors.rightMargin: Style.space(3)
@@ -214,6 +218,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: row.chartKind === "bar" && row.chart !== null
           text: row.chart ? row.chart.label : ""
           color: root.foreground

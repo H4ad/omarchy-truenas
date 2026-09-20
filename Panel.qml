@@ -39,6 +39,11 @@ Panel {
   property var configData: null
   property var configDoc: null
   property var pendingConfirm: null
+  // A write asks for a forced re-poll, but only one poll runs at a time. When a
+  // poll is already in flight the request is remembered here and run on exit,
+  // instead of being dropped and leaving the panel on pre-write state until the
+  // independent service timer fires.
+  property bool forceRefreshPending: false
 
   readonly property var barIdentity: hostWidget || root
 
@@ -138,8 +143,15 @@ Panel {
   }
 
   // A close through the toggle, an outside click or an IPC hide must drop the
-  // sheet too, otherwise reopening shows a stale glossary.
-  onOpenedChanged: if (!root.opened) helpModal.opened = false
+  // sheet and any armed confirmation too. Dropping only the sheet let a
+  // destructive confirm survive the close, so reopening the panel showed the old
+  // dialog with the destructive option still selected and one Enter away.
+  onOpenedChanged: {
+    if (!root.opened) {
+      helpModal.opened = false
+      confirmAction.canceled()
+    }
+  }
 
   // The glossary is a sheet inside the visible panel window, opened from the
   // header `?` and from the menu's Help row.
@@ -153,7 +165,9 @@ Panel {
     helpModal.opened = false
     root.actionError = ""
     root.actionNotice = ""
-    root.pendingConfirm = null
+    // Close the dialog, not just clear the callback: a tab switch used to null
+    // pendingConfirm but leave the confirmation rendered and unactionable.
+    confirmAction.canceled()
     root.view = next
     if (next === "config") root.loadConfig()
   }
@@ -168,8 +182,13 @@ Panel {
 
   // A write changes something the poller only refetches on its slow cadence, so
   // without the flag the panel keeps showing the state from before the write.
+  // A poll already in flight cannot be replaced, so the forced refresh is queued
+  // for when it exits rather than dropped.
   function refreshAfterWrite() {
-    if (pollProc.running) return
+    if (pollProc.running) {
+      root.forceRefreshPending = true
+      return
+    }
     pollProc.command = [root.pollPath, "--quiet", "--force-meta"]
     pollProc.running = true
   }
@@ -309,7 +328,15 @@ Panel {
   Process {
     id: pollProc
     command: [root.pollPath, "--quiet"]
-    onExited: pollProc.command = [root.pollPath, "--quiet"]
+    onExited: {
+      if (root.forceRefreshPending) {
+        root.forceRefreshPending = false
+        pollProc.command = [root.pollPath, "--quiet", "--force-meta"]
+        pollProc.running = true
+      } else {
+        pollProc.command = [root.pollPath, "--quiet"]
+      }
+    }
   }
 
   Process {
@@ -397,6 +424,7 @@ Panel {
           implicitHeight: Math.max(title.implicitHeight, closeButton.height)
 
           Text {
+            textFormat: Text.PlainText
             id: title
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
@@ -408,6 +436,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             anchors.left: title.right
             anchors.leftMargin: Style.space(10)
             anchors.right: refreshButton.left
@@ -482,6 +511,7 @@ Panel {
             model: root.tabs
 
             Text {
+              textFormat: Text.PlainText
               required property var modelData
               readonly property bool active: root.view === modelData.key
               text: modelData.label
@@ -551,6 +581,7 @@ Panel {
         spacing: Style.space(6)
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           wrapMode: Text.WordWrap
           visible: root.actionError !== "" || root.actionNotice !== ""
@@ -575,6 +606,7 @@ Panel {
             ]
 
             Text {
+              textFormat: Text.PlainText
               required property var modelData
               text: Model.GLYPH.link + " " + modelData.label
               color: linkMouse.containsMouse

@@ -46,6 +46,43 @@ check "the new key replaced the old" 1 \
 check "the old key is gone" 0 "$(grep -c 'k1' "$TRUENAS_CREDENTIALS_FILE")"
 teardown
 
+test_case "login preserves per-instance settings and other instances"
+setup
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "schema": 1, "pollSeconds": 30, "timeoutSeconds": 8, "insecureTLS": false,
+  "instances": [
+    { "id": "prod", "label": "Production", "baseUrl": "https://old.example",
+      "tag": "prod", "apiKeyFile": "~/.config/truenas/key",
+      "apiKeyCommand": "pass show truenas/prod" },
+    { "id": "lab", "label": "Lab", "baseUrl": "https://lab.example" } ] }
+JSON
+rm -f "$TRUENAS_CREDENTIALS_FILE"
+printf 'new-key\n' | ctl login https://new.example >/dev/null 2>&1
+check "the base url moved" https://new.example \
+  "$(jq -r '.instances[0].baseUrl' "$TRUENAS_CONFIG_FILE")"
+check "the id is preserved" prod "$(jq -r '.instances[0].id' "$TRUENAS_CONFIG_FILE")"
+check "the label is preserved" Production \
+  "$(jq -r '.instances[0].label' "$TRUENAS_CONFIG_FILE")"
+check "apiKeyCommand is preserved" "pass show truenas/prod" \
+  "$(jq -r '.instances[0].apiKeyCommand' "$TRUENAS_CONFIG_FILE")"
+check "apiKeyFile is preserved" "~/.config/truenas/key" \
+  "$(jq -r '.instances[0].apiKeyFile' "$TRUENAS_CONFIG_FILE")"
+check "tag is preserved" prod "$(jq -r '.instances[0].tag' "$TRUENAS_CONFIG_FILE")"
+check "the second instance survives" https://lab.example \
+  "$(jq -r '.instances[1].baseUrl' "$TRUENAS_CONFIG_FILE")"
+check "two instances, not one" 2 "$(jq '.instances | length' "$TRUENAS_CONFIG_FILE")"
+teardown
+
+test_case "login seeds defaults when no instance exists yet"
+setup
+rm -f "$TRUENAS_CONFIG_FILE" "$TRUENAS_CREDENTIALS_FILE"
+printf 'fresh-key\n' | ctl login https://nas.example >/dev/null 2>&1
+check "one instance" 1 "$(jq '.instances | length' "$TRUENAS_CONFIG_FILE")"
+check "the default id" nas "$(jq -r '.instances[0].id' "$TRUENAS_CONFIG_FILE")"
+check "the default label" NAS "$(jq -r '.instances[0].label' "$TRUENAS_CONFIG_FILE")"
+check "the url" https://nas.example "$(jq -r '.instances[0].baseUrl' "$TRUENAS_CONFIG_FILE")"
+teardown
+
 test_case "login stores no key when the config cannot be written"
 setup
 printf 'TRUENAS_API_KEY=old-key\n' >"$TRUENAS_CREDENTIALS_FILE"
@@ -104,6 +141,15 @@ ctl config set pollSeconds 60 >/dev/null
 check "pollSeconds set" 60 "$(jq -r '.pollSeconds' "$TRUENAS_CONFIG_FILE")"
 check "a non-number pollSeconds is refused" 1 \
   "$(ctl config set pollSeconds soon >/dev/null 2>&1; echo $?)"
+check "an out-of-range pollSeconds is refused" 1 \
+  "$(ctl config set pollSeconds 4294967296 >/dev/null 2>&1; echo $?)"
+check "the refusal left pollSeconds alone" 60 \
+  "$(jq -r '.pollSeconds' "$TRUENAS_CONFIG_FILE")"
+check "the ceiling itself is accepted" 0 \
+  "$(ctl config set pollSeconds 86400 >/dev/null 2>&1; echo $?)"
+ctl config set pollSeconds 60 >/dev/null
+check "an out-of-range timeoutSeconds is refused" 1 \
+  "$(ctl config set timeoutSeconds 99999 >/dev/null 2>&1; echo $?)"
 check "an unknown key is refused" 1 \
   "$(ctl config set bananas 1 >/dev/null 2>&1; echo $?)"
 teardown
@@ -894,4 +940,45 @@ check "says unknown" 1 "$(grep -c '^network unknown:' <<<"$out")"
 check "names the failed section" 1 \
   "$(grep -c 'the network section did not answer' <<<"$out")"
 check "draws no header over an empty table" 0 "$(grep -c '^NAME' <<<"$out")"
+teardown
+
+# ------------------------------------------------------- control sequences
+# Alert text, pool names, hostnames and error messages are all shaped by whoever
+# controls the NAS, and `jq -r` decodes a `\u001b` back into a real ESC byte. A
+# terminal that receives one can be made to rewrite its title, overwrite the
+# clipboard (OSC 52) or spoof output. The state every read verb prints is
+# stripped of C0 control bytes at the one gate it passes through, and the live
+# body `test` prints is stripped on the way out.
+test_case "control sequences off the wire never reach the terminal"
+setup
+single_instance_config
+cat >"$WORK/alerts-esc.json" <<'JSON'
+[ { "uuid": "esc-1", "source": "ZFS", "klass": "PoolStatus",
+    "args": { "pool": "storage" },
+    "datetime": { "$date": 1787322480000 },
+    "dismissed": false,
+    "text": "beacon \u001b]52;c;cGF5bG9hZA==\u0007 here",
+    "formatted": "beacon \u001b]52;c;cGF5bG9hZA==\u0007 here",
+    "level": "CRITICAL", "dismissable": true } ]
+JSON
+cat >"$WORK/pools-esc.json" <<'JSON'
+[ { "name": "storage\u001b[2J", "status": "ONLINE", "size": 100, "allocated": 10,
+    "healthy": true } ]
+JSON
+cat >"$WORK/system-esc.json" <<'JSON'
+{ "version": "25.04.2\u001b[2J", "hostname": "nas\u001b]0;pwned\u0007",
+  "uptime_seconds": 1, "cores": 1, "physmem": 1, "loadavg": [0, 0, 0] }
+JSON
+respond     "/api/v2.0/alert/list"  0 200 "$WORK/alerts-esc.json"
+respond_add "/api/v2.0/pool"        0 200 "$WORK/pools-esc.json"
+respond_add "/api/v2.0/system/info" 0 200 "$WORK/system-esc.json"
+poll
+check "state.json carries no ESC" 0 "$(grep -c $'\x1b' "$STATE")"
+check "the alert text survives without the sequence" 1 \
+  "$(ctl alerts | grep -c 'beacon .* here')"
+check "alerts prints no ESC" 0 "$(ctl alerts | grep -c $'\x1b' || true)"
+check "pools prints no ESC" 0 "$(ctl pools | grep -c $'\x1b' || true)"
+out=$(ctl test 2>&1)
+check "test succeeds against the body" 0 "$(ctl test >/dev/null 2>&1; echo $?)"
+check "test prints no ESC from a live body" 0 "$(grep -c $'\x1b' <<<"$out" || true)"
 teardown

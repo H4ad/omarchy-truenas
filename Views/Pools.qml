@@ -123,6 +123,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyText !== ""
@@ -152,6 +153,7 @@ Column {
         implicitHeight: Math.max(poolName.implicitHeight, poolStatus.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: poolName
           anchors.left: parent.left
           anchors.right: poolStatus.left
@@ -166,6 +168,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: poolStatus
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -191,6 +194,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: poolCard.capacityLine !== ""
@@ -201,6 +205,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: poolCard.scrubLine
@@ -211,6 +216,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: poolCard.vdevLine !== ""

@@ -17,6 +17,10 @@ Item {
   readonly property string pollerPath: decodeURIComponent(
     String(Qt.resolvedUrl("bin/truenas-poll")).replace(/^file:\/\//, ""))
 
+  // Both ends are load-bearing. The floor is the API rate limit; the ceiling
+  // keeps `pollSeconds * 1000` inside a 32-bit int, because the Timer interval
+  // is an int and an out-of-range product wraps to 0 or negative, which turns a
+  // repeating Timer into a tight loop that hammers the NAS.
   property int pollSeconds: 30
 
   function applyConfig(text) {
@@ -25,7 +29,9 @@ Item {
       var seconds = parseInt(config.pollSeconds, 10)
       // The floor is not politeness, it is a guard: the API rate-limits, and a
       // typo of 1 would hammer the instance from every session the user has open.
-      root.pollSeconds = isFinite(seconds) && seconds >= 15 ? seconds : 30
+      root.pollSeconds = isFinite(seconds) && seconds >= 15
+        ? Math.min(seconds, 86400)
+        : 30
     } catch (e) {
       root.pollSeconds = 30
     }

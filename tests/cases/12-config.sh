@@ -168,3 +168,46 @@ printf '{"data":[]}\n' >"$WORK/keyed-empty.json"
 TN_BODY=$WORK/keyed-empty.json
 check "an empty array yields nothing" "" "$(tn_error_message)"
 teardown
+
+test_case "tn_load_config clamps pollSeconds and timeoutSeconds at both ends"
+setup
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "pollSeconds": 4294967296, "timeoutSeconds": 99999,
+  "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "an over-long pollSeconds clamps to a day" 86400 \
+  "$(tn_load_config | jq -r '.pollSeconds')"
+check "an over-long timeoutSeconds clamps too" 86400 \
+  "$(tn_load_config | jq -r '.timeoutSeconds')"
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "pollSeconds": 1, "timeoutSeconds": 0,
+  "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "the pollSeconds floor stays" 15 "$(tn_load_config | jq -r '.pollSeconds')"
+check "the timeoutSeconds floor stays" 2 "$(tn_load_config | jq -r '.timeoutSeconds')"
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "pollSeconds": "soon", "timeoutSeconds": null,
+  "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "a non-number falls back to the default" 30 \
+  "$(tn_load_config | jq -r '.pollSeconds')"
+teardown
+
+test_case "tn_write_json strips terminal control bytes but keeps tab and newline"
+setup
+printf '%s' '{"a":"x\u001by","t":"a\tb","n":"a\nb","ok":"caf\u00e9"}' \
+  | tn_write_json "$WORK/clean.json"
+check "the write succeeds" 0 "$?"
+check "the ESC byte is gone" xy "$(jq -r '.a' "$WORK/clean.json")"
+check "a tab is kept" "$(printf 'a\tb')" "$(jq -r '.t' "$WORK/clean.json")"
+check "a newline is kept" "$(printf 'a\nb')" "$(jq -r '.n' "$WORK/clean.json")"
+check "the file holds no raw ESC" 0 "$(grep -c $'\x1b' "$WORK/clean.json")"
+check "ordinary text is untouched" "café" "$(jq -r '.ok' "$WORK/clean.json")"
+teardown
+
+test_case "tn_sanitize strips the escape byte and leaves the rest"
+setup
+check "the ESC byte is removed" "ab" "$(printf 'a\x1bb' | tn_sanitize)"
+check "a newline survives" "$(printf 'a\nb')" "$(printf 'a\nb' | tn_sanitize)"
+check "a tab survives" "$(printf 'a\tb')" "$(printf 'a\tb' | tn_sanitize)"
+teardown

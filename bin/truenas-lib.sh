@@ -49,22 +49,43 @@ tn_read_json() {
   printf '%s' "$text"
 }
 
+# Strips the C0 control bytes a terminal interprets (ESC and friends), keeping
+# tab, newline and carriage return. Every byte that came off the wire is
+# untrusted terminal input: a NAS that puts an OSC 52 or a title-change sequence
+# in an alert, a pool name or an error message would otherwise get it printed
+# raw by `jq -r`. Use at the edge of any live body that is printed rather than
+# stored; tn_write_json sanitizes the stored copies.
+tn_sanitize() {
+  tr -d '\000-\010\013\014\016-\037\177'
+}
+
 # Writes stdin to $1 only when it parses as JSON, so a failed producer cannot
-# replace good state with an empty file.
+# replace good state with an empty file. Every string value is stripped of C0/DEL
+# control characters first, on the same reasoning as tn_sanitize: this is the one
+# gate every state/history/seen file passes through, so nothing a compromised NAS
+# emits can survive to be decoded by `jq -r` at the operator's terminal.
 tn_write_json() {
-  local target=$1 tmp
+  local target=$1 tmp clean
   tmp=$(mktemp "${TMPDIR:-/tmp}/truenas-write.XXXXXX")
+  clean=$(mktemp "${TMPDIR:-/tmp}/truenas-clean.XXXXXX")
   cat >"$tmp"
   if [[ -s $tmp ]] && jq -e . "$tmp" >/dev/null 2>&1; then
-    if tn_write_atomic "$target" <"$tmp"; then
-      rm -f "$tmp"
+    if ! jq 'walk(if type == "string"
+                    then gsub("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"; "")
+                    else . end)' "$tmp" >"$clean" 2>/dev/null; then
+      rm -f "$tmp" "$clean"
+      tn_warn "refusing to write invalid JSON to $target"
+      return 1
+    fi
+    if tn_write_atomic "$target" <"$clean"; then
+      rm -f "$tmp" "$clean"
       return 0
     fi
-    rm -f "$tmp"
+    rm -f "$tmp" "$clean"
     tn_warn "could not write $target"
     return 1
   fi
-  rm -f "$tmp"
+  rm -f "$tmp" "$clean"
   tn_warn "refusing to write invalid JSON to $target"
   return 1
 }
@@ -91,8 +112,12 @@ tn_load_config() {
   jq '
     {
       schema:          (.schema // 1),
-      pollSeconds:     ([(.pollSeconds // 30), 15] | max),
-      timeoutSeconds:  ([(.timeoutSeconds // 8), 2] | max),
+      # Clamped at both ends. The floor is the API rate limit; the ceiling keeps
+      # `pollSeconds * 1000` inside a 32-bit int in the QML Timer, so a
+      # hand-edited or out-of-range value cannot wrap to a zero/negative interval
+      # and turn the repeating Timer into a tight poll loop.
+      pollSeconds:     ((.pollSeconds // 30) | if type == "number" then (if . < 15 then 15 elif . > 86400 then 86400 else . end) else 30 end),
+      timeoutSeconds:  ((.timeoutSeconds // 8) | if type == "number" then (if . < 2 then 2 elif . > 86400 then 86400 else . end) else 8 end),
       insecureTLS:     (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
       notify: {
         levels:                        (.notify.levels // ["critical","error","warning"]),
@@ -334,7 +359,8 @@ tn_error_message() {
           | select(type == "string" and length > 0) ][0] // ""
       else "" end;
     (.error.message // .error.type // .message // keyed_message // "")
-    | if type == "string" then . else tostring end' "$TN_BODY" 2>/dev/null
+    | if type == "string" then . else tostring end' "$TN_BODY" 2>/dev/null \
+    | tn_sanitize
 }
 
 tn_curl_rc_message() {

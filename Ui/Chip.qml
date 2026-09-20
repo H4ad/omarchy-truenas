@@ -52,6 +52,7 @@ Item {
   // value is still recognizable from its prefix while a truncated key stops
   // saying which label this is.
   Text {
+    textFormat: Text.PlainText
     id: keyText
     anchors.left: parent.left
     anchors.leftMargin: root.paddingX
@@ -65,6 +66,7 @@ Item {
   }
 
   Text {
+    textFormat: Text.PlainText
     id: valueText
     anchors.left: keyText.right
     anchors.leftMargin: root.gap

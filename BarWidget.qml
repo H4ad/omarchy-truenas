@@ -386,6 +386,7 @@ BarWidget {
       model: root.segments
 
       Text {
+        textFormat: Text.PlainText
         text: (modelData || {}).text || ""
         font.family: root.segmentFontFamily
         font.pixelSize: root.segmentFontSize
@@ -406,6 +407,7 @@ BarWidget {
           model: root.segments
 
           Text {
+            textFormat: Text.PlainText
             text: (modelData || {}).text || ""
             color: root.colorForSeverity((modelData || {}).severity)
             font.family: root.segmentFontFamily
@@ -472,6 +474,7 @@ BarWidget {
             height: root.composedLineHeight
 
             Text {
+              textFormat: Text.PlainText
               id: labelItem
               visible: !token.isChart
               anchors.verticalCenter: parent.verticalCenter

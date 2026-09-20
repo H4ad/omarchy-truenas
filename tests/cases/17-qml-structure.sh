@@ -301,3 +301,53 @@ for file in "$ROOT"/Views/*.qml; do
 done
 check "every data view names the not-configured sentence (Views/Config.qml exempt)" \
   "" "${qml_unconfigured_missing# }"
+
+# ------------------------------------------------------- poll interval bounds
+# pollSeconds feeds `interval: root.pollSeconds * 1000`, and interval is an int.
+# A value at or above ~2.1M seconds overflows the product and wraps to a
+# non-positive interval, which turns the repeating Timer into a tight poll loop.
+# The ceiling has to be here as well as in the CLI and tn_load_config.
+check "Service.qml clamps pollSeconds below the int-safe ceiling" "1" \
+  "$(grep -c 'Math.min(seconds, 86400)' "$ROOT/Service.qml")"
+check "Service.qml keeps the rate-limit floor" "1" \
+  "$(grep -c 'seconds >= 15' "$ROOT/Service.qml")"
+
+# ------------------------------------------------------ forced refresh queue
+# A write's forced re-poll used to be dropped when a poll was already in flight,
+# leaving the panel on pre-write state until the independent timer fired.
+check "the panel declares a pending forced refresh" "1" \
+  "$(grep -c 'property bool forceRefreshPending' "$ROOT/Panel.qml")"
+check "refreshAfterWrite queues the request instead of dropping it" "1" \
+  "$(grep -c 'root.forceRefreshPending = true' "$ROOT/Panel.qml")"
+check "the poll's exit consumes the queued request" "1" \
+  "$(grep -c 'if (root.forceRefreshPending)' "$ROOT/Panel.qml")"
+check "both the direct and the queued path use --force-meta" "2" \
+  "$(grep -cF -- '--force-meta' "$ROOT/Panel.qml")"
+
+# ----------------------------------------------------- confirmation lifetime
+# A confirmation armed for a destructive write has to die with the panel, or
+# reopening shows the old dialog with the destructive option still selected and
+# one Enter away. Switching tabs has to close it too, not just clear the callback.
+check "closing the panel cancels the armed confirmation" "yes" \
+  "$(awk '/^  onOpenedChanged: \{/ {inside=1}
+          inside && /confirmAction\.canceled\(\)/ {found=1}
+          inside && /^  \}/ {inside=0}
+          END {print (found ? "yes" : "no")}' "$ROOT/Panel.qml")"
+check "switching view closes the confirmation dialog" "yes" \
+  "$(awk '/^  function showView\(/ {inside=1}
+          inside && /confirmAction\.canceled\(\)/ {found=1}
+          inside && /^  \}/ {inside=0}
+          END {print (found ? "yes" : "no")}' "$ROOT/Panel.qml")"
+
+# ----------------------------------------------------------- rich-text sink
+# Qt Quick's default Text.AutoText parses anything that looks like markup, and
+# the plugin renders NAS-controlled hostnames, pool names, alert text and error
+# messages. A compromised NAS could inject `<img src=...>` and make the shell
+# resolve it. Every Text in this repo therefore states PlainText explicitly; the
+# check fails on any Text whose next line is not the property.
+qml_text_plain_missing=$(printf '%s\n' "$qml_files" | while IFS= read -r file; do
+  awk '/^[ \t]*Text \{/ { getline nxt
+                           if (nxt !~ /^[ \t]*textFormat: Text\.PlainText$/)
+                             printf "%s:%d Text is not PlainText\n", FILENAME, FNR - 1 }' "$file"
+done)
+check "every Text renders as plain text, never AutoText" "" "$qml_text_plain_missing"

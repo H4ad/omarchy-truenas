@@ -51,6 +51,7 @@ Column {
     implicitHeight: Math.max(rowLabel.implicitHeight, rowValue.implicitHeight)
 
     Text {
+      textFormat: Text.PlainText
       id: rowLabel
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -61,6 +62,7 @@ Column {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: rowValue
       anchors.left: rowLabel.right
       anchors.leftMargin: Style.space(10)
@@ -76,6 +78,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: text !== ""
@@ -101,6 +104,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     text: "the bar item's own settings; the variant is written back to shell.json here"
@@ -129,6 +133,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     text: "Pick the Custom variant to draw these pieces in one item, in this "
@@ -208,6 +213,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     text: "Replacing the key runs truenasctl config set-key. It is read on stdin and "

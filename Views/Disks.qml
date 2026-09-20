@@ -117,6 +117,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLine !== ""
@@ -127,6 +128,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyText !== ""
@@ -155,6 +157,7 @@ Column {
         implicitHeight: Math.max(diskName.implicitHeight, diskTemp.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: diskName
           anchors.left: parent.left
           anchors.right: diskTemp.left
@@ -169,6 +172,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: diskTemp
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -181,6 +185,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         visible: String(modelData.model || "") !== ""
         elide: Text.ElideRight
@@ -191,6 +196,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: diskCard.detailLine !== ""
@@ -201,6 +207,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: diskCard.thresholdLine !== ""

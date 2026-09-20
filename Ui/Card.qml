@@ -47,6 +47,7 @@ Item {
     spacing: Style.space(4)
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       visible: root.title !== ""
       text: root.title

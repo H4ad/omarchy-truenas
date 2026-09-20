@@ -542,6 +542,7 @@ Ui.Panel {
             spacing: Style.spacing.sm
 
             Text {
+              textFormat: Text.PlainText
               text: Model.glyphFor(root.mode, root.counts)
               color: root.statusColor
               font.family: Style.font.family
@@ -550,6 +551,7 @@ Ui.Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               text: "TrueNAS"
               color: Color.menu.text
               font.family: Style.font.menuFamily
@@ -558,6 +560,7 @@ Ui.Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               anchors.verticalCenter: parent.verticalCenter
               text: root.manifest && root.manifest.version
                 ? String(root.manifest.version) : ""
@@ -570,6 +573,7 @@ Ui.Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: content.width
             text: root.statusText
             wrapMode: Text.WordWrap
@@ -602,6 +606,7 @@ Ui.Panel {
                 anchors.rightMargin: Style.spacing.xs
 
                 Text {
+                  textFormat: Text.PlainText
                   width: rowText.width
                   text: row.modelData.label
                   elide: Text.ElideRight
@@ -612,6 +617,7 @@ Ui.Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: rowText.width
                   text: row.modelData.detail
                   visible: row.modelData.detail !== ""
@@ -633,6 +639,7 @@ Ui.Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             id: footer
             width: content.width
             text: root.busyLabel !== "" ? root.busyLabel + "..." : root.notice

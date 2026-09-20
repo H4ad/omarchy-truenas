@@ -129,6 +129,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.servicesUrl !== ""
@@ -155,6 +156,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLine !== ""
@@ -165,6 +167,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyText !== ""
@@ -189,6 +192,7 @@ Column {
         implicitHeight: Math.max(serviceName.implicitHeight, serviceState.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: serviceName
           anchors.left: parent.left
           anchors.right: serviceState.left
@@ -203,6 +207,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: serviceState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -215,6 +220,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.enableText(modelData)
         color: modelData.enable === true ? view.panel.contentForeground : view.panel.dimForeground
@@ -234,6 +240,7 @@ Column {
           ]
 
           Text {
+            textFormat: Text.PlainText
             required property var modelData
             text: modelData.label
             visible: view.actionVisible(serviceCard.modelData, modelData.verb)

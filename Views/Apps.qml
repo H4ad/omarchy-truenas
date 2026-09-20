@@ -166,6 +166,7 @@ Column {
   // The apps page is the fallback for an app with no webui: this one line opens
   // the list, and each card offers its own webui when the poll reported one.
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.appsUrl !== ""
@@ -186,6 +187,7 @@ Column {
   // The updates summary, under the header: how many of the listed apps the NAS
   // reports an update for. Nothing at all when the count is zero.
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.updatesLine !== ""
@@ -204,6 +206,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLine !== ""
@@ -214,6 +217,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyText !== ""
@@ -243,6 +247,7 @@ Column {
         implicitHeight: Math.max(appName.implicitHeight, appState.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: appName
           anchors.left: parent.left
           anchors.right: appState.left
@@ -257,6 +262,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: appState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -269,6 +275,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: appCard.detailLine !== ""
@@ -279,6 +286,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         visible: appCard.hasUpdate
         text: "update available"
@@ -299,6 +307,7 @@ Column {
           ]
 
           Text {
+            textFormat: Text.PlainText
             required property var modelData
             text: modelData.label
             visible: view.actionVisible(appCard.modelData, modelData.verb)
@@ -319,6 +328,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: appCard.webuiUrl !== ""

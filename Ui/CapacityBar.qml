@@ -62,6 +62,7 @@ Item {
     implicitHeight: Math.max(nameLabel.implicitHeight, pctLabel.implicitHeight)
 
     Text {
+      textFormat: Text.PlainText
       id: nameLabel
       anchors.left: parent.left
       anchors.right: pctLabel.left
@@ -75,6 +76,7 @@ Item {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: pctLabel
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
@@ -111,6 +113,7 @@ Item {
   }
 
   Text {
+    textFormat: Text.PlainText
     id: sizeLabel
     anchors.left: parent.left
     anchors.right: parent.right

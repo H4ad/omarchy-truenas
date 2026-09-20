@@ -101,6 +101,7 @@ Item {
       height: root.barRowHeight
 
       Text {
+        textFormat: Text.PlainText
         id: barLabel
         anchors.centerIn: parent
         text: root.kind === "bar" ? String(root.spec.label || "") : ""

@@ -152,6 +152,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.sharesUrl !== ""
@@ -171,6 +172,7 @@ Column {
 
   // ------------------------------------------------------------------ shares
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "SHARES"
     color: view.panel.dimForeground
@@ -188,6 +190,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "SMB"
     color: view.panel.dimForeground
@@ -196,6 +199,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("smb", "SMB share list") !== ""
@@ -206,6 +210,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("smb", view.smb.length, view.smbRows.length, "SMB shares") !== ""
@@ -226,6 +231,7 @@ Column {
       fontFamily: view.panel.contentFontFamily
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.shareTitle(smbCard.modelData, true)
         color: view.panel.contentForeground
@@ -236,6 +242,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: String(smbCard.modelData.path || "path unknown")
         color: view.panel.dimForeground
@@ -245,6 +252,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.shareMarkers(smbCard.modelData)
         color: view.panel.dimForeground
@@ -255,6 +263,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "NFS"
     color: view.panel.dimForeground
@@ -263,6 +272,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("nfs", "NFS export list") !== ""
@@ -273,6 +283,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("nfs", view.nfs.length, view.nfsRows.length, "NFS exports") !== ""
@@ -293,6 +304,7 @@ Column {
       fontFamily: view.panel.contentFontFamily
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.shareTitle(nfsCard.modelData, false)
         color: view.panel.contentForeground
@@ -303,6 +315,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.shareMarkers(nfsCard.modelData)
         color: view.panel.dimForeground
@@ -313,6 +326,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "ISCSI"
     color: view.panel.dimForeground
@@ -321,6 +335,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("iscsi", "iSCSI target list") !== ""
@@ -331,6 +346,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("iscsi", view.iscsi.length, view.iscsiRows.length, "iSCSI targets") !== ""
@@ -351,6 +367,7 @@ Column {
       fontFamily: view.panel.contentFontFamily
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.shareTitle(iscsiCard.modelData, true)
         color: view.panel.contentForeground
@@ -361,6 +378,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: view.iscsiDetail(iscsiCard.modelData)
         visible: text !== ""
@@ -373,6 +391,7 @@ Column {
 
   // ----------------------------------------------------------------- network
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "NETWORK"
     color: view.panel.dimForeground
@@ -390,6 +409,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("network", "interface list") !== ""
@@ -400,6 +420,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("network", view.network.length, view.networkRows.length, "interfaces") !== ""
@@ -410,6 +431,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.interfaceSummary !== ""
@@ -434,6 +456,7 @@ Column {
         implicitHeight: Math.max(ifaceName.implicitHeight, ifaceLink.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: ifaceName
           anchors.left: parent.left
           anchors.right: ifaceLink.left
@@ -448,6 +471,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: ifaceLink
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -460,6 +484,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: String(ifaceCard.modelData.type || "type unknown") + " · " + view.mediaText(ifaceCard.modelData)
         color: view.panel.dimForeground
@@ -469,6 +494,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: view.addressText(ifaceCard.modelData)

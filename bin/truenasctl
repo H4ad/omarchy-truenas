@@ -150,10 +150,19 @@ cmd_login() {
   # The config is written before the key. A login that cannot write its config
   # must fail without leaving a new key stored behind it.
   text=$(config_read) || { unset key; return 1; }
+  # Merge into the first instance instead of replacing the array: `login` only
+  # means to move the URL, and replacing it silently drops apiKeyCommand,
+  # apiKeyFile, tag, a non-default id and every other instance. The `+` keeps
+  # the existing keys, and the explicit fields only fill what is absent.
   if ! text=$(jq --arg url "$url" --argjson insecure "$insecure_json" '
         .schema = (.schema // 1)
         | .insecureTLS = (if $insecure then true else (.insecureTLS // false) end)
-        | .instances = [ { id: "nas", label: "NAS", baseUrl: $url } ]
+        | .instances = [
+            ((.instances[0] // {})
+              + { id: (.instances[0].id // "nas"),
+                  label: (.instances[0].label // "NAS"),
+                  baseUrl: $url })
+          ] + ((.instances // [])[1:])
       ' <<<"$text"); then
     unset key
     tn_warn "could not update $(config_file)"
@@ -258,7 +267,7 @@ cmd_test() {
   fi
 
   step "reachable" "yes"
-  step "version" "$(jq -r '.version // "?"' "$body") ($(jq -r '.hostname // "?"' "$body"))"
+  step "version" "$(jq -r '.version // "?"' "$body" | tn_sanitize) ($(jq -r '.hostname // "?"' "$body" | tn_sanitize))"
   step "key" "$( ((has_key)) && printf 'set' || printf 'none' )"
   ((verbose)) && step "detail" "curl rc ${rc}, http ${code}, ${TN_TIME_MS}ms, dialect ${dialect}"
   rm -f "$body"; unset key
@@ -743,12 +752,12 @@ cmd_config_set() {
       esac
       text=$(jq --argjson v "$value" '.insecureTLS = $v' <<<"$text") ;;
     pollSeconds)
-      [[ $value =~ ^[0-9]+$ ]] && ((value >= 15)) || {
-        tn_warn "pollSeconds wants a whole number of at least 15"; return 1; }
+      [[ $value =~ ^[0-9]+$ ]] && ((value >= 15)) && ((value <= 86400)) || {
+        tn_warn "pollSeconds wants a whole number from 15 to 86400"; return 1; }
       text=$(jq --argjson v "$value" '.pollSeconds = $v' <<<"$text") ;;
     timeoutSeconds)
-      [[ $value =~ ^[0-9]+$ ]] && ((value >= 2)) || {
-        tn_warn "timeoutSeconds wants a whole number of at least 2"; return 1; }
+      [[ $value =~ ^[0-9]+$ ]] && ((value >= 2)) && ((value <= 86400)) || {
+        tn_warn "timeoutSeconds wants a whole number from 2 to 86400"; return 1; }
       text=$(jq --argjson v "$value" '.timeoutSeconds = $v' <<<"$text") ;;
     notify.*)
       name=${key#notify.}

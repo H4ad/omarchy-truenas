@@ -125,6 +125,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.alertsUrl !== ""
@@ -143,6 +144,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLine !== ""
@@ -153,6 +155,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.statusLine !== ""
@@ -194,6 +197,7 @@ Column {
             implicitHeight: Math.max(levelText.implicitHeight, bodyText.implicitHeight, actionText.implicitHeight)
 
             Text {
+              textFormat: Text.PlainText
               id: levelText
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
@@ -204,6 +208,7 @@ Column {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: bodyText
               anchors.left: levelText.right
               anchors.leftMargin: Style.space(8)
@@ -218,6 +223,7 @@ Column {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: actionText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
@@ -244,6 +250,7 @@ Column {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.WordWrap
             text: view.metaLine(alertRow.alertData)

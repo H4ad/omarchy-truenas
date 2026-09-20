@@ -122,6 +122,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.protectionUrl !== ""
@@ -141,6 +142,7 @@ Column {
 
   // ------------------------------------------------------------- replication
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "REPLICATION"
     color: view.panel.dimForeground
@@ -158,6 +160,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("replication", "replication task list") !== ""
@@ -168,6 +171,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("replication", view.replication.length, view.replicationRows.length,
@@ -201,6 +205,7 @@ Column {
         implicitHeight: Math.max(replicationName.implicitHeight, replicationState.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: replicationName
           anchors.left: parent.left
           anchors.right: replicationState.left
@@ -215,6 +220,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: replicationState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -227,6 +233,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: replicationCard.detailLine !== ""
@@ -237,6 +244,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: replicationCard.scheduleLine !== ""
@@ -247,6 +255,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: "last run " + replicationCard.runLine
@@ -256,6 +265,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         text: "run now"
         color: replicationRunMouse.containsMouse ? Color.accent : view.panel.dimForeground
         font.family: view.panel.contentFontFamily
@@ -277,6 +287,7 @@ Column {
 
   // -------------------------------------------------------------- cloud sync
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "CLOUD SYNC"
     color: view.panel.dimForeground
@@ -294,6 +305,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("cloudSync", "cloud sync task list") !== ""
@@ -304,6 +316,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("cloudSync", view.cloudSync.length, view.cloudSyncRows.length,
@@ -337,6 +350,7 @@ Column {
         implicitHeight: Math.max(cloudSyncName.implicitHeight, cloudSyncState.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: cloudSyncName
           anchors.left: parent.left
           anchors.right: cloudSyncState.left
@@ -351,6 +365,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: cloudSyncState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -363,6 +378,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: cloudSyncCard.detailLine !== ""
@@ -373,6 +389,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: cloudSyncCard.scheduleLine !== ""
@@ -383,6 +400,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: "last run " + cloudSyncCard.runLine
@@ -392,6 +410,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         text: "sync now"
         color: cloudSyncRunMouse.containsMouse ? Color.accent : view.panel.dimForeground
         font.family: view.panel.contentFontFamily
@@ -413,6 +432,7 @@ Column {
 
   // ---------------------------------------------------------- snapshot tasks
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "SNAPSHOT TASKS"
     color: view.panel.dimForeground
@@ -430,6 +450,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("snapshotTasks", "snapshot task list") !== ""
@@ -440,6 +461,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("snapshotTasks", view.snapshotTasks.length, view.snapshotRows.length,
@@ -471,6 +493,7 @@ Column {
         implicitHeight: Math.max(snapshotName.implicitHeight, snapshotState.implicitHeight)
 
         Text {
+          textFormat: Text.PlainText
           id: snapshotName
           anchors.left: parent.left
           anchors.right: snapshotState.left
@@ -485,6 +508,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: snapshotState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -497,6 +521,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: snapshotCard.scheduleLine !== ""
@@ -507,6 +532,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: snapshotCard.snapshotLine !== ""
@@ -518,6 +544,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         text: "run now"
         color: snapshotRunMouse.containsMouse ? Color.accent : view.panel.dimForeground
         font.family: view.panel.contentFontFamily
@@ -539,6 +566,7 @@ Column {
 
   // ---------------------------------------------------------------- scrubs
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     text: "SCRUB TASKS"
     color: view.panel.dimForeground
@@ -556,6 +584,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.warningLineFor("scrubs", "scrub task list") !== ""
@@ -566,6 +595,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     visible: view.emptyFor("scrubs", view.scrubs.length, view.scrubRows.length,
@@ -603,6 +633,7 @@ Column {
         implicitHeight: scrubName.implicitHeight
 
         Text {
+          textFormat: Text.PlainText
           id: scrubName
           anchors.left: parent.left
           anchors.right: parent.right
@@ -617,6 +648,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: scrubCard.detailLine
@@ -627,6 +659,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         visible: scrubCard.scheduleLine !== ""
@@ -637,6 +670,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         text: "start scrub"
         color: scrubRunMouse.containsMouse ? Color.accent : view.panel.dimForeground
         font.family: view.panel.contentFontFamily

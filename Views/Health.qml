@@ -191,6 +191,7 @@ Column {
   // green-ish for a healthy poll, urgent for no answer, accent for setup and
   // for a partial answer.
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.WordWrap
     text: view.statusLine
@@ -210,6 +211,7 @@ Column {
       model: view.warnings
 
       Text {
+        textFormat: Text.PlainText
         required property var modelData
         width: parent.width
         wrapMode: Text.WordWrap
@@ -230,6 +232,7 @@ Column {
     visible: view.nasState !== null && !view.unconfigured
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       wrapMode: Text.WordWrap
       visible: view.system === null
@@ -262,6 +265,7 @@ Column {
     visible: view.poolsKnown
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       wrapMode: Text.WordWrap
       visible: view.pools.length === 0
@@ -280,6 +284,7 @@ Column {
         spacing: Style.space(2)
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: String(modelData.status || "") !== ""
             ? String(modelData.status) : "status unknown"
@@ -330,6 +335,7 @@ Column {
           spacing: Style.space(1)
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: modelData.count === null ? "?" : String(modelData.count)
@@ -345,6 +351,7 @@ Column {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: modelData.level
@@ -357,6 +364,7 @@ Column {
     }
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       wrapMode: Text.WordWrap
       visible: !view.countsKnown
@@ -384,6 +392,7 @@ Column {
         implicitHeight: worstText.implicitHeight + Style.space(6)
 
         Text {
+          textFormat: Text.PlainText
           id: worstLevel
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
@@ -395,6 +404,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: worstText
           anchors.left: worstLevel.right
           anchors.leftMargin: Style.space(6)
@@ -409,6 +419,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           id: worstAge
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
@@ -432,6 +443,7 @@ Column {
     implicitHeight: Math.max(rowLabel.implicitHeight, rowValue.implicitHeight)
 
     Text {
+      textFormat: Text.PlainText
       id: rowLabel
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -442,6 +454,7 @@ Column {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: rowValue
       anchors.left: rowLabel.right
       anchors.leftMargin: Style.space(10)

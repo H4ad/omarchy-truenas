@@ -215,6 +215,7 @@ Item {
             height: headTitle.implicitHeight
 
             Text {
+              textFormat: Text.PlainText
               id: headTitle
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
@@ -226,6 +227,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: "✕"
@@ -245,6 +247,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "Esc closes this. Up and down scroll it."
             color: root.dimForeground
@@ -292,6 +295,7 @@ Item {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: modelData.note !== ""
                   text: modelData.note
@@ -318,6 +322,7 @@ Item {
                       : Math.max(termName.implicitHeight, termText.implicitHeight)) + Style.space(3)
 
                     Text {
+                      textFormat: Text.PlainText
                       id: termName
                       anchors.left: parent.left
                       anchors.top: parent.top
@@ -330,6 +335,7 @@ Item {
                     }
 
                     Text {
+                      textFormat: Text.PlainText
                       id: termText
                       anchors.left: termRow.stacked ? parent.left : termName.right
                       anchors.leftMargin: termRow.stacked ? 0 : Style.space(8)
