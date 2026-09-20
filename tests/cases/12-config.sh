@@ -205,6 +205,22 @@ check "the file holds no raw ESC" 0 "$(grep -c $'\x1b' "$WORK/clean.json")"
 check "ordinary text is untouched" "café" "$(jq -r '.ok' "$WORK/clean.json")"
 teardown
 
+test_case "tn_load_config validates the redact level"
+setup
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "redact": "names", "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "a valid level passes through" names "$(tn_load_config | jq -r '.redact')"
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "redact": "verbose", "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "an unknown level falls back to off" off "$(tn_load_config | jq -r '.redact')"
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "redact": 3, "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "a non-string level falls back to off" off "$(tn_load_config | jq -r '.redact')"
+teardown
+
 test_case "tn_sanitize strips the escape byte and leaves the rest"
 setup
 check "the ESC byte is removed" "ab" "$(printf 'a\x1bb' | tn_sanitize)"

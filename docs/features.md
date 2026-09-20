@@ -100,9 +100,16 @@ where the alert allows it. Dismiss is confirmed.
 
 **Config.** The bar item's settings plus a read-out of the NAS setup. The variant
 is written back to `shell.json`; the API key is entered through a masked field,
-written on stdin, and never shown back. `pollSeconds`, `timeoutSeconds` and
-`insecureTLS` are displayed but changed through `truenasctl config set` or by
-hand.
+written on stdin, and never shown back. `pollSeconds`, `timeoutSeconds`,
+`insecureTLS` and `redact` are displayed and changed through `truenasctl config
+set` or the controls here.
+
+**Recording.** A `redact` level hides identifying values while you record or
+screenshot: `network` (addresses, hostnames, the base URL), `names` (adds pools,
+datasets, shares, apps, disks, interfaces and tasks) or `all` (adds the version
+and hides free-form alert text). Each hidden value prints as a stable fake, so
+the same pool is the same token everywhere. It is display only: the state and
+credential files keep the real values and links still open the real NAS.
 
 Every list view has a filter, and every data view names the not-configured state
 separately, so a NAS with no key never looks like a NAS with nothing on it. A

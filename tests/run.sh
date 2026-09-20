@@ -26,7 +26,7 @@ shell_ok=$((FAIL == 0 ? 0 : 1))
 # than one that fails.
 model_ok=0
 if command -v node >/dev/null 2>&1; then
-  for suite in model search bar-variants links; do
+  for suite in model search bar-variants links redact; do
     # A named suite whose file is missing is a failure, not a skip. Continuing
     # here is how the links suite sat registered and unrun while the summary
     # said every suite was green.

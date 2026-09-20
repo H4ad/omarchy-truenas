@@ -7,6 +7,7 @@ import qs.Ui
 import qs.Ui as Ui
 import "Model.js" as Model
 import "Links.js" as Links
+import "Redact.js" as Redact
 
 // The summoned menu surface: `omarchy-shell shell summon io.github.h4ad.truenas`
 // lands here rather than on the bar item, so the popout itself stays on
@@ -30,8 +31,11 @@ Ui.Panel {
   property var shell: null
   property var manifest: null
 
-  // What the last poll wrote to state.json, and nothing else.
-  property var snapshot: null
+  // What the last poll wrote to state.json, and nothing else. Redacted for
+  // display, the same way the bar redacts it, so a recording cannot leak a value
+  // the bar hid.
+  property var rawSnapshot: null
+  property var snapshot: Redact.apply(root.rawSnapshot, root.redactLevel)
   property int selectedIndex: 0
   property string busyLabel: ""
   property string notice: ""
@@ -177,6 +181,20 @@ Ui.Panel {
       ? String(widget.configuredBase() || "")
       : ""
   }
+
+  // The level the bar widget resolved, so the menu and the bar never disagree
+  // about what is hidden. The widget is the single reader of config.json.
+  readonly property string redactLevel:
+    Redact.normalize(root.widgetRedactLevel())
+
+  function widgetRedactLevel() {
+    var widget = root.panelWidget()
+    return widget && widget.redactLevel !== undefined ? String(widget.redactLevel) : ""
+  }
+
+  // The base URL as printed, never as linked: dashboardUrl() keeps the real one.
+  readonly property string displayBase:
+    Redact.url(root.baseUrl, root.redactLevel)
 
   readonly property color statusColor: {
     if (!root.snapshot || !root.configured) return Color.menu.text
@@ -333,7 +351,7 @@ Ui.Panel {
   readonly property string configText: {
     if (!root.snapshot) return ""
     if (!root.configured) return "not configured yet"
-    return root.baseUrl !== "" ? root.baseUrl : "no base URL set"
+    return root.displayBase !== "" ? root.displayBase : "no base URL set"
   }
 
   readonly property string pollText: root.snapshot
@@ -359,7 +377,7 @@ Ui.Panel {
     ]
     if (root.dashboardUrl() !== "")
       list.push({ kind: "open", args: [], label: "Open the NAS UI",
-                  detail: Links.baseUrl(root.baseUrl) })
+                  detail: Links.baseUrl(root.displayBase) })
     return list
   }
 
@@ -457,13 +475,13 @@ Ui.Panel {
     printErrors: false
     onLoaded: {
       try {
-        root.snapshot = JSON.parse(text())
+        root.rawSnapshot = JSON.parse(text())
       } catch (e) {
-        root.snapshot = null
+        root.rawSnapshot = null
       }
     }
     onFileChanged: reload()
-    onLoadFailed: root.snapshot = null
+    onLoadFailed: root.rawSnapshot = null
   }
 
   Process {

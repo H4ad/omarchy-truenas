@@ -119,6 +119,13 @@ tn_load_config() {
       pollSeconds:     ((.pollSeconds // 30) | if type == "number" then (if . < 15 then 15 elif . > 86400 then 86400 else . end) else 30 end),
       timeoutSeconds:  ((.timeoutSeconds // 8) | if type == "number" then (if . < 2 then 2 elif . > 86400 then 86400 else . end) else 8 end),
       insecureTLS:     (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
+      # Display-only redaction level for recording and screenshots. A value
+      # outside the enum is "off", so a hand-edited config cannot switch on a
+      # level the display code does not know. It changes nothing on disk.
+      redact:          (.redact as $r
+                        | if ($r | type) == "string"
+                             and (["off", "network", "names", "all"] | index($r)) != null
+                          then $r else "off" end),
       notify: {
         levels:                        (.notify.levels // ["critical","error","warning"]),
         # `//` treats an explicit false as absent, and false is the whole point

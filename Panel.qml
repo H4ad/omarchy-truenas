@@ -7,6 +7,7 @@ import "Views" as Views
 import "Ui" as Local
 import "Model.js" as Model
 import "Links.js" as Links
+import "Redact.js" as Redact
 
 // The popout. A shell and a write queue, plus the seven views.
 //
@@ -46,6 +47,12 @@ Panel {
   property bool forceRefreshPending: false
 
   readonly property var barIdentity: hostWidget || root
+
+  // The config.json the panel reads itself carries the redaction level. The state
+  // arrives already redacted from the bar widget; only the config list this panel
+  // loads for the Config view needs it applied here.
+  readonly property string redactLevel:
+    Redact.normalize(root.configDoc ? root.configDoc.redact : "off")
 
   readonly property var counts: (state && state.counts) || ({})
   readonly property var pools: (state && Model.arrayLike(state.pools)) ? state.pools : []
@@ -197,7 +204,7 @@ Panel {
     root.busyVerb = "config"
     root.runCtl(["config", "list"], function(result) {
       if (!root) return
-      root.configData = result
+      root.configData = Redact.applyConfig(result, root.redactLevel)
       root.busyVerb = ""
     })
   }

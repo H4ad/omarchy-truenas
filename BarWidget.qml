@@ -6,6 +6,7 @@ import qs.Ui
 import "Model.js" as Model
 import "BarVariants.js" as BarVariants
 import "Links.js" as Links
+import "Redact.js" as Redact
 import "Ui" as Local
 
 // The bar item. A read-only watcher of the state file the service writes: it
@@ -39,7 +40,13 @@ BarWidget {
       + "/omarchy/truenas/config.json"
   }
 
-  property var state: null
+  property var rawState: null
+  // The redaction level, read off the same config.json the base URL comes from.
+  // The state is redacted as a binding, not once at parse time, so a level change
+  // takes effect on the already-loaded file without waiting for the next poll.
+  readonly property string redactLevel:
+    Redact.normalize(root.configDoc ? root.configDoc.redact : "off")
+  property var state: Redact.apply(root.rawState, root.redactLevel)
   property var configDoc: null
   property var history: null
   property int nowTick: 0
@@ -266,11 +273,18 @@ BarWidget {
     return String(list[0].baseUrl || "")
   }
 
+  // The base URL for a printed row, never for a link: the menu shows this and
+  // builds its dashboard URL from configuredBase(), so redaction hides the value
+  // without breaking the jump.
+  function displayBase() {
+    return Redact.url(root.configuredBase(), root.redactLevel)
+  }
+
   function applyState(text) {
     try {
-      root.state = JSON.parse(String(text || "null"))
+      root.rawState = JSON.parse(String(text || "null"))
     } catch (e) {
-      root.state = null
+      root.rawState = null
     }
   }
 

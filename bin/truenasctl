@@ -732,6 +732,10 @@ cmd_config_list() {
         instance: (if $i == null then null
                    else { id: ($i.id // "nas"), label: ($i.label // "NAS"), baseUrl: ($i.baseUrl // "") } end),
         insecureTLS: (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
+        redact: (.redact as $r
+                 | if ($r | type) == "string"
+                      and (["off", "network", "names", "all"] | index($r)) != null
+                   then $r else "off" end),
         pollSeconds: (.pollSeconds // 30),
         timeoutSeconds: (.timeoutSeconds // 8),
         notify: (.notify // {}),
@@ -751,6 +755,12 @@ cmd_config_set() {
         *) tn_warn "insecureTLS takes true or false"; return 1 ;;
       esac
       text=$(jq --argjson v "$value" '.insecureTLS = $v' <<<"$text") ;;
+    redact)
+      case $value in
+        off|network|names|all) ;;
+        *) tn_warn "redact takes off, network, names or all"; return 1 ;;
+      esac
+      text=$(jq --arg v "$value" '.redact = $v' <<<"$text") ;;
     pollSeconds)
       [[ $value =~ ^[0-9]+$ ]] && ((value >= 15)) && ((value <= 86400)) || {
         tn_warn "pollSeconds wants a whole number from 15 to 86400"; return 1; }
@@ -769,7 +779,7 @@ cmd_config_set() {
       esac
       text=$(jq --arg n "$name" --argjson v "$jv" \
         '.notify = ((.notify // {}) | .[$n] = $v)' <<<"$text") ;;
-    *) tn_warn "unknown setting $key (try insecureTLS, pollSeconds, timeoutSeconds, notify.<field>)"; return 1 ;;
+    *) tn_warn "unknown setting $key (try insecureTLS, redact, pollSeconds, timeoutSeconds, notify.<field>)"; return 1 ;;
   esac
   printf '%s' "$text" | write_config || return 1
   printf '%s is now %s\n' "$key" "$value"

@@ -24,7 +24,7 @@ qml_files=$(find "$ROOT" -name '*.qml' -not -path '*/.git/*' | sort)
 # that imports a script gets its own private copy of it, so a write in one
 # importer is invisible to another. The directive has to be the first line of
 # the file. Behaviour check in 18-qml-runtime.sh.
-for script in Model.js Links.js Search.js BarVariants.js; do
+for script in Model.js Links.js Search.js BarVariants.js Redact.js; do
   check "$script has .pragma library as line 1" \
     ".pragma library" "$(head -n 1 "$ROOT/$script")"
 done
@@ -351,3 +351,28 @@ qml_text_plain_missing=$(printf '%s\n' "$qml_files" | while IFS= read -r file; d
                              printf "%s:%d Text is not PlainText\n", FILENAME, FNR - 1 }' "$file"
 done)
 check "every Text renders as plain text, never AutoText" "" "$qml_text_plain_missing"
+
+# ------------------------------------------------------------------ redaction
+# Redaction is display-only and is applied at the three JSON.parse sites, so a
+# recording cannot leak a value one surface hid and another printed. A missed
+# site is invisible to every other suite: the file still compiles and the node
+# suite loads Redact.js alone. The real value has to survive for links, so the
+# menu and widget keep the raw base URL beside the redacted one.
+check "Redact.js is the shared redaction module" "yes" \
+  "$([[ -f "$ROOT/Redact.js" ]] && echo yes)"
+check "BarWidget redacts the state it renders" "1" \
+  "$(grep -c 'property var state: Redact.apply(root.rawState, root.redactLevel)' "$ROOT/BarWidget.qml")"
+check "BarWidget parses into the raw state, not the redacted one" "1" \
+  "$(grep -c 'root.rawState = JSON.parse' "$ROOT/BarWidget.qml")"
+check "BarWidget redacts only the printed base URL" "1" \
+  "$(grep -c 'Redact.url(root.configuredBase(), root.redactLevel)' "$ROOT/BarWidget.qml")"
+check "Panel redacts the config list it shows" "1" \
+  "$(grep -c 'Redact.applyConfig(result, root.redactLevel)' "$ROOT/Panel.qml")"
+check "Menu redacts the state it renders" "1" \
+  "$(grep -c 'property var snapshot: Redact.apply(root.rawSnapshot, root.redactLevel)' "$ROOT/Menu.qml")"
+check "Menu keeps the real base URL for links" "1" \
+  "$(grep -c 'return Links.dashboardUrl(root.baseUrl)' "$ROOT/Menu.qml")"
+check "the config view offers every redaction level" "1" \
+  "$(grep -c 'model: Redact.LEVELS' "$ROOT/Views/Config.qml")"
+check "the config view writes the level through the CLI" "1" \
+  "$(grep -c '"config", "set", "redact"' "$ROOT/Views/Config.qml")"

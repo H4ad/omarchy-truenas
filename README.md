@@ -87,9 +87,9 @@ rejected, forbidden, not JSON, timed out) rather than reporting a generic error.
 ## Configuration
 
 Settings live in `~/.config/omarchy/truenas/config.json`. The panel shows them;
-only the bar variant and the API key are editable there. `baseUrl` is written by
-`login`, `insecureTLS`, `pollSeconds` and `timeoutSeconds` by
-`truenasctl config set`, and the `notify` block by hand.
+the bar variant, the API key and the redaction level are editable there.
+`baseUrl` is written by `login`, `insecureTLS`, `pollSeconds`, `timeoutSeconds`
+and `redact` by `truenasctl config set`, and the `notify` block by hand.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -97,6 +97,7 @@ only the bar variant and the API key are editable there. `baseUrl` is written by
 | `pollSeconds` | 30 | Fast poll interval, floored at 15 (the API rate limit) |
 | `timeoutSeconds` | 8 | Per-request timeout |
 | `insecureTLS` | false | Skip certificate verification (explicit opt-in) |
+| `redact` | off | Display-only: hide identifying values for recording |
 | `notify.levels` | critical, error, warning | Alert levels that toast |
 
 The bar item's own settings (variant, `hideWhenHealthy`, `panelWidth`) are
@@ -152,6 +153,15 @@ yourself; it runs only to fetch the key, and if you do not set it nothing runs.
 fields before caching, so disk serials, replication SSH credentials and
 encryption keys, cloud sync secrets, app image ids and notes, SMB audit/options
 blobs, NFS hosts/networks, iSCSI parameters and interface MACs never reach disk.
+
+**Can I record a demo without showing my hostname or pool names?** Set `redact` to
+`network`, `names` or `all` (`truenasctl config set redact names`, or the Config
+tab). It is display only: the bar, menu and panel print a stable fake for the
+values each level hides, while `config.json`, the credentials file and every
+state file keep the real ones, and links still open the real NAS. `network` hides
+addresses, hostnames and the base URL; `names` adds pools, datasets, shares,
+apps, disks, interfaces and tasks; `all` adds the version and hides free-form
+alert text. Use it for a recording, then set it back to `off`.
 
 **What can it change on the NAS?** Only what you confirm in the popout:
 start, stop or restart a service, start, stop or redeploy an app, dismiss or

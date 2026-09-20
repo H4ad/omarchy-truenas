@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../Ui" as Local
+import "../Redact.js" as Redact
 
 // Configuration for this bar item. Two different things live here and the view
 // keeps them apart:
@@ -42,6 +43,24 @@ Column {
     if (!view.config) return "…"
     var value = view.config[name]
     return value === undefined || value === null ? String(fallback) : String(value)
+  }
+
+  function redactLevel() {
+    return Redact.normalize(view.config ? view.config.redact : "off")
+  }
+
+  // One setting, written the same way the CLI writes it, so a recording can be
+  // set up from here and undone from a terminal.
+  function setRedact(value) {
+    view.keyError = ""
+    view.keyNotice = ""
+    view.panel.runCtl(["config", "set", "redact", value], function() {
+      view.panel.loadConfig()
+    }, function(result) {
+      view.keyError = result && result.message
+        ? String(result.message)
+        : "could not change the redaction level"
+    })
   }
 
   component InfoRow: Item {
@@ -242,5 +261,61 @@ Column {
       view.keyError = message
     }
     onCanceled: {}
+  }
+
+  PanelSeparator { width: parent.width }
+
+  PanelSectionHeader {
+    text: "RECORDING"
+    foreground: view.panel.contentForeground
+    fontFamily: view.panel.contentFontFamily
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    text: "Hide identifying values while you record or screenshot. Display only: "
+      + "the state and credential files keep the real values, and links still "
+      + "open the real NAS."
+    color: view.panel.dimForeground
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Row {
+    width: parent.width
+    spacing: Style.space(12)
+
+    Repeater {
+      model: Redact.LEVELS
+
+      Text {
+        textFormat: Text.PlainText
+        required property var modelData
+        readonly property bool active: view.redactLevel() === modelData
+        text: modelData
+        color: active
+          ? Color.accent
+          : (redactMouse.containsMouse ? view.panel.contentForeground : view.panel.dimForeground)
+        font.family: view.panel.contentFontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: active
+
+        MouseArea {
+          id: redactMouse
+          anchors.fill: parent
+          anchors.margins: -Style.space(4)
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: view.setRedact(modelData)
+        }
+      }
+    }
+  }
+
+  InfoRow {
+    label: "hides"
+    value: Redact.describe(view.redactLevel())
   }
 }

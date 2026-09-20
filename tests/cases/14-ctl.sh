@@ -126,6 +126,7 @@ out=$(ctl config list)
 check "keySet true" true "$(jq -r '.keySet' <<<"$out")"
 check "insecureTLS true" true "$(jq -r '.insecureTLS' <<<"$out")"
 check "pollSeconds default" 30 "$(jq -r '.pollSeconds' <<<"$out")"
+check "redact default off" off "$(jq -r '.redact' <<<"$out")"
 check "notify is an object" object "$(jq -r '.notify | type' <<<"$out")"
 check "the instance base" https://nas.example "$(jq -r '.instance.baseUrl' <<<"$out")"
 check "the base url is not repeated at the top level" false "$(jq 'has("baseUrl")' <<<"$out")"
@@ -137,6 +138,12 @@ setup
 single_instance_config
 ctl config set insecureTLS false >/dev/null
 check "insecureTLS off" false "$(jq -r '.insecureTLS' "$TRUENAS_CONFIG_FILE")"
+ctl config set redact names >/dev/null
+check "redact set" names "$(jq -r '.redact' "$TRUENAS_CONFIG_FILE")"
+check "an unknown redact level is refused" 1 \
+  "$(ctl config set redact verbose >/dev/null 2>&1; echo $?)"
+check "the refusal left redact alone" names \
+  "$(jq -r '.redact' "$TRUENAS_CONFIG_FILE")"
 ctl config set pollSeconds 60 >/dev/null
 check "pollSeconds set" 60 "$(jq -r '.pollSeconds' "$TRUENAS_CONFIG_FILE")"
 check "a non-number pollSeconds is refused" 1 \
