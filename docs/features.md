@@ -177,9 +177,11 @@ change lands on the first; give each a different variant, or use Bar Settings.
 
 ## Screenshot
 
-`preview.png` is a live screenshot of the bar item and the Health popout taken
-against a real TrueNAS 25.10.6. It shows the `Default` bar variant and real pool
-capacity; the disk serial in the alert text is cropped out on purpose.
+`preview.png` is the Health tab of the popout, taken against a real TrueNAS
+25.10.6 at `redact: network`: the connection line, the system block, the pool
+capacity bars and the alert counts. It is byte-identical to
+`docs/screenshots/health.png`, and it is the image the marketplace shows as the
+plugin card.
 
 `docs/screenshots/` holds one capture per popout tab, and the README shows all
 of them: Health alone, then a strip of the other eight. They were taken over IPC,

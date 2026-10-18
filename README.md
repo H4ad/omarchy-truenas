@@ -50,34 +50,76 @@ fails or recovers. Toasts are deduped, so a network blip does not replay them.
 - TrueNAS SCALE 25.10. The REST `/api/v2.0` API this plugin uses is removed in
   TrueNAS 26; see [docs/websocket-migration.md](docs/websocket-migration.md).
 - One NAS and one API key.
+- `curl`, `jq` and `xdg-open` on `PATH`. `jq` is in Omarchy's base package list,
+  and `curl` and `xdg-utils` come with a desktop install. The poller and the CLI
+  need all three; the CLI names a missing `jq` or `xdg-open` rather than failing
+  silently.
 
 ## Install
 
-The plugin is not published yet. There is no marketplace listing and no public
-repository, so install from a local checkout:
+The repository is public. Install from it:
+
+```
+omarchy plugin add https://github.com/h4ad/omarchy-truenas.git --enable
+```
+
+That clones the current `master` and enables the bar item. The marketplace
+listing is not live yet; once it is, the same command is built from the listing.
+
+Working on the plugin itself, install from a local checkout instead. It copies
+the tree into `~/.config/omarchy/plugins/` and leaves out the files users do not
+need:
 
 ```
 ./scripts/dev-install --restart
 ```
 
 `--restart` is needed because the shell caches compiled QML per URL; a rescan
-alone does not reload an open panel. If the plugin is published later, the
-marketplace listing and
-`omarchy plugin add https://github.com/h4ad/omarchy-truenas.git --enable` are the
-intended paths.
+alone does not reload an open panel.
 
 ## Setup
 
-Point the plugin at your NAS. The API key is read on stdin so it never reaches
-the command line:
+The CLI lives inside the plugin folder, so put it on `PATH` once:
+
+```
+ln -s ~/.config/omarchy/plugins/io.github.h4ad.truenas/bin/truenasctl ~/.local/bin/truenasctl
+```
+
+Then point the plugin at your NAS. The API key is read on stdin so it never
+reaches the command line:
 
 ```
 truenasctl login https://<host>[:<port>]
 ```
 
-The key is stored at mode 600. After login, the bar and popout read the state the
-poller writes. Add `--insecure` to `login` only if your NAS uses a self-signed
+Without the symlink, run it as
+`~/.config/omarchy/plugins/io.github.h4ad.truenas/bin/truenasctl`. The key is
+stored at mode 600. After login, the bar and popout read the state the poller
+writes. Add `--insecure` to `login` only if your NAS uses a self-signed
 certificate your desktop does not trust.
+
+## Remove
+
+Clear the local config first, while the CLI is still on disk:
+
+```
+truenasctl purge
+```
+
+`purge` deletes `~/.config/omarchy/truenas/` (the config and the API key) and
+`~/.local/state/omarchy/truenas/` (the poll state). Then drop the plugin, which
+takes the item out of `shell.json` and deletes
+`~/.config/omarchy/plugins/io.github.h4ad.truenas`, CLI included:
+
+```
+omarchy plugin remove io.github.h4ad.truenas
+rm -f ~/.local/bin/truenasctl
+```
+
+The last line removes the symlink from Setup, if you made one. If you skip the
+symlink, run `purge` as
+`~/.config/omarchy/plugins/io.github.h4ad.truenas/bin/truenasctl purge` and do it
+before the plugin is removed, because the CLI lives in the plugin folder.
 
 ## The CLI
 
