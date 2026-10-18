@@ -22,7 +22,7 @@ mkdir -p "$DEST"
 # Copy every top-level entry except the deny-list. Listing what to *include*
 # instead means a new top-level runtime file is silently left out of the
 # install; a new file inside a copied directory is already covered.
-DENY=(.git .agent docs tests scripts preview.png .gitignore)
+DENY=(.git .agent docs tests scripts preview.png .gitignore .deepsec)
 for entry in "$ROOT"/* "$ROOT"/.[!.]*; do
   [[ -e $entry ]] || continue
   name=$(basename "$entry")
