@@ -180,6 +180,13 @@ change lands on the first; give each a different variant, or use Bar Settings.
 `preview.png` is a live screenshot of the bar item and the Health popout taken
 against a real TrueNAS 25.10.6. It shows the `Default` bar variant and real pool
 capacity; the disk serial in the alert text is cropped out on purpose.
+
+`docs/screenshots/` holds one capture per popout tab, and the README shows all
+of them: Health alone, then a strip of the other eight. They were taken over IPC,
+one `omarchy-shell ... view <tab>` call each, then the card cropped out of a
+full-screen capture, because the panel is a full-screen layer surface and
+`slurp` would mean nine manual drags.
+
 `scripts/screenshot` opens the panel over IPC and captures a region you drag with
 `slurp`; run it by hand on a real session to refresh the image. It is a desk
 helper, not part of the installed tree.

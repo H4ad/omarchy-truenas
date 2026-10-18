@@ -4,10 +4,19 @@ TrueNAS pool health, disk temperatures and active alerts on the Omarchy bar, wit
 desktop notifications when something degrades and a popout that also covers
 protection, shares and network.
 
-![The TrueNAS bar item and Health popout](preview.png)
+![The Health tab: the connection line, system, pool capacity bars and the alert counts](docs/screenshots/health.png)
 
 Verified against a live TrueNAS 25.10.6 with two pools, real alert levels and a
-self-signed certificate.
+self-signed certificate. Every capture is that machine, taken at `redact:
+network` so addresses and hostnames print as stable fakes.
+
+| Pools | Disks | Alerts | Shares |
+| --- | --- | --- | --- |
+| [![Pools tab: one card per pool, with capacity, used space and scrub state](docs/screenshots/pools.png)](docs/screenshots/pools.png) | [![Disks tab: one card per disk, with model, media type and temperature](docs/screenshots/disks.png)](docs/screenshots/disks.png) | [![Alerts tab: a count per alert level, and a warning whose addresses are faked](docs/screenshots/alerts.png)](docs/screenshots/alerts.png) | [![Shares tab: SMB and NFS shares, and the network interfaces](docs/screenshots/shares.png)](docs/screenshots/shares.png) |
+
+| Services | Apps | Protection | Config |
+| --- | --- | --- | --- |
+| [![Services tab: every service with its state, and start and restart](docs/screenshots/services.png)](docs/screenshots/services.png) | [![Apps tab: every app, its version, and update, stop and redeploy](docs/screenshots/apps.png)](docs/screenshots/apps.png) | [![Protection tab: replication, cloud sync and snapshot tasks with their last result](docs/screenshots/protection.png)](docs/screenshots/protection.png) | [![Config tab: the bar variant picker and the custom pieces it composes](docs/screenshots/config.png)](docs/screenshots/config.png) |
 
 ## What it does
 
