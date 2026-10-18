@@ -202,8 +202,75 @@ function addValue(map, kind, value) {
   }
 }
 
+// ----------------------------------------------------------- prose masking
+
+// The field map substitutes a value it has seen as a field. A value written only
+// inside free-form prose is invisible to it: an alert that lists the clients
+// hitting the API names addresses that appear nowhere else in the state, and
+// those are the ones worth hiding. So prose gets its own pass over the three
+// shapes a field map cannot see: a URL authority, a dotted quad, an IPv6 literal.
+
+// A URL keeps its scheme, port and path. `redactUrl` is the function the printed
+// base URL already goes through, so a host reads the same way wherever it is.
+var PROSE_URL = /[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\/\s<>"')\]]+[^\s<>"')\]]*/g;
+
+// A dotted quad with an optional prefix length.
+var PROSE_V4 = /(\d{1,3}(?:\.\d{1,3}){3})(\/\d{1,3})?/g;
+
+// Two or more colon-separated groups. A clock time has that shape too, so the
+// caller keeps a candidate only when it carries a hex letter or a "::".
+var PROSE_V6 = /[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,}(?:\/\d{1,3})?/g;
+
+// True when a match stands alone: neither neighbour continues the same token.
+// A five-part version is never cut into a four-part address, and a v4-mapped
+// IPv6 literal ("::ffff:10.0.0.7") is not left half rewritten.
+function standalone(whole, offset, length) {
+  var before = offset > 0 ? whole.charAt(offset - 1) : "";
+  var after = whole.charAt(offset + length);
+  if (/[0-9a-fA-F.]/.test(before)) return false;
+  if (/[0-9a-fA-F]/.test(after)) return false;
+  // A full stop continues the token only when a digit follows it: "1.2.3.4.5"
+  // is a version, while "1.2.3.4." ending a sentence is an address.
+  if (after === "." && /[0-9]/.test(whole.charAt(offset + length + 1))) return false;
+  return true;
+}
+
+function maskUrls(text) {
+  return String(text).replace(PROSE_URL, function (url) { return redactUrl(url); });
+}
+
+function maskIPv4(text) {
+  return String(text).replace(PROSE_V4, function (all, addr, cidr, offset, whole) {
+    if (!standalone(whole, offset, all.length)) return all;
+    var octets = addr.split(".");
+    for (var i = 0; i < octets.length; i++)
+      if (Number(octets[i]) > 255) return all;
+    // Loopback and the unspecified address name no host, so faking them would
+    // put a plausible address where the alert said "this machine". The fake
+    // range is skipped so this pass is never run over its own output.
+    if (Number(octets[0]) === 127 || addr === "0.0.0.0") return all;
+    if (addr.indexOf("192.0.2.") === 0) return all;
+    return ipName(all);
+  });
+}
+
+function maskIPv6(text) {
+  return String(text).replace(PROSE_V6, function (all, offset, whole) {
+    if (!standalone(whole, offset, all.length)) return all;
+    // A clock time ("17:24:50") carries neither, a MAC address carries a letter
+    // and is worth hiding anyway.
+    if (!/[a-fA-F]/.test(all) && all.indexOf("::") === -1) return all;
+    if (/^2001:db8:/i.test(all)) return all;
+    return ipName(all);
+  });
+}
+
+function maskProse(text) {
+  return maskIPv4(maskIPv6(maskUrls(text)));
+}
+
 function substitute(text, map) {
-  var out = String(text);
+  var out = maskProse(String(text));
   var keys = [];
   for (var key in map) keys.push(key);
   // Longest first: replacing "storage" before "storage/media" would leave a

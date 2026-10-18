@@ -108,7 +108,9 @@ set` or the controls here.
 screenshot: `network` (addresses, hostnames, the base URL), `names` (adds pools,
 datasets, shares, apps, disks, interfaces and tasks) or `all` (adds the version
 and hides free-form alert text). Each hidden value prints as a stable fake, so
-the same pool is the same token everywhere. It is display only: the state and
+the same pool is the same token everywhere. An address or a URL host written
+inside prose is faked too, because that is where an alert lists the clients that
+hit the API and those appear in no field. It is display only: the state and
 credential files keep the real values and links still open the real NAS.
 
 Every list view has a filter, and every data view names the not-configured state

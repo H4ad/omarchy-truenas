@@ -338,6 +338,22 @@ Watch the file modes: a plain `cp` restores a file without the modes `tn_write_a
 sets. Anything that touches the credentials or config file has to go through the
 atomic write, which chmods before renaming.
 
+### A field map cannot see prose
+
+Redaction substitutes a value it has seen as a field, and a value written only
+inside free-form text is invisible to that map. An alert body that lists the
+clients hitting the REST API names addresses that exist nowhere else in the
+state, so they survived every level while the NAS's own addresses in the same
+sentence were faked.
+
+Do: keep the prose pass in `Redact.js` (`maskProse`), which runs over every
+free-form text value before the field map does: a URL authority goes through
+`redactUrl`, a dotted quad and an IPv6 literal through `ipName`. A new free-form
+field needs a `text` entry in `kindFor` to reach it. Two shapes stay readable on
+purpose: loopback and `0.0.0.0` name no host, and a clock time or a three-part
+version is not an address. Test with an address that is in no field, or the
+suite passes while the leak is live.
+
 ## TrueNAS
 
 ### A self-signed certificate is the default, and `insecureTLS` is never guessed

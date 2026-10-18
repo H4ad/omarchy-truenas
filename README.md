@@ -161,7 +161,9 @@ values each level hides, while `config.json`, the credentials file and every
 state file keep the real ones, and links still open the real NAS. `network` hides
 addresses, hostnames and the base URL; `names` adds pools, datasets, shares,
 apps, disks, interfaces and tasks; `all` adds the version and hides free-form
-alert text. Use it for a recording, then set it back to `off`.
+alert text. An address or a URL host written inside prose, which is where an
+alert lists the clients that hit the API, is faked too, even when it appears in
+no field. Use it for a recording, then set it back to `off`.
 
 **What can it change on the NAS?** Only what you confirm in the popout:
 start, stop or restart a service, start, stop or redeploy an app, dismiss or

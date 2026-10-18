@@ -169,6 +169,41 @@ test_case("all hides the version and free text");
   check("an empty text stays empty", "", Redact.apply({ alerts: [{ text: "" }] }, "all").alerts[0].text);
 }
 
+test_case("an address written only in prose is faked");
+{
+  // The field map only substitutes a value it has seen as a field. A client
+  // address in an alert body is in no field, which is the case the other suites
+  // miss: their sample always carries the address it looks for.
+  const state = {
+    network: [ { name: "enp4s0", addresses: [ { address: "192.168.15.2", netmask: 24 } ] } ],
+    alerts: [ { level: "warning", uuid: "u1", text: "authenticated 12 times from "
+      + "127.0.0.1, 192.168.15.2 and 192.168.15.99. The REST API goes in version "
+      + "25.10.6, build 10.20.30.40.50, link fe80::1" } ],
+    warnings: [ { section: "app", error: "timeout", message:
+      "could not reach https://portal.example.lan:8443/ui from 10.0.0.7 at 17:24:50" } ]
+  };
+  const out = Redact.apply(state, "network");
+  const text = out.alerts[0].text;
+  check("an address that is no field is faked", false, text.indexOf("192.168.15.99") !== -1);
+  check("a full stop after it is not part of it", false, text.indexOf("192.168.15.99.") !== -1);
+  check("it lands in TEST-NET-1", true, text.indexOf("192.0.2.") !== -1);
+  check("a field's address reads the same in both places", true,
+    text.indexOf(out.network[0].addresses[0].address) !== -1);
+  check("loopback names no host and stays", true, text.indexOf("127.0.0.1") !== -1);
+  check("an IPv6 literal is faked", true,
+    text.indexOf("fe80::") === -1 && text.indexOf("2001:db8::") !== -1);
+  check("a three-part version is not an address", true, text.indexOf("25.10.6") !== -1);
+  check("a five-part version is not one either", true, text.indexOf("10.20.30.40.50") !== -1);
+
+  const message = out.warnings[0].message;
+  check("a URL host in prose is faked", false, message.indexOf("portal.example.lan") !== -1);
+  check("its port and path survive", true, message.indexOf(":8443/ui") !== -1);
+  check("a bare address in prose is faked", false, message.indexOf("10.0.0.7") !== -1);
+  check("a clock time is not an address", true, message.indexOf("17:24:50") !== -1);
+  check("off leaves prose alone", "from 10.0.0.7",
+    Redact.apply({ warnings: [ { message: "from 10.0.0.7" } ] }, "off").warnings[0].message);
+}
+
 test_case("stable pseudonyms");
 {
   const first = Redact.apply(sample(), "names");
