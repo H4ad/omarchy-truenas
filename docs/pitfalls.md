@@ -279,7 +279,7 @@ right for a child that exits on its own, which is what `truenas-poll` does.
 
 Editing a view and reopening the panel shows the old code.
 
-Do: `./scripts/dev-install --restart`, or `omarchy-restart-shell`.
+Do: `./scripts/dev-copy --restart`, or `omarchy-restart-shell`.
 
 ## The install and the tree
 
@@ -291,7 +291,7 @@ out of the installed tree.
 Looks like: works perfectly here, fails at runtime on somebody else's machine.
 `omarchy plugin validate` catches a missing entry point but not a missing import.
 
-Do: `scripts/dev-install` copies every top-level entry except a small deny-list
+Do: `scripts/dev-copy` copies every top-level entry except a small deny-list
 (`.git`, `.agent`, `docs`, `tests`, `scripts`, `preview.png`, `.gitignore`), so a
 new runtime file is included by default. A deny-list has the opposite failure
 mode: a directory that should not ship has to be named, so review the list when

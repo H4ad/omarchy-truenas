@@ -5,7 +5,7 @@
 set -euo pipefail
 
 if ! command -v jq >/dev/null 2>&1; then
-  printf 'dev-install: jq is required to read the manifest id; install jq and retry\n' >&2
+  printf 'dev-copy: jq is required to read the manifest id; install jq and retry\n' >&2
   exit 1
 fi
 
@@ -56,4 +56,4 @@ if command -v omarchy-shell >/dev/null 2>&1; then
 fi
 printf 'installed %s to %s\n' "$ID" "$DEST"
 printf 'enable with: omarchy plugin enable %s\n' "$ID"
-printf 'QML edits to the panel need: ./scripts/dev-install --restart\n'
+printf 'QML edits to the panel need: ./scripts/dev-copy --restart\n'

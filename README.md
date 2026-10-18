@@ -71,7 +71,7 @@ the tree into `~/.config/omarchy/plugins/` and leaves out the files users do not
 need:
 
 ```
-./scripts/dev-install --restart
+./scripts/dev-copy --restart
 ```
 
 `--restart` is needed because the shell caches compiled QML per URL; a rescan
