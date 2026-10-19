@@ -201,10 +201,11 @@ data. A toast carries only the kind of event, its severity or state and its
 numbers: alert text, pool, disk, service, app and task names, the NAS's own
 error words and the configured base URL stay in the state files and the panel,
 because an argv word is readable by other local users through `/proc`. The same
-rule holds for the poll's `jq` calls: every document the NAS shaped travels on
-stdin. `xdg-open` receives only origin-gated URLs. The one command-execution path
-is `apiKeyCommand` in `config.json`, a command you write yourself; it runs only
-to fetch the key, and if you do not set it nothing runs.
+rule holds for the poll's `jq` calls (every document the NAS shaped travels on
+stdin) and for `curl` (the request URL rides the stdin config document next to
+the key). `xdg-open` receives only origin-gated URLs. The one command-execution
+path is `apiKeyCommand` in `config.json`, a command you write yourself; it runs
+only to fetch the key, and if you do not set it nothing runs.
 
 **What does it write to disk?** Config and key under
 `~/.config/omarchy/truenas/`. Poll state under `~/.local/state/omarchy/truenas/`
