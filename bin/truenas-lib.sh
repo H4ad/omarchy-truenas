@@ -258,11 +258,13 @@ tn_insecure_args() {
 # shipped, so this is still the fixed rest-v2.0 rather than a cached value.
 tn_dialect() { printf '%s' 'rest-v2.0'; }
 
-# Request $2 from base $1. The key goes in on stdin as a curl config file so it
-# never appears in argv, where every process of this user could read it.
-# Sets TN_CODE, TN_TIME_MS, TN_CURL_RC and leaves the body in $TN_BODY.
+# Request $2 from base $1. The key and the URL both go in on stdin as a curl
+# config file so neither appears in argv, where every process of this user could
+# read the key, and every other local user could read the address of the NAS
+# through /proc/<pid>/cmdline. Sets TN_CODE, TN_TIME_MS, TN_CURL_RC and leaves
+# the body in $TN_BODY.
 tn_http_request() {
-  local method=$1 base=$2 path=$3 key=$4 timeout=$5 payload=${6:-} out escaped
+  local method=$1 base=$2 path=$3 key=$4 timeout=$5 payload=${6:-} out escaped url
   TN_BODY=$(mktemp "${TMPDIR:-/tmp}/truenas-body.XXXXXX")
   local args=(-sS --config - --max-time "$timeout" -X "$method"
               -o "$TN_BODY" -w '%{http_code} %{time_total}')
@@ -274,14 +276,21 @@ tn_http_request() {
   if [[ -n $payload ]]; then
     args+=(-H "content-type: application/json" --data-binary "@$payload")
   fi
-  # curl processes backslash escapes inside a quoted config value, so a key
-  # holding a `"` is truncated there and a key holding a `\` is rewritten, both
-  # silently: the request goes out with the wrong key and comes back 401.
-  # Leaving the value unquoted is not the fix, because curl then stops at the
-  # first space and drops the header entirely.
+  # curl processes backslash escapes inside a quoted config value, so a `"` is
+  # truncated there and a `\` is rewritten, both silently: the request goes out
+  # with the wrong key or a mangled URL. Leaving a value unquoted is not the fix,
+  # because curl then stops at the first space and drops it entirely. A line
+  # break cannot be escaped into a quoted value at all, so the URL drops CR/LF
+  # (a URL cannot hold one) and cannot add a config line of its own.
   escaped=${key//\\/\\\\}
   escaped=${escaped//\"/\\\"}
-  out=$(printf 'header = "Authorization: Bearer %s"\n' "$escaped" | curl "${args[@]}" "$base$path" 2>/dev/null)
+  url=${base}${path}
+  url=${url//$'\r'/}
+  url=${url//$'\n'/}
+  url=${url//\\/\\\\}
+  url=${url//\"/\\\"}
+  out=$(printf 'url = "%s"\nheader = "Authorization: Bearer %s"\n' "$url" "$escaped" \
+    | curl "${args[@]}" 2>/dev/null)
   TN_CURL_RC=$?
   TN_CODE=${out%% *}
   local secs=${out##* }

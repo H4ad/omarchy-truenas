@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Test stub. Reads the same argv shape sz_http_get uses, resolves a canned
+# Test stub. Reads the argv shape tn_http_request uses, resolves a canned
 # response from STUB_MAP (url<TAB>rc<TAB>http_code<TAB>body_file), and reports it
-# the way real curl would. Consumes stdin so the key never leaks into a log.
+# the way real curl would. The request URL and the key both arrive in the
+# `--config -` document on stdin rather than in argv, so the URL is read back out
+# of that document, parsed the way curl parses a quoted value.
 #
-# STUB_CURL_HEADER_LOG opts one case out of that, because the header the key is
-# written into is the only place a quoting mistake shows: curl processes
-# backslash escapes inside a quoted config value, so a key holding a `"` used to
-# be truncated there and the request went out with a wrong key and came back 401.
+# STUB_CURL_HEADER_LOG opts one case out, because the header the key is written
+# into is the only place a quoting mistake shows: curl processes backslash
+# escapes inside a quoted config value, so a key holding a `"` used to be
+# truncated there and the request went out with a wrong key and came back 401.
 # It is left unset by lib.sh's setup and named by the one case that reads it, so
 # no other case can grow a log of its key by accident.
 #
@@ -18,6 +20,9 @@
 # the header here instead of being recovered. That divergence from the
 # omarchy-signoz copy of this stub (which only strips the outer quotes) is
 # deliberate: this log has to be able to fail.
+#
+# STUB_CURL_ARGV_LOG records every argv word, so a case can prove the URL is not
+# among them.
 curl_unquote() {
   local v=$1 out="" i=0 n c
   n=${#v}
@@ -35,28 +40,30 @@ curl_unquote() {
   printf '%s\n' "$out"
 }
 
-log_config() {
-  local line value
+# Prints the value of one `key = value` line from the config document on stdin,
+# unquoted when it is quoted.
+config_value() {
+  local key=$1 line value
   while IFS= read -r line; do
-    [[ $line == header\ =\ * ]] || continue
-    value=${line#header = }
-    if [[ $value == \"* ]]; then
-      curl_unquote "${value:1}" >>"$STUB_CURL_HEADER_LOG"
-    else
-      printf '%s\n' "$value" >>"$STUB_CURL_HEADER_LOG"
+    [[ $line == "$key = "* ]] || continue
+    value=${line#"$key = "}
+    if [[ $value == \"* ]]; then curl_unquote "${value:1}"
+    else printf '%s\n' "$value"
     fi
   done
 }
+
+original=("$@")
 out=""
 url=""
+cfg=""
 write_fmt=""
 while (($#)); do
   case $1 in
     -o) out=$2; shift 2 ;;
     -w) write_fmt=$2; shift 2 ;;
     --config)
-      if [[ -n ${STUB_CURL_HEADER_LOG:-} ]]; then log_config
-      else cat >/dev/null; fi
+      cfg=$(cat)
       shift 2 ;;
     --max-time) shift 2 ;;
     -X) printf '%s ' "$2" >>"${STUB_METHOD_LOG:-/dev/null}"; shift 2 ;;
@@ -68,6 +75,10 @@ while (($#)); do
     *) url=$1; shift ;;
   esac
 done
+
+[[ -n $url ]] || url=$(config_value url <<<"$cfg")
+[[ -z ${STUB_CURL_HEADER_LOG:-} ]] || config_value header <<<"$cfg" >>"$STUB_CURL_HEADER_LOG"
+[[ -z ${STUB_CURL_ARGV_LOG:-} ]] || printf '%s\n' "${original[*]}" >>"$STUB_CURL_ARGV_LOG"
 
 rc=0; code=200; body=/dev/null
 if [[ -n ${STUB_MAP:-} && -f $STUB_MAP ]]; then

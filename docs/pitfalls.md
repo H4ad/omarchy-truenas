@@ -110,23 +110,31 @@ a helper hands to a child process is readable by every other local user for as
 long as that process lives. A poll runs on a timer, and its `jq` calls carried
 the whole seen history, the meta cache and the warning list as `--argjson`
 arguments; its toasts carried alert text, pool, disk, service, app and task
-names and the NAS's own error words. All of it was visible in `ps` to anyone
-logged in.
+names and the NAS's own error words; its `curl` calls carried the configured NAS
+address as their last argument, on every poll. All of it was visible in `ps` to
+anyone logged in.
 
 Do: pass documents as files or on stdin, never as an argument. In
 `bin/truenas-poll`: `--slurpfile` for `seen.json` and `meta.json`, `--rawfile`
 for the warning fields and for the connection error and message, and stdin for
-the rest. A toast's words are constants, counts and whitelisted state words
-(RUNNING, DEGRADED, a temperature), picked through `brief_error`, `pool_state`,
+the rest. `tn_http_request` puts the request URL in curl's `--config -` document
+next to the key, so the address of the NAS is not in argv either; both values are
+escaped because curl processes backslash escapes inside a quoted config value,
+and the URL drops CR/LF because a line break cannot be escaped into a quoted
+value and would start a config line of its own.
+
+A toast's words are constants, counts and whitelisted state words (RUNNING,
+DEGRADED, a temperature), picked through `brief_error`, `pool_state`,
 `service_state` and `job_state` rather than echoed, so a field the NAS puts text
 in cannot make a toast say it. The `--exec` is the constant
 `omarchy-shell -q shell summon io.github.h4ad.truenas`, so the panel's details
 are one click away without a name on a command line.
 
 The regression is `tests/cases/16-argv.sh`: it runs a poll with a `jq` wrapper
-first on `PATH` that records every argument vector, fires every notification
-kind with marker strings in the fixtures, and greps both logs for the markers.
-A marker found in either log fails the case.
+first on `PATH` that records every argument vector, logs the curl stub's argv and
+the notification sender's argv, fires every notification kind with marker strings
+in the fixtures, and greps all three logs for the markers. A marker found in any
+of them fails the case.
 
 ### Test cases share one shell
 

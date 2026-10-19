@@ -64,8 +64,8 @@ Pick one and record the decision before writing transport code:
    question.
 
 Whichever it is, the helper must own the connection and speak one call in, one
-JSON response out, so the shell side stays a function call. Keep the API key out
-of argv, the way `tn_http_request` does today.
+JSON response out, so the shell side stays a function call. Keep the API key and
+the request URL out of argv, the way `tn_http_request` does today.
 
 ## Connection lifecycle
 

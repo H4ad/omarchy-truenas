@@ -168,11 +168,12 @@ command line, never in an environment variable, never in a log. `config list`
 prints only whether a key is set.
 
 **How is the key sent?** As `Authorization: Bearer <key>` to the one base URL you
-configure, over HTTPS. The header is handed to curl through a stdin config
-document (`--config -`), not argv, so no other process of your user can read it
-from `ps`. TrueNAS revokes keys sent over plain HTTP, so the base must be
-`https`. If you prefer a password manager, `apiKeyCommand` in `config.json` names
-a command to fetch the key instead of storing it.
+configure, over HTTPS. The header and the request URL are both handed to curl
+through a stdin config document (`--config -`), not argv, so the key is never
+readable from `ps` and the address of your NAS is not readable there by other
+local users either. TrueNAS revokes keys sent over plain HTTP, so the base must
+be `https`. If you prefer a password manager, `apiKeyCommand` in `config.json`
+names a command to fetch the key instead of storing it.
 
 **Does anything leave my machine besides the NAS?** No. The plugin is an outbound
 HTTPS client to your NAS and nothing else: no telemetry, no analytics, no

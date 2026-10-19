@@ -4,14 +4,15 @@
 # Every argv word this plugin hands to a child is readable by every local user
 # through /proc/<pid>/cmdline on an ordinary procfs. So the documents that carry
 # NAS text (the payload, the seen history, the meta cache, the warnings list and
-# the connection error) reach jq through --slurpfile, --rawfile or stdin, and a
-# toast carries only constants, counts and whitelisted state words.
+# the connection error) reach jq through --slurpfile, --rawfile or stdin; the
+# request URL and the key reach curl in its --config - document; and a toast
+# carries only constants, counts and whitelisted state words.
 #
 # The first case drives one poll that fires every kind of notification at once,
-# with fixtures the markers below come from, and then greps both command lines
-# for them. The second puts a path in a state field the wire carries as text, to
-# prove the toast whitelists it instead of echoing it. A marker found in either
-# log is the leak back.
+# with fixtures the markers below come from, and then greps every command line
+# it can see (jq, curl, the notification sender) for them. The second puts a path
+# in a state field the wire carries as text, to prove the toast whitelists it
+# instead of echoing it. A marker found in a log is the leak back.
 
 MARKERS=(
   'One or more devices is offline'   # alert text
@@ -26,6 +27,7 @@ MARKERS=(
   'sda'                              # disk name
   '25.04.2'                          # NAS version
   '/mnt/private'                     # a path, used as a state field in case 2
+  'nas.example'                      # the configured base URL
 )
 
 # Every marker found in one log, one per line, so a failure names the value that
@@ -40,11 +42,14 @@ marker_hits() {
 
 # A jq first on PATH that records every argument vector it is handed and then
 # execs the real jq, so a poll under this PATH behaves normally and what jq saw
-# is a fact in a log rather than something a case has to infer. setup() makes a
-# fresh $WORK, so each case calls this after its own setup.
+# is a fact in a log rather than something a case has to infer. The curl stub
+# logs its own argv the same way. setup() makes a fresh $WORK, so each case calls
+# this after its own setup.
 argv_probe() {
   export STUB_JQ_ARGV_LOG="$WORK/jq-argv.log"
+  export STUB_CURL_ARGV_LOG="$WORK/curl-argv.log"
   : >"$STUB_JQ_ARGV_LOG"
+  : >"$STUB_CURL_ARGV_LOG"
   cat >"$WORK/jq" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_JQ_ARGV_LOG"
@@ -91,6 +96,8 @@ PATH="$WORK:$PATH" poll
 
 check "the jq wrapper really ran the poll" yes \
   "$(grep -q -- '--slurpfile' "$STUB_JQ_ARGV_LOG" && printf yes || printf no)"
+check "the curl stub really ran the poll" yes \
+  "$(grep -q -- '--config' "$STUB_CURL_ARGV_LOG" && printf yes || printf no)"
 check "the alert fired" 1 "$(grep -c 'New critical alert' "$STUB_NOTIFY_LOG" || true)"
 check "the pool went DEGRADED" 1 "$(grep -c 'A pool is DEGRADED' "$STUB_NOTIFY_LOG" || true)"
 check "the hot disks fired" 2 "$(grep -c 'A disk is hot' "$STUB_NOTIFY_LOG" || true)"
@@ -105,6 +112,7 @@ holds() { grep -qF -- "$1" "$STATE" && printf yes || printf no; }
 check "the alert node is live in the state file" yes "$(holds 'Controller A')"
 check "and so is the NAS version" yes "$(holds '25.04.2')"
 check "no NAS value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+check "no configured address is on a curl command line" "" "$(marker_hits "$STUB_CURL_ARGV_LOG")"
 check "no NAS value is on a notification command line" "" "$(marker_hits "$STUB_NOTIFY_LOG")"
 teardown
 
@@ -135,5 +143,6 @@ check "with the whitelisted word" 1 \
 check "and the wire text stays in the state file" yes \
   "$(grep -qF -- '/mnt/private/report' "$STATE" && printf yes || printf no)"
 check "no NAS value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+check "no configured address is on a curl command line" "" "$(marker_hits "$STUB_CURL_ARGV_LOG")"
 check "no NAS value is on a notification command line" "" "$(marker_hits "$STUB_NOTIFY_LOG")"
 teardown

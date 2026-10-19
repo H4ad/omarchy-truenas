@@ -16,11 +16,14 @@ the user's own NAS, `https://<host>[:<port>]`, and the REST tree hangs off
 `/api/v2.0`. A shell script with `curl` and `jq` is enough; there is no session
 or cookie handling.
 
-The key is passed to `curl` through a `--config -` document on stdin, never in
-`argv`, `ps`, `shell.json` or a log line. `bin/truenas-lib.sh` `tn_http_request`
-builds `header = "Authorization: Bearer <key>"`, escaping `\` and `"` because
+The key and the request URL are passed to `curl` through a `--config -` document
+on stdin, never in `argv`, `ps`, `shell.json` or a log line. `bin/truenas-lib.sh`
+`tn_http_request` builds `url = "<base><path>"` and
+`header = "Authorization: Bearer <key>"`, escaping `\` and `"` in both because
 curl processes backslash escapes inside a quoted config value and would
-otherwise silently send the wrong key.
+otherwise silently send the wrong key or a mangled URL. The URL drops CR and LF
+before it is written, because a line break cannot be escaped into a quoted
+config value and would otherwise start a config line of its own.
 
 Response bodies and the documents derived from them follow the same rule inside
 the poll: they reach `jq` as files or on stdin (`--slurpfile`, `--rawfile`),
