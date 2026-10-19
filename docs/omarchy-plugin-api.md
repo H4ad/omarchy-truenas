@@ -149,6 +149,15 @@ command waiting for a click. We apply the same rule to URLs coming from the
 TrueNAS API (see [truenas-api.md](truenas-api.md), and the origin gate in
 `Links.js`).
 
+There is no stdin mode: the headline, the body and the `--exec` words are argv
+and nothing else. Every one of those words is therefore readable by other local
+users through `/proc/<pid>/cmdline` while the toast is on screen, so
+`bin/truenas-poll` passes only constants, counts and closed-vocabulary states
+(as in "A pool is DEGRADED"). Alert text, NAS names and the configured base URL
+stay in the state files and the panel; the click action is the constant
+`omarchy-shell -q shell summon io.github.h4ad.truenas`, which opens the menu into
+the popout. See "Private data on a command line" in [pitfalls.md](pitfalls.md).
+
 ## Dev loop
 
 ```bash

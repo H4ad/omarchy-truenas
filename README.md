@@ -41,6 +41,9 @@ and network are read-only.
 returns to `ONLINE`, when a disk crosses a temperature band and cools back, when
 a service or app goes down or returns, and when a replication or cloud sync task
 fails or recovers. Toasts are deduped, so a network blip does not replay them.
+A toast names the kind of event ("A pool is DEGRADED", "A disk is hot"), never
+the pool, disk, service, app or alert text; clicking it opens the plugin's menu,
+and the panel has the details. See the Security section for why.
 
 **The CLI.** `truenasctl` is the terminal side. See below.
 
@@ -193,10 +196,14 @@ is shown as "unknown", never as a fabricated zero.
 
 **Can a compromised NAS run commands on my desktop or steal the key?** No, with
 one documented exception you control. No shell command is built from NAS or poll
-data. Notifications receive their arguments as separate argv words, never as a
-shell string. `xdg-open` receives only origin-gated URLs. The one
-command-execution path is `apiKeyCommand` in `config.json`, a command you write
-yourself; it runs only to fetch the key, and if you do not set it nothing runs.
+data. A toast carries only the kind of event, its severity or state and its
+numbers: alert text, pool, disk, service, app and task names, the NAS's own
+error words and the configured base URL stay in the state files and the panel,
+because an argv word is readable by other local users through `/proc`. The same
+rule holds for the poll's `jq` calls: every document the NAS shaped travels on
+stdin. `xdg-open` receives only origin-gated URLs. The one command-execution path
+is `apiKeyCommand` in `config.json`, a command you write yourself; it runs only
+to fetch the key, and if you do not set it nothing runs.
 
 **What does it write to disk?** Config and key under
 `~/.config/omarchy/truenas/`. Poll state under `~/.local/state/omarchy/truenas/`

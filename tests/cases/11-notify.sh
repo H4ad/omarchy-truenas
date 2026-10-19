@@ -1,118 +1,18 @@
 # shellcheck shell=bash
 # Task 5: desktop notifications and seen.json.
 
-# The poll writes seen.json under the XDG state home setup() exports, which is
-# not known when this file is sourced, so the path is resolved per call.
-seen_file() { printf '%s/omarchy/truenas/seen.json' "$XDG_STATE_HOME"; }
-seen() { jq -r "$1" "$(seen_file)" 2>/dev/null; }
-
-# One alert body written into $WORK and printed, so a case can hand it straight
-# to respond without a fixture for every level and dismissal state.
-one_alert() {
-  local level=$1 text=$2 dismissed=${3:-false}
-  local uuid=${4:-11111111-2222-3333-4444-555555555555}
-  cat >"$WORK/alert-one.json" <<JSON
-[ { "uuid": "$uuid", "level": "$level", "formatted": "$text", "text": "$text",
-    "dismissed": $dismissed, "dismissable": true, "datetime": "2026-08-21T14:28:00Z" } ]
-JSON
-  printf '%s' "$WORK/alert-one.json"
-}
-
-# The fifteen endpoints every notification case needs. system carries no
-# notification and is canned throughout; the temperatures default to the cool
-# fixture so an alert or pool case cannot grow a disk toast by accident, and the
-# service and app lists default to the all-running fixtures so only a case that
-# asks for a down row can grow a service or app toast. The shares and interfaces
-# are quiet and canned too: they only need to answer so the meta cache reaches
-# the warm path, and M5 adds no share or network notification.
-notify_endpoints() {
-  local alerts=$1 pool=$2 temps=${3:-"$ROOT/tests/fixtures/disk-temperatures.json"}
-  local services=${4:-"$ROOT/tests/fixtures/services.json"}
-  local apps=${5:-"$ROOT/tests/fixtures/apps.json"}
-  local replication=${6:-"$ROOT/tests/fixtures/replication.json"}
-  local cloudsync=${7:-"$ROOT/tests/fixtures/cloudsync.json"}
-  respond     "/api/v2.0/alert/list"  0 200 "$alerts"
-  # The specific pool sub-routes come before /api/v2.0/pool, because the stub
-  # matches a URL by substring.
-  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
-  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
-  respond_add "/api/v2.0/pool"        0 200 "$pool"
-  respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
-  respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
-  respond_add "/api/v2.0/disk/temperatures" 0 200 "$temps"
-  respond_add "/api/v2.0/service"     0 200 "$services"
-  respond_add "/api/v2.0/app"         0 200 "$apps"
-  respond_add "/api/v2.0/replication" 0 200 "$replication"
-  respond_add "/api/v2.0/cloudsync"   0 200 "$cloudsync"
-  respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
-  respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
-  respond_add "/api/v2.0/iscsi/target" 0 200 "$ROOT/tests/fixtures/iscsi-target.json"
-  respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
-}
-
-# The protection half of the map on its own: quiet alerts and pools, the real
-# disks and services, and the replication and cloud sync bodies a case varies.
-notify_protection() {
-  local replication=$1 cloudsync=${2:-"$ROOT/tests/fixtures/cloudsync.json"}
-  notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
-    "$ROOT/tests/fixtures/pools-healthy.json" \
-    "$ROOT/tests/fixtures/disk-temperatures.json" \
-    "$ROOT/tests/fixtures/services.json" \
-    "$ROOT/tests/fixtures/apps.json" \
-    "$replication" "$cloudsync"
-}
-
-# A copy of the replication fixture with task id 1's job state and error set.
-rep_job() {
-  local id=$1 state=$2 error=${3:-} out=$4
-  jq -c --argjson id "$id" --arg s "$state" --arg e "$error" \
-    'map(if .id == $id then .job = { state: $s, time_finished: null,
-             error: (if $e == "" then null else $e end) } else . end)' \
-    "$ROOT/tests/fixtures/replication.json" >"$out"
-}
-
-# A copy of the replication fixture with a warning on task id 1's task state.
-rep_warn() {
-  local id=$1 out=$2
-  jq -c --argjson id "$id" \
-    'map(if .id == $id then .state = { state: "FINISHED", datetime: null,
-             warnings: ["snapshot failed"], last_snapshot: null }
-         else . end)' \
-    "$ROOT/tests/fixtures/replication.json" >"$out"
-}
-
-# A one-row cloud sync body with the job state and error a case wants.
-cs_job() {
-  local state=$1 error=${2:-} out=$3
-  jq -nc --arg s "$state" --arg e "$error" \
-    '[ { id: 3, description: "clouda", path: "/mnt/storage", enabled: true,
-         direction: "PUSH", transfer_mode: "SYNC", schedule: null,
-         job: { state: $s, time_finished: null,
-                error: (if $e == "" then null else $e end) } } ]' >"$out"
-}
-
-# A copy of the service or app fixture with one row moved to another state, so a
-# case can drive a single transition without restating the whole list.
-down_service() {
-  local name=$1 state=$2 out=$3
-  jq -c --arg n "$name" --arg s "$state" \
-    'map(if .service == $n then .state = $s else . end)' \
-    "$ROOT/tests/fixtures/services.json" >"$out"
-}
-
-down_app() {
-  local name=$1 state=$2 out=$3
-  jq -c --arg n "$name" --arg s "$state" \
-    'map(if .name == $n then .state = $s else . end)' \
-    "$ROOT/tests/fixtures/apps.json" >"$out"
-}
+# The fixture builders every notification case needs live in lib.sh with the
+# other helpers, so 16-argv.sh can use them without depending on this file
+# being sourced first.
 
 test_case "a new critical alert toasts once"
 setup; single_instance_config
 respond "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-critical.json"
 poll
 check "one toast" 1 "$(notifications)"
-check "and it names the alert" 1 "$(grep -c 'Pool storage state is DEGRADED' "$STUB_NOTIFY_LOG" || true)"
+check "and it names the level" 1 "$(grep -c 'New critical alert' "$STUB_NOTIFY_LOG" || true)"
+check "so the alert text stays out of argv" 0 \
+  "$(grep -c 'Pool storage state is DEGRADED' "$STUB_NOTIFY_LOG" || true)"
 poll
 check "the same alert does not toast again" 1 "$(notifications)"
 teardown
@@ -123,7 +23,7 @@ respond "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-critical.json"
 poll
 respond "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
 poll
-check "a resolution toast" 1 "$(grep -c 'Resolved' "$STUB_NOTIFY_LOG" || true)"
+check "a resolution toast" 1 "$(grep -c 'Alert resolved' "$STUB_NOTIFY_LOG" || true)"
 teardown
 
 test_case "a pool going DEGRADED toasts, recovering is low"
@@ -134,7 +34,10 @@ check "a healthy pool is quiet" 0 "$(notifications)"
 notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-degraded.json"
 poll
 check "one worsening toast" 1 "$(notifications)"
-check "it names the pool" 1 "$(grep -c 'storage' "$STUB_NOTIFY_LOG" || true)"
+check "it names the status, not the pool" 1 \
+  "$(grep -c 'A pool is DEGRADED' "$STUB_NOTIFY_LOG" || true)"
+check "so the pool name stays out of argv" 0 \
+  "$(grep -c 'storage' "$STUB_NOTIFY_LOG" || true)"
 check "with normal urgency" 1 "$(grep -c -e '-u normal' "$STUB_NOTIFY_LOG" || true)"
 notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
 poll
@@ -284,10 +187,10 @@ setup; single_instance_config
 respond "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-critical.json"
 poll
 check "the alert toast is recorded rather than rejected" 1 "$(notifications)"
-check "with --exec xdg-open and the URL as separate words" 1 \
-  "$(grep -c ' --exec xdg-open ' "$STUB_NOTIFY_LOG" || true)"
-check "and the command ends with xdg-open and the URL" 1 \
-  "$(awk '{ if ($(NF-1) == "xdg-open" && $NF ~ /^https:\/\//) n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "with the summon command as separate argv words" 1 \
+  "$(grep -c ' --exec omarchy-shell -q shell summon io.github.h4ad.truenas$' "$STUB_NOTIFY_LOG" || true)"
+check "and never the configured base URL" 0 \
+  "$(grep -c 'nas.example' "$STUB_NOTIFY_LOG" || true)"
 teardown
 
 test_case "a failed pool section does not wipe or resolve the alert half"
@@ -300,7 +203,7 @@ respond_add "/api/v2.0/pool"        7 0 /dev/null
 respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
 poll
 check "the alert half is preserved" 1 "$(seen '.alerts | length')"
-check "no resolution toast" 0 "$(grep -c 'Resolved' "$STUB_NOTIFY_LOG" || true)"
+check "no resolution toast" 0 "$(grep -c 'Alert resolved' "$STUB_NOTIFY_LOG" || true)"
 poll
 check "the still-firing alert stays quiet" 1 "$(notifications)"
 teardown
@@ -343,22 +246,22 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
   "$ROOT/tests/fixtures/disk-temperatures-hot.json"
 poll
 check "one toast per hot disk" 2 "$(notifications)"
-check "the critical headline" 1 "$(grep -c 'Disk sda is hot' "$STUB_NOTIFY_LOG" || true)"
-check "with its temperature and critical threshold" 1 \
-  "$(awk '/Disk sda is hot/ && /61 °C, critical at 60 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "the warning headline" 1 "$(grep -c 'Disk sdc is hot' "$STUB_NOTIFY_LOG" || true)"
-check "with the warning band start" 1 \
-  "$(awk '/Disk sdc is hot/ && /51 °C, warning at 50 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the critical disk's temperature and threshold" 1 \
+  "$(awk '/A disk is hot/ && /61 °C, critical at 60 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the warning disk's band start" 1 \
+  "$(awk '/A disk is hot/ && /51 °C, warning at 50 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "and neither disk name is in argv" 0 \
+  "$(grep -c -e 'sda' -e 'sdc' "$STUB_NOTIFY_LOG" || true)"
 check "the critical disk carries the critical glyph" 1 \
-  "$(awk -v g=$'\uf071' '/Disk sda is hot/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf071' '/A disk is hot/ && /61 °C/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the warning disk carries the alert glyph" 1 \
-  "$(awk -v g=$'\uf0f3' '/Disk sdc is hot/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf0f3' '/A disk is hot/ && /51 °C/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the critical disk is critical urgency" 1 \
-  "$(awk '/Disk sda is hot/ && /-u critical/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/A disk is hot/ && /61 °C/ && /-u critical/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the warning disk is normal urgency" 1 \
-  "$(awk '/Disk sdc is hot/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "the hot toast opens the configured base" 1 \
-  "$(awk '/Disk sda is hot/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/A disk is hot/ && /51 °C/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the hot toast opens the plugin menu" 1 \
+  "$(awk '/A disk is hot/ && /61 °C/ && /--exec omarchy-shell -q shell summon io.github.h4ad.truenas/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "sda is recorded critical" critical "$(seen '.disks.sda.state')"
 check "sdc is recorded warning" warning "$(seen '.disks.sdc.state')"
 check "sdb is still ok" ok "$(seen '.disks.sdb.state')"
@@ -384,14 +287,12 @@ check "the hot pair toasted" 2 "$(notifications)"
 notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/pools-healthy.json"
 poll
 check "both cooled toasts" 4 "$(notifications)"
-check "the sda headline" 1 \
-  "$(awk '/Disk sda cooled/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "with its temperature" 1 \
-  "$(awk '/Disk sda cooled/ && /38 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the cooled disk's temperature" 1 \
+  "$(awk '/A disk cooled/ && /38 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "at low urgency" 1 \
-  "$(awk '/Disk sda cooled/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/A disk cooled/ && /38 °C/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "with the ok glyph" 1 \
-  "$(awk -v g=$'\uf00c' '/Disk sda cooled/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf00c' '/A disk cooled/ && /38 °C/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "sda is ok again" ok "$(seen '.disks.sda.state')"
 teardown
 
@@ -438,7 +339,7 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
   "$ROOT/tests/fixtures/disk-temperatures-hot.json"
 poll
 check "crossing from unknown into critical toasts" 1 \
-  "$(awk '/Disk sda is hot/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/A disk is hot/ && /61 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "sda is recorded critical" critical "$(seen '.disks.sda.state')"
 teardown
 
@@ -470,8 +371,8 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
   "$WORK/temps-no-sda.json"
 poll
 check "sda went unknown" unknown "$(seen '.disks.sda.state')"
-check "no cooled toast for sda" 0 \
-  "$(awk '/Disk sda cooled/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "no cooled toast for the unknown disk" 0 \
+  "$(awk '/A disk cooled/ && /38 °C/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "but the warning disk cooled" 3 "$(notifications)"
 teardown
 
@@ -490,16 +391,18 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
   "$ROOT/tests/fixtures/disk-temperatures.json" "$WORK/services-cifs-stopped.json"
 poll
 check "one down toast" 1 "$(notifications)"
-check "the headline names the service and its state" 1 \
-  "$(grep -c 'Service cifs is STOPPED' "$STUB_NOTIFY_LOG" || true)"
+check "the headline names the state, not the service" 1 \
+  "$(grep -c 'A service is STOPPED' "$STUB_NOTIFY_LOG" || true)"
 check "the body carries the transition" 1 \
   "$(grep -c 'state changed from RUNNING to STOPPED' "$STUB_NOTIFY_LOG" || true)"
+check "and the service name stays out of argv" 0 \
+  "$(grep -c 'cifs' "$STUB_NOTIFY_LOG" || true)"
 check "with the alert glyph" 1 \
-  "$(awk -v g=$'\uf0f3' '/Service cifs is STOPPED/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf0f3' '/A service is STOPPED/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "at normal urgency (warning maps to normal)" 1 \
-  "$(awk '/Service cifs is STOPPED/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "the exec is argv words, xdg-open then the base" 1 \
-  "$(awk '/Service cifs is STOPPED/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/A service is STOPPED/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the exec is the plugin menu, not the base" 1 \
+  "$(awk '/A service is STOPPED/ && /--exec omarchy-shell -q shell summon io.github.h4ad.truenas/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the state is recorded" STOPPED "$(seen '.services.cifs.state')"
 poll
 check "an identical poll does not replay" 1 "$(notifications)"
@@ -518,11 +421,11 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
 poll
 check "a recovery toast" 2 "$(notifications)"
 check "saying it is running again" 1 \
-  "$(grep -c 'Service cifs is running again' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'A service is running again' "$STUB_NOTIFY_LOG" || true)"
 check "at low urgency" 1 \
-  "$(awk '/Service cifs is running again/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/A service is running again/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "with the ok glyph" 1 \
-  "$(awk -v g=$'\uf00c' '/Service cifs is running again/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf00c' '/A service is running again/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the state is RUNNING again" RUNNING "$(seen '.services.cifs.state')"
 teardown
 
@@ -572,16 +475,18 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
   "$WORK/apps-appc-crashed.json"
 poll
 check "one down toast" 1 "$(notifications)"
-check "the headline names the app and its state" 1 \
-  "$(grep -c 'App appc is CRASHED' "$STUB_NOTIFY_LOG" || true)"
+check "the headline names the state, not the app" 1 \
+  "$(grep -c 'An app is CRASHED' "$STUB_NOTIFY_LOG" || true)"
 check "the body carries the transition" 1 \
   "$(grep -c 'state changed from RUNNING to CRASHED' "$STUB_NOTIFY_LOG" || true)"
+check "and the app name stays out of argv" 0 \
+  "$(grep -c 'appc' "$STUB_NOTIFY_LOG" || true)"
 check "with the alert glyph" 1 \
-  "$(awk -v g=$'\uf0f3' '/App appc is CRASHED/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf0f3' '/An app is CRASHED/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "at normal urgency (warning maps to normal)" 1 \
-  "$(awk '/App appc is CRASHED/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "the exec is argv words, xdg-open then the base" 1 \
-  "$(awk '/App appc is CRASHED/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/An app is CRASHED/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the exec is the plugin menu, not the base" 1 \
+  "$(awk '/An app is CRASHED/ && /--exec omarchy-shell -q shell summon io.github.h4ad.truenas/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the state is recorded" CRASHED "$(seen '.apps.appc.state')"
 poll
 check "an identical poll does not replay" 1 "$(notifications)"
@@ -601,11 +506,11 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
 poll
 check "a recovery toast" 2 "$(notifications)"
 check "saying it is running again" 1 \
-  "$(grep -c 'App appc is running again' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'An app is running again' "$STUB_NOTIFY_LOG" || true)"
 check "at low urgency" 1 \
-  "$(awk '/App appc is running again/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/An app is running again/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "with the ok glyph" 1 \
-  "$(awk -v g=$'\uf00c' '/App appc is running again/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf00c' '/An app is running again/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the state is RUNNING again" RUNNING "$(seen '.apps.appc.state')"
 teardown
 
@@ -706,7 +611,7 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
 poll
 check "the recovery after the gap still toasts" 2 "$(notifications)"
 check "saying it is running again" 1 \
-  "$(grep -c 'Service cifs is running again' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'A service is running again' "$STUB_NOTIFY_LOG" || true)"
 teardown
 
 test_case "a service first sighted blank toasts a later down with no empty from"
@@ -774,7 +679,7 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
 poll
 check "the recovery after the transition still toasts" 2 "$(notifications)"
 check "saying it is running again" 1 \
-  "$(grep -c 'App appc is running again' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'An app is running again' "$STUB_NOTIFY_LOG" || true)"
 teardown
 
 test_case "one poll toasts a service down and another up"
@@ -795,9 +700,11 @@ notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" "$ROOT/tests/fixtures/
 poll
 check "two toasts from one poll" 2 "$(notifications)"
 check "the service that went down" 1 \
-  "$(grep -c 'Service cifs is STOPPED' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'state changed from RUNNING to STOPPED' "$STUB_NOTIFY_LOG" || true)"
 check "the service that came back" 1 \
-  "$(grep -c 'Service ssh is running again' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'A service is running again' "$STUB_NOTIFY_LOG" || true)"
+check "and neither service name is in argv" 0 \
+  "$(grep -c -e 'cifs' -e 'ssh' "$STUB_NOTIFY_LOG" || true)"
 check "cifs is now down" true "$(seen '.services.cifs.down')"
 check "ssh is now up" false "$(seen '.services.ssh.down')"
 teardown
@@ -818,16 +725,18 @@ rep_job 1 FAILED "send failed" "$WORK/rep-failed.json"
 notify_protection "$WORK/rep-failed.json"
 poll
 check "one failure toast" 1 "$(notifications)"
-check "the headline names the task" 1 \
-  "$(grep -c 'Replication storage-to-backup failed' "$STUB_NOTIFY_LOG" || true)"
-check "the body carries the job error" 1 \
-  "$(grep -c 'send failed' "$STUB_NOTIFY_LOG" || true)"
+check "the headline names the kind, not the task" 1 \
+  "$(grep -c 'Replication failed' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries the job state, not the error" 1 \
+  "$(grep -c 'job state FAILED' "$STUB_NOTIFY_LOG" || true)"
+check "and the task name and error stay out of argv" 0 \
+  "$(grep -c -e 'storage-to-backup' -e 'send failed' "$STUB_NOTIFY_LOG" || true)"
 check "with the alert glyph" 1 \
-  "$(awk -v g=$'\uf0f3' '/Replication storage-to-backup failed/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf0f3' '/Replication failed/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "at normal urgency" 1 \
-  "$(awk '/Replication storage-to-backup failed/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
-check "the exec is argv words, xdg-open then the base" 1 \
-  "$(awk '/Replication storage-to-backup failed/ && $(NF-1) == "xdg-open" && $NF == "https://nas.example:4433" { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/Replication failed/ && /-u normal/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+check "the exec is the plugin menu, not the base" 1 \
+  "$(awk '/Replication failed/ && /--exec omarchy-shell -q shell summon io.github.h4ad.truenas/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the state is recorded" FAILED "$(seen '.replication["1"].state')"
 check "and it is failed" true "$(seen '.replication["1"].failed')"
 poll
@@ -845,11 +754,11 @@ notify_protection "$ROOT/tests/fixtures/replication.json"
 poll
 check "a recovery toast" 1 "$(notifications)"
 check "saying it recovered" 1 \
-  "$(grep -c 'Replication storage-to-backup recovered' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'Replication recovered' "$STUB_NOTIFY_LOG" || true)"
 check "at low urgency" 1 \
-  "$(awk '/Replication storage-to-backup recovered/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk '/Replication recovered/ && /-u low/ { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "with the ok glyph" 1 \
-  "$(awk -v g=$'\uf00c' '/Replication storage-to-backup recovered/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf00c' '/Replication recovered/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 check "the state is SUCCESS again" SUCCESS "$(seen '.replication["1"].state')"
 teardown
 
@@ -862,8 +771,8 @@ rep_warn 1 "$WORK/rep-warn.json"
 notify_protection "$WORK/rep-warn.json"
 poll
 check "warnings toast" 1 "$(notifications)"
-check "naming the task" 1 \
-  "$(grep -c 'Replication storage-to-backup failed' "$STUB_NOTIFY_LOG" || true)"
+check "naming the kind" 1 \
+  "$(grep -c 'Replication failed' "$STUB_NOTIFY_LOG" || true)"
 check "and it is recorded failed" true "$(seen '.replication["1"].failed')"
 teardown
 
@@ -920,18 +829,20 @@ cs_job FAILED "quota exceeded" "$WORK/cs-failed.json"
 notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-failed.json"
 poll
 check "one failure toast" 1 "$(notifications)"
-check "the headline names the task" 1 \
-  "$(grep -c 'Cloud sync clouda failed' "$STUB_NOTIFY_LOG" || true)"
-check "the body carries the error" 1 \
-  "$(grep -c 'quota exceeded' "$STUB_NOTIFY_LOG" || true)"
+check "the headline names the kind, not the task" 1 \
+  "$(grep -c 'Cloud sync failed' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries the job state, not the error" 1 \
+  "$(grep -c 'job state FAILED' "$STUB_NOTIFY_LOG" || true)"
+check "and the task name and error stay out of argv" 0 \
+  "$(grep -c -e 'clouda' -e 'quota exceeded' "$STUB_NOTIFY_LOG" || true)"
 check "and it is recorded failed" true "$(seen '.cloudSync["3"].failed')"
 notify_protection "$ROOT/tests/fixtures/replication.json" "$WORK/cs-success.json"
 poll
 check "a recovery toast" 2 "$(notifications)"
 check "saying it recovered" 1 \
-  "$(grep -c 'Cloud sync clouda recovered' "$STUB_NOTIFY_LOG" || true)"
+  "$(grep -c 'Cloud sync recovered' "$STUB_NOTIFY_LOG" || true)"
 check "with the ok glyph" 1 \
-  "$(awk -v g=$'\uf00c' '/Cloud sync clouda recovered/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
+  "$(awk -v g=$'\uf00c' '/Cloud sync recovered/ && index($0, g) { n++ } END { print n+0 }' "$STUB_NOTIFY_LOG")"
 teardown
 
 test_case "a cloud sync task first sighted failed toasts nothing"

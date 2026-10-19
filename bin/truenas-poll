@@ -11,6 +11,10 @@ TN_PLUGIN_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 . "$TN_PLUGIN_DIR/bin/truenas-lib.sh"
 
 NOTIFY_BIN=${TRUENAS_NOTIFY_BIN:-omarchy-notification-send}
+# The one target a toast's click action needs: the plugin's own menu, as
+# manifest.json names it. The command is constant, so neither NAS text nor the
+# configured base URL ever rides an exec argv.
+PLUGIN_ID=io.github.h4ad.truenas
 QUIET=0
 FORCE_META=0
 for arg in "$@"; do
@@ -39,25 +43,26 @@ GLYPH_ALERT=$'\uf0f3'
 GLYPH_OK=$'\uf00c'
 GLYPH_OFFLINE=$'\uf1e6'
 
-# Every toast goes out as an argv array, never a shell string: alert text is
-# shaped by anyone who can make the NAS emit an alert, and it is passed only as
-# an argv element. The exec URL is built here from the configured base, never
-# from payload text.
+# Every toast goes out as an argv array, never a shell string, and every word in
+# it is a constant or a number. /proc/<pid>/cmdline is world-readable on an
+# ordinary procfs, so anything the NAS shaped (alert text, a pool, disk, service,
+# app or task name, the NAS's own error words) and the configured base URL stay
+# out of the call: the toast names the kind of event and the panel, which reads
+# the state files, has the detail. The click runs the plugin's summoned menu,
+# which needs none of that on a command line either.
 notify() {
-  local urgency=$1 glyph=$2 url=$3 head=$4 body=${5:-}
+  local urgency=$1 glyph=$2 head=$3 body=${4:-}
   # The sender's contract: options first, then <headline> [description], and
   # --exec last with the command as separate argv words. A single exec word
-  # holding a space is rejected outright, so xdg-open and the URL are two
-  # elements and the option is never built as one string.
+  # holding a space is rejected outright, so the summon command is passed as
+  # words and never built as one string.
   local args=(--app-name truenas -u "$urgency" -g "$glyph")
   if [[ -n $body ]]; then
     args+=("$head" "$body")
   else
     args+=("$head")
   fi
-  if [[ -n $url ]]; then
-    args+=(--exec xdg-open "$url")
-  fi
+  args+=(--exec omarchy-shell -q shell summon "$PLUGIN_ID")
   "$NOTIFY_BIN" "${args[@]}" >/dev/null 2>&1 || true
 }
 
@@ -81,6 +86,52 @@ glyph_for() {
   esac
 }
 
+# The one sentence an outage toast is allowed to carry. The error class and the
+# classified message can both be the NAS's own words (an `.error.code`, a
+# message out of the body), so the toast quotes neither: the class is mapped
+# here, and anything off this list reads as a generic failure.
+brief_error() {
+  case ${1:-} in
+    timeout)         printf 'the request timed out' ;;
+    unreachable)     printf 'the host did not answer' ;;
+    not_json)        printf 'the answer was not JSON' ;;
+    unauthenticated) printf 'the API key was rejected' ;;
+    forbidden)       printf 'the key lacks permission for that route' ;;
+    not_found)       printf 'the route was not found' ;;
+    server_error)    printf 'the NAS reported a server error' ;;
+    "")              printf '' ;;
+    *)               printf 'the NAS reported an error' ;;
+  esac
+}
+
+# The state words a toast may show are picked from closed vocabularies, not
+# echoed: pool status, service state and job state come off the wire as text the
+# NAS shaped, so a value outside the list the routes actually use reads as the
+# generic word for its field instead. The panel, which reads the state files,
+# still shows the real value.
+pool_state() {
+  case ${1:-} in
+    ONLINE|DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED) printf '%s' "$1" ;;
+    *) printf 'not ONLINE' ;;
+  esac
+}
+
+service_state() {
+  case ${1:-} in
+    RUNNING|STOPPED) printf '%s' "$1" ;;
+    "")              printf '' ;;
+    *)               printf 'not RUNNING' ;;
+  esac
+}
+
+job_state() {
+  case ${1:-} in
+    SUCCESS|FINISHED|FAILED|ERROR|ABORTED) printf '%s' "$1" ;;
+    "")                                    printf 'unknown' ;;
+    *)                                     printf 'did not finish' ;;
+  esac
+}
+
 # Replication and cloud sync share one reduction. `kind` names both the payload
 # section and the seen.json key; `use_warnings` includes a replication row's
 # state.warnings as a failure. A job state outside the terminal set (RUNNING,
@@ -91,11 +142,12 @@ protection_notify() {
   local kind=$1 use_warnings=$2 noun=$3
   jq -c -n \
     --slurpfile payload "$WORK/payload.json" \
-    --argjson seen "$seen" \
+    --slurpfile seen "$WORK/seen.json" \
     --arg kind "$kind" \
     --argjson useWarnings "$use_warnings" \
     --arg now "$now" '
-    ($payload[0][$kind] // []) as $rows_in
+    ($seen[0]) as $seen
+    | ($payload[0][$kind] // []) as $rows_in
     | ($seen[$kind] // {}) as $prev
     | (["SUCCESS","FINISHED","FAILED","ERROR","ABORTED"]) as $terminal
     | (["FAILED","ERROR","ABORTED"]) as $bad
@@ -135,25 +187,24 @@ protection_notify() {
           }))
       }' >"$WORK/$kind-notify.json"
 
-  local name state err body
+  # The task name and the job error are the NAS's own words, so only the kind
+  # of event and the job state reach the toast; the panel has the rest.
+  local state
   while IFS= read -r t; do
     [[ -n $t ]] || continue
-    name=$(jq -r '.name' <<<"$t")
-    state=$(jq -r '.state' <<<"$t")
-    err=$(jq -r '.error // ""' <<<"$t")
-    if [[ -n $err ]]; then body=$err; else body="job state $state"; fi
-    notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" "$noun $name failed" "$body"
+    state=$(job_state "$(jq -r '.state' <<<"$t")")
+    notify "$(urgency_for warning)" "$GLYPH_ALERT" "$noun failed" "job state $state"
   done < <(jq -c '.decisions.failed[]' "$WORK/$kind-notify.json")
 
   while IFS= read -r t; do
     [[ -n $t ]] || continue
-    notify low "$GLYPH_OK" "$base" "$noun $(jq -r '.name' <<<"$t") recovered" ""
+    notify low "$GLYPH_OK" "$noun recovered"
   done < <(jq -c '.decisions.recovered[]' "$WORK/$kind-notify.json")
 
   local seen_next
-  seen_next=$(jq -c --argjson seen "$seen" --arg kind "$kind" \
-    '. as $d | $seen + { ($kind): $d.entries }' "$WORK/$kind-notify.json")
-  [[ -n $seen_next ]] && seen=$seen_next
+  seen_next=$(jq -c --slurpfile seen "$WORK/seen.json" --arg kind "$kind" \
+    '. as $d | ($seen[0]) + { ($kind): $d.entries }' "$WORK/$kind-notify.json")
+  set_seen "$seen_next"
 }
 
 # Appends one capacity sample to the sparkline history: the fullest pool's used
@@ -211,6 +262,21 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/truenas-poll.XXXXXX")
 TN_BODY=""
 trap 'rm -rf "$WORK"; rm -f "${TN_BODY:-}"' EXIT
 
+# seen.json and meta.json are what jq slurps. Both carry NAS text (alert text
+# and names in the history, hostnames, dataset paths and share names in the
+# cache), so they travel as files, never as argv words: an argv word is visible
+# to every local user through /proc/<pid>/cmdline on an ordinary procfs.
+printf '%s\n' "$seen" >"$WORK/seen.json"
+printf '%s\n' "$meta" >"$WORK/meta.json"
+
+# Every write to `seen` goes through here, so the file jq slurps and the
+# variable the rest of the poll reads cannot drift apart.
+set_seen() {
+  [[ -n ${1:-} ]] || return 0
+  seen=$1
+  printf '%s\n' "$seen" >"$WORK/seen.json"
+}
+
 warnings='[]'
 
 # The shape every failure path emits for the sections, so a failed request
@@ -219,8 +285,17 @@ default_payload() {
   printf '%s\n' '{"system":null,"counts":{"critical":0,"error":0,"warning":0,"notice":0,"info":0,"total":0,"dismissed":0},"alerts":[],"pools":[],"disks":[],"services":[],"apps":[],"replication":[],"cloudSync":[],"snapshotTasks":[],"scrubs":[],"shares":{"smb":[],"nfs":[],"iscsi":[]},"network":[]}' >"$WORK/payload.json"
 }
 
+# The section name and the error class are short codes, but the class can be the
+# NAS's own `.error.code`, and the message is whatever the body said, so all
+# three reach jq through files: --rawfile reads each back as a string and no
+# document rides an argv element.
 warn_section() {
-  warnings=$(jq -c --arg s "$1" --arg e "$2" --arg m "$3" \
+  printf '%s' "$1" >"$WORK/warning-section.txt"
+  printf '%s' "$2" >"$WORK/warning-error.txt"
+  printf '%s' "$3" >"$WORK/warning-message.txt"
+  warnings=$(jq -c --rawfile s "$WORK/warning-section.txt" \
+                    --rawfile e "$WORK/warning-error.txt" \
+                    --rawfile m "$WORK/warning-message.txt" \
     '. + [{ section: $s, error: $e, message: $m }]' <<<"$warnings")
 }
 
@@ -428,13 +503,14 @@ else
       scrub_fetched=1
       [[ -z $S_ERR ]] && scrub_ok=1
     else
-      jq -c -n --argjson s "$(jq -c '.system.data // null' <<<"$meta")" '
-        { hostname:       ($s.hostname // ""),
-          version:        ($s.version // ""),
-          uptime_seconds: ($s.uptimeSeconds // null),
-          cores:          ($s.cores // null),
-          physmem:        ($s.physmem // null),
-          loadavg:        ($s.loadavg // null) }' >"$WORK/system.json"
+      jq -c -n --slurpfile meta "$WORK/meta.json" '
+        ($meta[0].system.data // null) as $s
+        | { hostname:       ($s.hostname // ""),
+            version:        ($s.version // ""),
+            uptime_seconds: ($s.uptimeSeconds // null),
+            cores:          ($s.cores // null),
+            physmem:        ($s.physmem // null),
+            loadavg:        ($s.loadavg // null) }' >"$WORK/system.json"
       jq -c '.disks.rows // []' <<<"$meta" >"$WORK/disks.json"
       jq -c '.diskTemps.map // {}' <<<"$meta" >"$WORK/disk-temps.json"
       jq -c '.services.rows // []' <<<"$meta" >"$WORK/services.json"
@@ -490,13 +566,13 @@ outage_notified=$prev_outage
 if [[ -n $error ]]; then
   threshold=$(jq -r '.connectionFailuresBeforeToast // 3' <<<"$notify_json")
   if (( attempted )) && [[ $prev_outage != true ]] && (( failures >= threshold )); then
-    notify low "$GLYPH_OFFLINE" "$base" "TrueNAS unreachable" "${message:-$error}"
+    notify low "$GLYPH_OFFLINE" "TrueNAS unreachable" "$(brief_error "$error")"
     outage_notified=true
   fi
 else
   # A successful poll after an outage we toasted is the one recovery ping.
   if [[ $prev_outage == true ]]; then
-    notify low "$GLYPH_OK" "$base" "TrueNAS reachable again" ""
+    notify low "$GLYPH_OK" "TrueNAS reachable again"
   fi
   outage_notified=false
 
@@ -540,11 +616,12 @@ else
 
   jq -c -n \
     --slurpfile payload "$WORK/payload.json" \
-    --argjson seen "$seen" \
+    --slurpfile seen "$WORK/seen.json" \
     --argjson levels "$levels" \
     --argjson renotify "$renotify" \
     --arg now "$now" '
-    ($payload[0]) as $p
+    ($seen[0]) as $seen
+    | ($payload[0]) as $p
     | ($seen.alerts // {}) as $prev
     | ($p.alerts // []) as $all
     # A dismissed alert is out of the notification path completely: no first
@@ -570,42 +647,39 @@ else
   if (( firing_count > batch )); then
     crit=$(jq '[ .firing[] | select(.level == "critical" or .level == "error") ] | length' \
       "$WORK/decisions.json")
-    notify normal "$GLYPH_CRITICAL" "$base" \
+    notify normal "$GLYPH_CRITICAL" \
       "$firing_count new alerts" "$crit critical or error"
   else
+    # The alert text and the node name are the NAS's words; the toast carries
+    # the level only and the panel has the rest.
     while IFS= read -r a; do
       [[ -n $a ]] || continue
       sev=$(jq -r '.level' <<<"$a")
-      notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "$base" \
-        "$(jq -r '.text // "alert"' <<<"$a")" \
-        "$(jq -r '.node // ""' <<<"$a")"
+      notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "New $sev alert"
     done < <(jq -c '.firing[]' "$WORK/decisions.json")
   fi
 
   while IFS= read -r a; do
     [[ -n $a ]] || continue
     sev=$(jq -r '.level' <<<"$a")
-    notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "$base" \
-      "Still firing: $(jq -r '.text // "alert"' <<<"$a")" \
-      "$(jq -r '.node // ""' <<<"$a")"
+    notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "Still firing: $sev alert"
   done < <(jq -c '.renotify[]' "$WORK/decisions.json")
 
   if [[ $want_resolved == true ]]; then
     while IFS= read -r a; do
       [[ -n $a ]] || continue
-      notify low "$GLYPH_OK" "$base" \
-        "Resolved: $(jq -r '.name // "alert"' <<<"$a")" \
-        "$(jq -r 'if .firstSeenAt then "fired since " + .firstSeenAt else "" end' <<<"$a")"
+      notify low "$GLYPH_OK" "Alert resolved"
     done < <(jq -c '.resolved[]' "$WORK/decisions.json")
   fi
 
   if ((alerts_ok)); then
     seen_next=$(jq -c -n \
-      --argjson seen "$seen" \
+      --slurpfile seen "$WORK/seen.json" \
       --slurpfile payload "$WORK/payload.json" \
       --slurpfile decisions "$WORK/decisions.json" \
       --arg now "$now" '
-      ($payload[0]) as $p
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($decisions[0]) as $d
       | ($seen.alerts // {}) as $prev
       | (reduce ($p.alerts[]? | select(.dismissed != true)) as $a ({};
@@ -620,15 +694,16 @@ else
               else ($prev[$a.uuid].lastNotifiedAt // $now) end)
           })) as $next
       | $seen + { alerts: $next }')
-    [[ -n $seen_next ]] && seen=$seen_next
+    set_seen "$seen_next"
   fi
 
   if ((pools_ok)); then
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
-      --argjson seen "$seen" \
+      --slurpfile seen "$WORK/seen.json" \
       --arg now "$now" '
-      ($payload[0]) as $p
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($seen.pools // {}) as $prev
       | {
           worsened: [ ($p.pools // [])[] as $pool
@@ -643,24 +718,25 @@ else
                        | { name: $pool.name, status: $pool.status } ]
         }' >"$WORK/pool-decisions.json"
 
+    # The pool name is the NAS's word, so the toast carries only the status,
+    # and only when it is one the pool routes actually report.
     while IFS= read -r p; do
       [[ -n $p ]] || continue
-      notify normal "$GLYPH_CRITICAL" "$base" \
-        "Pool $(jq -r '.name' <<<"$p") is $(jq -r '.status' <<<"$p")" ""
+      notify normal "$GLYPH_CRITICAL" "A pool is $(pool_state "$(jq -r '.status' <<<"$p")")"
     done < <(jq -c '.worsened[]' "$WORK/pool-decisions.json")
 
     while IFS= read -r p; do
       [[ -n $p ]] || continue
-      notify low "$GLYPH_OK" "$base" \
-        "Pool $(jq -r '.name' <<<"$p") is ONLINE again" ""
+      notify low "$GLYPH_OK" "A pool is ONLINE again"
     done < <(jq -c '.recovered[]' "$WORK/pool-decisions.json")
 
     seen_pools=$(jq -c -n \
-      --argjson seen "$seen" \
+      --slurpfile seen "$WORK/seen.json" \
       --slurpfile payload "$WORK/payload.json" \
       --slurpfile decisions "$WORK/pool-decisions.json" \
       --arg now "$now" '
-      ($payload[0]) as $p
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($decisions[0]) as $d
       | ($seen.pools // {}) as $prev
       | (reduce ($p.pools[]?) as $pool ({};
@@ -673,14 +749,15 @@ else
               else ($prev[$pool.name].lastNotifiedAt // $now) end)
           })) as $next
       | $seen + { pools: $next }')
-    [[ -n $seen_pools ]] && seen=$seen_pools
+    set_seen "$seen_pools"
   fi
 
   if ((disks_notify_ok)); then
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
-      --argjson seen "$seen" '
-      ($payload[0]) as $p
+      --slurpfile seen "$WORK/seen.json" '
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($seen.disks // {}) as $prev
       | {
           hot: [ ($p.disks // [])[] as $disk
@@ -700,14 +777,15 @@ else
                         tempC: $disk.tempC } ]
         }' >"$WORK/disk-decisions.json"
 
+    # The disk name is the NAS's, so the toast names the event and keeps only
+    # the readings: both are numbers the panel shows too.
     while IFS= read -r d; do
       [[ -n $d ]] || continue
       sev=$(jq -r '.state' <<<"$d")
       # The warning band starts ten degrees below critical, the rule
       # share/normalize.jq decides tempState with; the row carries only the
       # critical threshold, so the band start is derived here.
-      notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "$base" \
-        "Disk $(jq -r '.name' <<<"$d") is hot" \
+      notify "$(urgency_for "$sev")" "$(glyph_for "$sev")" "A disk is hot" \
         "$(jq -r 'if .state == "critical"
                   then "\(.tempC | round) °C, critical at \(.tempCriticalC | round) °C"
                   else "\(.tempC | round) °C, warning at \(.tempCriticalC - 10 | round) °C"
@@ -716,17 +794,17 @@ else
 
     while IFS= read -r d; do
       [[ -n $d ]] || continue
-      notify low "$GLYPH_OK" "$base" \
-        "Disk $(jq -r '.name' <<<"$d") cooled" \
+      notify low "$GLYPH_OK" "A disk cooled" \
         "$(jq -r '"\(.tempC | round) °C"' <<<"$d")"
     done < <(jq -c '.cooled[]' "$WORK/disk-decisions.json")
 
     seen_disks=$(jq -c -n \
-      --argjson seen "$seen" \
+      --slurpfile seen "$WORK/seen.json" \
       --slurpfile payload "$WORK/payload.json" \
       --slurpfile decisions "$WORK/disk-decisions.json" \
       --arg now "$now" '
-      ($payload[0]) as $p
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($decisions[0]) as $d
       | ($seen.disks // {}) as $prev
       | (reduce ($p.disks[]?) as $disk ({};
@@ -740,7 +818,7 @@ else
               else ($prev[$disk.name].lastNotifiedAt // $now) end)
           })) as $next
       | $seen + { disks: $next }')
-    [[ -n $seen_disks ]] && seen=$seen_disks
+    set_seen "$seen_disks"
   fi
 
   if ((services_notify_ok)); then
@@ -752,9 +830,10 @@ else
     # entry behind.
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
-      --argjson seen "$seen" \
+      --slurpfile seen "$WORK/seen.json" \
       --arg now "$now" '
-      ($payload[0]) as $p
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($seen.services // {}) as $prev
       | [ $p.services[]? as $svc
           | ($prev[$svc.service] // null) as $old
@@ -784,29 +863,30 @@ else
             }))
         }' >"$WORK/service-notify.json"
 
+    # The service name is the NAS's; the state and the transition it was read
+    # against are whitelisted words, because the wire field is text the NAS
+    # shaped.
     while IFS= read -r s; do
       [[ -n $s ]] || continue
-      svc_name=$(jq -r '.name' <<<"$s")
-      svc_state=$(jq -r '.state' <<<"$s")
-      svc_prev=$(jq -r '.prev // ""' <<<"$s")
+      svc_state=$(service_state "$(jq -r '.state' <<<"$s")")
+      svc_prev=$(service_state "$(jq -r '.prev // ""' <<<"$s")")
       if [[ -n $svc_prev ]]; then
         svc_body="state changed from $svc_prev to $svc_state"
       else
         svc_body="state changed to $svc_state"
       fi
-      notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" \
-        "Service $svc_name is $svc_state" "$svc_body"
+      notify "$(urgency_for warning)" "$GLYPH_ALERT" \
+        "A service is $svc_state" "$svc_body"
     done < <(jq -c '.decisions.stopped[]' "$WORK/service-notify.json")
 
     while IFS= read -r s; do
       [[ -n $s ]] || continue
-      notify low "$GLYPH_OK" "$base" \
-        "Service $(jq -r '.name' <<<"$s") is running again" ""
+      notify low "$GLYPH_OK" "A service is running again"
     done < <(jq -c '.decisions.recovered[]' "$WORK/service-notify.json")
 
-    seen_services=$(jq -c --argjson seen "$seen" \
-      '. as $d | $seen + { services: $d.services }' "$WORK/service-notify.json")
-    [[ -n $seen_services ]] && seen=$seen_services
+    seen_services=$(jq -c --slurpfile seen "$WORK/seen.json" \
+      '. as $d | ($seen[0]) + { services: $d.services }' "$WORK/service-notify.json")
+    set_seen "$seen_services"
   fi
 
   if ((apps_notify_ok)); then
@@ -816,9 +896,10 @@ else
     # state forward. Reduce over the current rows only.
     jq -c -n \
       --slurpfile payload "$WORK/payload.json" \
-      --argjson seen "$seen" \
+      --slurpfile seen "$WORK/seen.json" \
       --arg now "$now" '
-      ($payload[0]) as $p
+      ($seen[0]) as $seen
+      | ($payload[0]) as $p
       | ($seen.apps // {}) as $prev
       | (["RUNNING","STOPPED","CRASHED","FAILED","EXITED"]) as $decisive
       | (["STOPPED","CRASHED","FAILED","EXITED"]) as $down
@@ -852,9 +933,10 @@ else
             }))
         }' >"$WORK/app-notify.json"
 
+    # The app name is the NAS's; the state and the transition are closed
+    # vocabularies and stay.
     while IFS= read -r a; do
       [[ -n $a ]] || continue
-      app_name=$(jq -r '.name' <<<"$a")
       app_state=$(jq -r '.state' <<<"$a")
       app_prev=$(jq -r '.prev // ""' <<<"$a")
       if [[ -n $app_prev ]]; then
@@ -862,19 +944,18 @@ else
       else
         app_body="state changed to $app_state"
       fi
-      notify "$(urgency_for warning)" "$GLYPH_ALERT" "$base" \
-        "App $app_name is $app_state" "$app_body"
+      notify "$(urgency_for warning)" "$GLYPH_ALERT" \
+        "An app is $app_state" "$app_body"
     done < <(jq -c '.decisions.stopped[]' "$WORK/app-notify.json")
 
     while IFS= read -r a; do
       [[ -n $a ]] || continue
-      notify low "$GLYPH_OK" "$base" \
-        "App $(jq -r '.name' <<<"$a") is running again" ""
+      notify low "$GLYPH_OK" "An app is running again"
     done < <(jq -c '.decisions.recovered[]' "$WORK/app-notify.json")
 
-    seen_apps=$(jq -c --argjson seen "$seen" \
-      '. as $d | $seen + { apps: $d.apps }' "$WORK/app-notify.json")
-    [[ -n $seen_apps ]] && seen=$seen_apps
+    seen_apps=$(jq -c --slurpfile seen "$WORK/seen.json" \
+      '. as $d | ($seen[0]) + { apps: $d.apps }' "$WORK/app-notify.json")
+    set_seen "$seen_apps"
   fi
 
   if ((replication_notify_ok)); then
@@ -905,7 +986,7 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
      && scrub_fetched && scrub_ok \
      && smb_fetched && smb_ok && nfs_fetched && nfs_ok \
      && iscsi_fetched && iscsi_ok && network_fetched && network_ok)); then
-  meta=$(jq -c -n --argjson meta "$meta" --arg now "$now" \
+  meta=$(jq -c -n --slurpfile meta "$WORK/meta.json" --arg now "$now" \
     --slurpfile payload "$WORK/payload.json" \
     --slurpfile disks "$WORK/disks.json" \
     --slurpfile diskTemps "$WORK/disk-temps.json" \
@@ -919,7 +1000,8 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
     --slurpfile nfs "$WORK/nfs.json" \
     --slurpfile iscsi "$WORK/iscsi.json" \
     --slurpfile network "$WORK/network.json" '
-    ($payload[0].system) as $s
+    ($meta[0]) as $meta
+    | ($payload[0].system) as $s
     | if $s == null then $meta
       else $meta + {
         system: { fetchedAt: $now, data: $s },
@@ -1136,21 +1218,29 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
                             else null end) } ]
         }
       } end')
+  printf '%s\n' "$meta" >"$WORK/meta.json"
   printf '%s\n' "$meta" | tn_write_json "$TN_META_FILE"
 fi
 
+# The connection error and its message can both be the NAS's own words, and the
+# warnings list is built from them, so all three reach jq through files: an
+# argv word is visible to every local user through /proc/<pid>/cmdline.
+printf '%s' "$error" >"$WORK/error.txt"
+printf '%s' "$message" >"$WORK/message.txt"
+printf '%s\n' "$warnings" >"$WORK/warnings.json"
+
 jq -n \
   --slurpfile payload "$WORK/payload.json" \
-  --argjson warnings "$warnings" \
+  --slurpfile warnings "$WORK/warnings.json" \
   --arg now "$now" \
   --argjson poll "${poll_seconds:-30}" \
-  --arg error "$error" --arg message "$message" \
+  --rawfile error "$WORK/error.txt" --rawfile message "$WORK/message.txt" \
   --argjson code "${code:-0}" --argjson latency "${latency:-0}" \
   --argjson failures "$failures" --arg lastOk "$last_ok" \
   --argjson outageNotified "$outage_notified" \
   --arg dialect "$(tn_dialect)" '
   ($payload[0]) as $p
-  | ($warnings // []) as $w
+  | ($warnings[0] // []) as $w
   | {
       schema: 1,
       updatedAt: $now,

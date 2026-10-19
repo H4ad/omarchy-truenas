@@ -22,6 +22,12 @@ builds `header = "Authorization: Bearer <key>"`, escaping `\` and `"` because
 curl processes backslash escapes inside a quoted config value and would
 otherwise silently send the wrong key.
 
+Response bodies and the documents derived from them follow the same rule inside
+the poll: they reach `jq` as files or on stdin (`--slurpfile`, `--rawfile`),
+never as an argument, because an argv word is world-readable through
+`/proc/<pid>/cmdline`. See "Private data on a command line" in
+[pitfalls.md](pitfalls.md).
+
 TrueNAS revokes API keys sent over plain HTTP, so the base must be `https`. A
 self-signed certificate is the norm, which is why `insecureTLS` exists; see
 [pitfalls.md](pitfalls.md).

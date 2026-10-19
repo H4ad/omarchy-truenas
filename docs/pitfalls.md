@@ -103,6 +103,31 @@ anything.
 
 Do: `--slurpfile`, or make the payload jq's input file rather than an argument.
 
+### Private data on a command line
+
+`/proc/<pid>/cmdline` is world-readable on an ordinary procfs, so every argv word
+a helper hands to a child process is readable by every other local user for as
+long as that process lives. A poll runs on a timer, and its `jq` calls carried
+the whole seen history, the meta cache and the warning list as `--argjson`
+arguments; its toasts carried alert text, pool, disk, service, app and task
+names and the NAS's own error words. All of it was visible in `ps` to anyone
+logged in.
+
+Do: pass documents as files or on stdin, never as an argument. In
+`bin/truenas-poll`: `--slurpfile` for `seen.json` and `meta.json`, `--rawfile`
+for the warning fields and for the connection error and message, and stdin for
+the rest. A toast's words are constants, counts and whitelisted state words
+(RUNNING, DEGRADED, a temperature), picked through `brief_error`, `pool_state`,
+`service_state` and `job_state` rather than echoed, so a field the NAS puts text
+in cannot make a toast say it. The `--exec` is the constant
+`omarchy-shell -q shell summon io.github.h4ad.truenas`, so the panel's details
+are one click away without a name on a command line.
+
+The regression is `tests/cases/16-argv.sh`: it runs a poll with a `jq` wrapper
+first on `PATH` that records every argument vector, fires every notification
+kind with marker strings in the fixtures, and greps both logs for the markers.
+A marker found in either log fails the case.
+
 ### Test cases share one shell
 
 `tests/cases/*.sh` are sourced in name order into **one** shell and share the
@@ -407,7 +432,7 @@ description, then `--exec <program> [args...]` as the last thing, with the comma
 as separate argv words:
 
 ```
-omarchy-notification-send [options] <headline> [description] --exec xdg-open <url>
+omarchy-notification-send [options] <headline> [description] --exec omarchy-shell -q shell summon io.github.h4ad.truenas
 ```
 
 A single argv word holding a space (`--exec "xdg-open <url>"`) is rejected
@@ -415,8 +440,11 @@ outright, and because the call ended in `|| true` every toast silently no-op'd.
 
 Do: `bin/truenas-poll`'s `notify()` builds the options
 (`--app-name truenas -u <urgency> -g <glyph>`), then the headline and body, then
-`--exec xdg-open "$url"`, and never builds `--exec`'s command as one string. Alert
-text is passed only as an argv element, never as a shell string.
+the summon command as separate words, and never builds `--exec`'s command as one
+string. The command is constant, so the toast's click action needs neither a NAS
+name nor the configured URL on a command line; it opens the plugin's menu, and
+the panel behind it has the details. Alert text never reaches the call at all
+(see "Private data on a command line" under Shell and jq).
 
 ### Check the real binary, not just the stub
 

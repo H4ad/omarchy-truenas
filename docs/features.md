@@ -127,6 +127,14 @@ task fails or recovers. Severity maps to urgency. Toasts are deduped in
 failed poll leaves `seen.json` untouched. A critical toast does not stick on
 screen by default; that is opt-in through `notify.stickyCritical`.
 
+A toast names the kind of event, not the thing: "A pool is DEGRADED", "A disk is
+hot", "A service is STOPPED", with counts, temperatures and state transitions.
+Alert text, pool, disk, service, app and task names, and the NAS's own error
+words live in the state files and the panel instead, because a notification
+argument is readable by other local users through `/proc`. Clicking a toast
+summons the plugin's menu, which opens the popout with the details; the
+configured base URL is never passed on a command line.
+
 There are no SMART toasts: the API dropped SMART tests after 24.10 and
 `smart/test/results` is `404` on 25.10.6.
 
