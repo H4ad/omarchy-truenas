@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.h4ad.truenas",
   "name": "TrueNAS",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Vinícius Lourenço",
   "license": "MIT",
   "description": "TrueNAS pool health, disk temperatures, active alerts and protection tasks on the Omarchy bar, with desktop notifications and a popout for disks, pools, alerts, services, apps, protection, shares, network and system state.",
