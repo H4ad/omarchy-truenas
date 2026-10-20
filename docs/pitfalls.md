@@ -130,6 +130,11 @@ command line. Both now compute it inside the render with the shared
 `STATE_UNKNOWN_JQ` filter. The verbs that only print the sentence themselves
 keep the shell helper, because a builtin's arguments are not a child's argv.
 
+`bin/truenas-api`'s `fail` had the same shape: `tn_classify` keeps an unknown
+`.error.code` verbatim, and the message is read from the body, so both could be
+the NAS's words and both went to jq as `--arg`. They now arrive on stdin,
+NUL-separated, which is safe because a bash variable cannot contain NUL.
+
 A toast's words are constants, counts and whitelisted state words (RUNNING,
 DEGRADED, a temperature), picked through `brief_error`, `pool_state`,
 `service_state` and `job_state` rather than echoed, so a field the NAS puts text
@@ -142,7 +147,9 @@ first on `PATH` that records every argument vector, logs the curl stub's argv an
 the notification sender's argv, fires every notification kind with marker strings
 in the fixtures, and greps all three logs for the markers. A marker found in any
 of them fails the case. A third case points `truenasctl status` and `shares` at a
-state whose `connection.message` is a marker and checks the `jq` log after both.
+state whose `connection.message` is a marker and checks the `jq` log after both,
+and a fourth points `truenas-api` at a 400 whose `.error.code` and message are
+markers.
 
 ### Test cases share one shell
 

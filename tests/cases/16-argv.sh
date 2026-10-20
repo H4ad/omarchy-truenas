@@ -169,3 +169,21 @@ check "shares names it once per type" 3 \
   "$(grep -c 'shares unknown: unreachable: connection refused: /mnt/private' <<<"$out")"
 check "no state value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
 teardown
+
+test_case "truenas-api keeps the NAS error off a jq command line"
+setup; single_instance_config
+cat >"$WORK/err-private.json" <<'JSON'
+{ "error": { "code": "/mnt/private/code", "message": "refused: /mnt/private" } }
+JSON
+respond "/api/v2.0/alert/dismiss" 0 400 "$WORK/err-private.json"
+argv_probe
+
+# tn_classify keeps an unknown `.error.code` verbatim and tn_error_message reads
+# the body's message, so both fields can be the NAS's words. `fail` used to hand
+# them to jq as --arg; the answer still has to carry them, but only on stdout.
+out=$(PATH="$WORK:$PATH" "$ROOT/bin/truenas-api" dismiss \
+  11111111-2222-3333-4444-555555555555)
+check "the error code is carried" "/mnt/private/code" "$(jq -r '.error' <<<"$out")"
+check "the message is carried" "refused: /mnt/private" "$(jq -r '.message' <<<"$out")"
+check "no NAS value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+teardown

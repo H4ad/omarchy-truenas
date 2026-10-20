@@ -41,7 +41,13 @@ TXT
 }
 
 fail() {
-  jq -n --arg error "$1" --arg message "${2:-}" '{ error: $error, message: $message }'
+  # Both values can be the NAS's own words: tn_classify returns `.error.code` or
+  # `.error.type` when it can, and the message is read from the body. They reach
+  # jq NUL-separated on stdin, never as `--arg` words, because argv is readable
+  # through /proc by every local user. A bash variable cannot hold NUL, so no
+  # value can be split into the wrong field.
+  printf '%s\0%s\0' "$1" "${2:-}" \
+    | jq -Rs 'split("\u0000") | { error: .[0], message: .[1] }'
   exit 1
 }
 
