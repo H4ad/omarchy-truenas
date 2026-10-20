@@ -274,30 +274,49 @@ cmd_test() {
   return 0
 }
 
-# Why one half of the state is unknown, or "" when it is not. `$2` is the
-# section name the poller uses: "alert", "pool", "disk", "diskTemp", "service",
+# Why one half of the state is unknown, or "" when it is not. The section name
+# the poller uses is one of "alert", "pool", "disk", "diskTemp", "service",
 # "app", "replication", "cloudSync", "snapshotTasks", "scrubs", "smb", "nfs",
 # "iscsi" or "network". A missing answer (offline), a failed request for that
 # section, and a failed normalize all leave the half unknowable, and each gets a
 # reason rather than a zero. The offline sentence is the same one the
 # `connection` line carries, so the verbs name the same cause.
-state_unknown_reason() {
-  jq -r --arg section "$2" '
-    def down:
-      (.connection.error // "unreachable")
-      + (if (.connection.message // "") != "" then ": " + .connection.message else "" end);
-    (.warnings // []) as $w
-    | if (.connection.ok != true) then down
-      elif ([$w[] | select(.section == $section)] | length) > 0
+#
+# This lives in a variable because `status` and `shares` render in a single jq
+# pass: they call `unknown`/`share_unknown` inside that program. A shell helper
+# that returned the sentence and then handed it back as `--arg` would put NAS
+# error text on a child's command line, readable through /proc by every local
+# user. The verbs that print a reason line themselves still use the helper.
+STATE_UNKNOWN_JQ='
+  def down:
+    ((.connection // {}) | if type == "object" then . else {} end) as $c
+    | (($c.error // "unreachable") | tostring)
+      + (if ($c.message // "") != "" then ": " + ($c.message | tostring) else "" end);
+  def unknown($section):
+    ((.connection // {}) | if type == "object" then . else {} end) as $c
+    | ((.warnings // []) | if type == "array" then . else [] end) as $w
+    | if ($c.ok != true) then down
+      elif ([$w[] | objects | select(.section == $section)] | length) > 0
         then "the \($section) section did not answer"
-      elif ([$w[] | select(.section == "normalize")] | length) > 0
+      elif ([$w[] | objects | select(.section == "normalize")] | length) > 0
         then "the response could not be normalized"
-      else "" end
+      else "" end;
+  def share_unknown($section):
+    unknown($section) as $r
+    | if $r != "" then $r
+      elif (.shares | type) == "object" then
+        if (.shares[$section] | type) == "array" then "" else "the \($section) section did not answer" end
+      else "the \($section) section did not answer" end;
+'
+
+state_unknown_reason() {
+  jq -r --arg section "$2" "$STATE_UNKNOWN_JQ"'
+    unknown($section)
   ' "$1"
 }
 
 cmd_status() {
-  local file updated poll_s then_epoch now_epoch age stale="" alert_unknown pool_unknown
+  local file updated poll_s then_epoch now_epoch age stale=""
   file="$TN_STATE_FILE"
   if [[ ! -s $file ]]; then
     printf 'no state yet; run: truenasctl poll\n'
@@ -315,12 +334,10 @@ cmd_status() {
     (( age > poll_s * 2 )) && stale=" (stale, ${age}s old)"
   fi
 
-  # Computed before the render so the count lines and the reason never disagree,
-  # and so the same helper answers `cmd_alerts`.
-  alert_unknown=$(state_unknown_reason "$file" alert)
-  pool_unknown=$(state_unknown_reason "$file" pool)
-
-  jq -r --arg stale "$stale" --arg alert_unknown "$alert_unknown" --arg pool_unknown "$pool_unknown" '
+  # The reason is computed inside the render, not in the shell: it carries the
+  # NAS's own error words, and an `--arg` would put them on jq's command line.
+  # `stale` stays an argument because it is only the plugin's own count.
+  jq -r --arg stale "$stale" "$STATE_UNKNOWN_JQ"'
     def human:
       (. | floor) as $d
       | ($d / 86400 | floor) as $days
@@ -330,6 +347,8 @@ cmd_status() {
         else "\($hours)h \($mins)m" end;
     def prank: {"ONLINE":0,"DEGRADED":1,"OFFLINE":2,"UNAVAIL":3,"FAULTED":4,"REMOVED":5}[.] // 9;
     (.counts // {}) as $c
+    | unknown("alert") as $alert_unknown
+    | unknown("pool") as $pool_unknown
     | "updated: \(.updatedAt // "never")\($stale)",
       "connection: " + (if (.connection.ok == true) then "ok" else "down" end)
         + (if (.connection.error // "") != "" then " (\(.connection.error): \(.connection.message // ""))" else "" end),
@@ -603,20 +622,6 @@ cmd_scrubs() {
   ' "$file"
 }
 
-# Why one share type is unknown, or "" when it is not. `$2` is the section token
-# the poller uses: smb, nfs or iscsi. A failed fetch leaves a warning; a state
-# written before M5 has no shares object at all, so an absent or non-list sublist
-# is named the same way a failed one is, rather than printed as an empty table.
-share_unknown_reason() {
-  local file=$1 section=$2 reason
-  reason=$(state_unknown_reason "$file" "$section")
-  if [[ -z $reason ]]; then
-    jq -e --arg s "$section" '.shares[$s] | type == "array"' "$file" >/dev/null 2>&1 \
-      || reason="the $section section did not answer"
-  fi
-  printf '%s' "$reason"
-}
-
 # One row per SMB, NFS and iSCSI share, grouped in that order and sorted within
 # each type the way the poller wrote them (SMB by name, NFS by path, iSCSI by
 # name). TYPE is the share type; NFS has no name and iSCSI has no path, enabled
@@ -624,30 +629,35 @@ share_unknown_reason() {
 # `unknown` for a field the type has but the poll did not learn. A type whose
 # section warned prints its reason on its own line before the table and its rows
 # are omitted, so a failed section never reads as "no shares".
+#
+# A state written before M5 has no shares object at all, so an absent or
+# non-list sublist is named the same way a failed one is. The reasons are part
+# of the render for the same reason as `status`: they can quote the NAS's error
+# text, which must not become an `--arg` on jq's command line.
 cmd_shares() {
-  local file smb_reason nfs_reason iscsi_reason
+  local file
   file="$TN_STATE_FILE"
   [[ -s $file ]] || { printf 'no state yet; run: truenasctl poll\n'; return 1; }
   if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
     printf 'the state at %s is unreadable; run: truenasctl poll\n' "$file"
     return 1
   fi
-  smb_reason=$(share_unknown_reason "$file" smb)
-  nfs_reason=$(share_unknown_reason "$file" nfs)
-  iscsi_reason=$(share_unknown_reason "$file" iscsi)
-  [[ -z $smb_reason ]] || printf 'smb shares unknown: %s\n' "$smb_reason"
-  [[ -z $nfs_reason ]] || printf 'nfs shares unknown: %s\n' "$nfs_reason"
-  [[ -z $iscsi_reason ]] || printf 'iscsi shares unknown: %s\n' "$iscsi_reason"
-  jq -r --arg smb "$smb_reason" --arg nfs "$nfs_reason" --arg iscsi "$iscsi_reason" '
+  jq -r "$STATE_UNKNOWN_JQ"'
     def yesno($v): if ($v | type) == "boolean" then (if $v then "yes" else "no" end) else "unknown" end;
     def carried($v): if $v == null or $v == "" then "unknown" else $v end;
-    "TYPE  NAME  PATH  ENABLED  RO",
-    (select($smb == "") | (.shares.smb // [])[]
-     | [ "smb", carried(.name), carried(.path), yesno(.enabled), yesno(.readonly) ] | join("  ")),
-    (select($nfs == "") | (.shares.nfs // [])[]
-     | [ "nfs", "-", carried(.path), yesno(.enabled), yesno(.readonly) ] | join("  ")),
-    (select($iscsi == "") | (.shares.iscsi // [])[]
-     | [ "iscsi", carried(.name), "-", "-", "-" ] | join("  "))
+    (share_unknown("smb")) as $smb
+    | (share_unknown("nfs")) as $nfs
+    | (share_unknown("iscsi")) as $iscsi
+    | (if $smb != "" then "smb shares unknown: \($smb)" else empty end),
+      (if $nfs != "" then "nfs shares unknown: \($nfs)" else empty end),
+      (if $iscsi != "" then "iscsi shares unknown: \($iscsi)" else empty end),
+      "TYPE  NAME  PATH  ENABLED  RO",
+      (select($smb == "") | (.shares.smb // [])[]
+       | [ "smb", carried(.name), carried(.path), yesno(.enabled), yesno(.readonly) ] | join("  ")),
+      (select($nfs == "") | (.shares.nfs // [])[]
+       | [ "nfs", "-", carried(.path), yesno(.enabled), yesno(.readonly) ] | join("  ")),
+      (select($iscsi == "") | (.shares.iscsi // [])[]
+       | [ "iscsi", carried(.name), "-", "-", "-" ] | join("  "))
   ' "$file"
 }
 

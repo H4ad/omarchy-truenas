@@ -146,3 +146,26 @@ check "no NAS value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LO
 check "no configured address is on a curl command line" "" "$(marker_hits "$STUB_CURL_ARGV_LOG")"
 check "no NAS value is on a notification command line" "" "$(marker_hits "$STUB_NOTIFY_LOG")"
 teardown
+
+test_case "truenasctl keeps the state's error text off a jq command line"
+setup
+mkdir -p "$(dirname "$STATE")"
+cat >"$STATE" <<'JSON'
+{ "schema": 1, "updatedAt": "2026-09-13T00:00:00Z", "pollSeconds": 30,
+  "connection": { "ok": false, "error": "unreachable",
+                  "message": "connection refused: /mnt/private" },
+  "system": null, "counts": null, "alerts": null, "pools": null, "warnings": [] }
+JSON
+argv_probe
+
+# The state carries the NAS's error sentence, which both verbs quote. The
+# sentence may print, but it must not become an `--arg` on the jq command line
+# the way it did in `status` and `shares` before this case existed.
+out=$(PATH="$WORK:$PATH" "$ROOT/bin/truenasctl" status)
+check "status names the reason on connection, pools and alerts" 3 \
+  "$(grep -c 'connection refused: /mnt/private' <<<"$out")"
+out=$(PATH="$WORK:$PATH" "$ROOT/bin/truenasctl" shares)
+check "shares names it once per type" 3 \
+  "$(grep -c 'shares unknown: unreachable: connection refused: /mnt/private' <<<"$out")"
+check "no state value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+teardown

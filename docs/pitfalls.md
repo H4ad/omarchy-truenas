@@ -123,6 +123,13 @@ escaped because curl processes backslash escapes inside a quoted config value,
 and the URL drops CR/LF because a line break cannot be escaped into a quoted
 value and would start a config line of its own.
 
+`truenasctl status` and `shares` had the same shape one layer up: they asked jq
+for the sentence that explains an unknown section, then passed that sentence
+back to jq as `--arg`, so the NAS's `connection.message` rode the render's
+command line. Both now compute it inside the render with the shared
+`STATE_UNKNOWN_JQ` filter. The verbs that only print the sentence themselves
+keep the shell helper, because a builtin's arguments are not a child's argv.
+
 A toast's words are constants, counts and whitelisted state words (RUNNING,
 DEGRADED, a temperature), picked through `brief_error`, `pool_state`,
 `service_state` and `job_state` rather than echoed, so a field the NAS puts text
@@ -134,7 +141,8 @@ The regression is `tests/cases/16-argv.sh`: it runs a poll with a `jq` wrapper
 first on `PATH` that records every argument vector, logs the curl stub's argv and
 the notification sender's argv, fires every notification kind with marker strings
 in the fixtures, and greps all three logs for the markers. A marker found in any
-of them fails the case.
+of them fails the case. A third case points `truenasctl status` and `shares` at a
+state whose `connection.message` is a marker and checks the `jq` log after both.
 
 ### Test cases share one shell
 
