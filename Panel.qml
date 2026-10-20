@@ -14,7 +14,9 @@ import "Redact.js" as Redact
 // The panel owns every write: views ask it to run a verb, it serialises the
 // argv through one Process (apiQueue/pumpApi), then refreshes the state with a
 // forced re-poll before believing anything. It never trusts a verb's stdout as
-// the new state.
+// the new state. The selected name or uuid travels on that process's stdin,
+// never in its argv: an argv word is readable by every local user through
+// /proc/<pid>/cmdline, and an app, service or pool name is the NAS's own data.
 //
 // The bar widget injects bar, settings, anchorItem, hostWidget and state. The
 // panel adds nothing else to that contract on purpose: everything else it needs
@@ -242,22 +244,31 @@ Panel {
   // writes, because it is also a command somebody types. So success is the exit
   // status, not the parseability of the output.
   function runCtl(args, callback, onError) {
-    root.enqueue([root.ctlPath].concat(args), callback, onError)
+    root.enqueue([root.ctlPath].concat(args), "", callback, onError)
   }
 
-  function runApi(args, callback, onError) {
-    root.enqueue([root.apiPath].concat(args), callback, onError)
+  // `target` is the name or uuid the verb acts on. It is written to the
+  // helper's stdin, never appended to the argv, because an app, service or
+  // pool name in /proc/<pid>/cmdline is readable by every local user for the
+  // life of the request.
+  function runApi(verb, target, callback, onError) {
+    root.enqueue([root.apiPath, String(verb || "")], String(target || ""),
+      callback, onError)
   }
 
-  function enqueue(command, callback, onError) {
+  function enqueue(command, stdinText, callback, onError) {
     root.apiQueue = root.apiQueue.concat([
-      { command: command, callback: callback, onError: onError }])
+      { command: command, stdinText: stdinText,
+        callback: callback, onError: onError }])
     root.pumpApi()
   }
 
   function pumpApi() {
     if (apiProc.running || !root.apiQueue.length) return
-    apiProc.command = root.apiQueue[0].command
+    var job = root.apiQueue[0]
+    apiProc.command = job.command
+    apiProc.stdinText = job.stdinText || ""
+    apiProc.stdinEnabled = apiProc.stdinText !== ""
     apiProc.running = true
   }
 
@@ -350,7 +361,17 @@ Panel {
     id: apiProc
     property string outText: ""
     property string errText: ""
+    // The target for the job about to run, written once and dropped. stdin is
+    // enabled only for a job that carries one, so a CLI verb that reads no
+    // stdin does not wait on a pipe the panel never closes.
+    property string stdinText: ""
+    stdinEnabled: false
     command: []
+    onStarted: {
+      if (!apiProc.stdinEnabled) return
+      apiProc.write(apiProc.stdinText + "\n")
+      apiProc.stdinText = ""
+    }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: apiProc.outText = text

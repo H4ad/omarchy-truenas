@@ -62,7 +62,17 @@ check() {
 
 test_case() { printf '\n%s\n' "$1"; }
 
-api() { "$ROOT/bin/truenas-api" "$@"; }
+# The verb is argv; the name or uuid is stdin, which is the panel's contract
+# and the reason the target has no place in a process listing. A call with no
+# target gets EOF so the helper complains instead of blocking a terminal run.
+api() {
+  local verb=${1:-} target=${2:-}
+  if (( $# > 1 )); then
+    "$ROOT/bin/truenas-api" "$verb" <<<"$target"
+  else
+    "$ROOT/bin/truenas-api" "$verb" </dev/null
+  fi
+}
 
 # ------------------------------------------------- notification fixtures
 # The builders every notification case needs: the fifteen endpoint map, one-row

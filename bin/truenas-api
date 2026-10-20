@@ -9,10 +9,13 @@
 # write.
 #
 # The key is resolved exactly the way the poller resolves it and handed to curl
-# as a config file on stdin, never in argv. The name or uuid is written into the
-# request body by jq, never interpolated into a shell string, so a value that
-# came off the wire can only ever be one JSON string and never a second field.
-# An id that goes into a path is validated numeric first.
+# as a config file on stdin, never in argv. The name or uuid is read from stdin
+# too, because an app, service or pool name on a command line is readable by
+# every local user through /proc/<pid>/cmdline for the life of the request. jq
+# writes it into the request body from the same stdin stream, never as an
+# argument, so a value that came off the wire can only ever be one JSON string
+# and never a second field. An id that goes into a path is validated numeric
+# first.
 set -uo pipefail
 
 TN_PLUGIN_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -21,7 +24,10 @@ TN_PLUGIN_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 
 usage() {
   cat <<'TXT'
-truenas-api <verb> <name|uuid>
+truenas-api <verb>
+
+The name or uuid is read from stdin, never from argv: a command line is
+readable by every local user through /proc/<pid>/cmdline.
 
   dismiss <uuid>          dismiss one alert
   restore <uuid>          restore a dismissed alert
@@ -35,7 +41,6 @@ truenas-api <verb> <name|uuid>
   cloudsync-sync <id>     run a cloud sync task now
   snapshot-run <id>       run a periodic snapshot task now
   scrub-start <pool>      start a scrub for a pool
-
 Answers with one JSON object: {"ok":true} on success, {error, message} otherwise.
 TXT
 }
@@ -55,13 +60,12 @@ tn_have jq || { tn_warn "jq is required"; exit 1; }
 
 # Unknown verb first, so the usage text is the only thing on the way out and the
 # exit status (2) is a different class from a failed write (1). Each arm names
-# its route, how the body is built and the word for the positional argument, so
-# the request below and this guard read the same table. `body=field` writes one
+# its route, how the body is built and the word for the value read from stdin,
+# so the request below and this guard read the same table. `body=field` writes one
 # key; `body=int` writes the bare integer the replication run route expects;
 # `body=scrub` writes the name and action pair; `body=none` sends no body, with
 # the id already in the path.
 verb=${1:-}
-target=${2:-}
 id_in_path=0
 case $verb in
   dismiss)         path=/api/v2.0/alert/dismiss;   body=field; body_key=uuid;     what="an alert uuid" ;;
@@ -79,10 +83,14 @@ case $verb in
   *) usage >&2; exit 2 ;;
 esac
 
-# Exactly one positional. A second one is a usage error rather than a silent
-# ignore, because a caller that passed the wrong tuple needs to hear about it.
-(( $# > 2 )) && { tn_warn "truenas-api takes one argument, got $(( $# - 1 ))"; usage >&2; exit 2; }
-[[ -n $target ]] || { tn_warn "a $verb needs $what"; usage >&2; exit 2; }
+# The target is the only thing on stdin, so it never reaches argv. A second
+# positional is a usage error rather than a silent ignore: a caller that still
+# passes the old tuple needs to hear about it, not have the name leak.
+(( $# > 1 )) && {
+  tn_warn "truenas-api reads its target on stdin; it takes no arguments after the verb"
+  usage >&2; exit 2; }
+IFS= read -r target || true
+[[ -n $target ]] || { tn_warn "a $verb needs $what on stdin"; usage >&2; exit 2; }
 
 config=$(tn_load_config)
 config_error=$(jq -r '.configError // ""' <<<"$config")
@@ -120,10 +128,15 @@ payload=$(mktemp "${TMPDIR:-/tmp}/truenas-api.XXXXXX") \
   || { tn_warn "could not create a temporary file"; exit 1; }
 trap 'rm -f "${payload:-}" "${TN_BODY:-}"' EXIT
 
+# The target reaches jq on stdin as well, so neither the name nor the uuid is
+# an `--arg` word. `body_key` is from the constant table above and is safe in
+# argv. `-Rs` reads one raw string, which is exactly the line read above.
 case $body in
-  field) jq -n --arg k "$body_key" --arg v "$target" '{ ($k): $v }' >"$payload" ;;
-  int)   jq -n --argjson n "$target" '$n' >"$payload" ;;
-  scrub) jq -n --arg name "$target" '{ name: $name, action: "START" }' >"$payload" ;;
+  field) printf '%s' "$target" \
+           | jq -Rs --arg k "$body_key" '{ ($k): . }' >"$payload" ;;
+  int)   printf '%s' "$target" | jq -R 'tonumber' >"$payload" ;;
+  scrub) printf '%s' "$target" \
+           | jq -Rs '{ name: ., action: "START" }' >"$payload" ;;
   none)  : >"$payload" ;;
 esac
 

@@ -83,8 +83,9 @@ endpoint. What the seam does not cover is in
 | run snapshot task | POST | `/api/v2.0/pool/snapshottask/id/{id}/run` | none | `null` (synchronous) |
 | scrub action | POST | `/api/v2.0/pool/scrub/scrub` | `{"name":<pool>,"action":"START"}` | a job id |
 
-Alert writes are reached through `bin/truenas-api`, one verb per call, JSON on
-stdout. Both require the `ALERT_LIST_WRITE` role; the reads need
+Alert writes are reached through `bin/truenas-api`, one verb per call, with the
+name or uuid on stdin rather than argv and JSON on stdout. Both require the
+`ALERT_LIST_WRITE` role; the reads need
 `ALERT_LIST_READ`. Every write is one queued process followed by a forced
 re-poll, so the panel reads the NAS back rather than trusting the verb's stdout.
 Dismiss and every service, app and protection control sit behind a confirmation.

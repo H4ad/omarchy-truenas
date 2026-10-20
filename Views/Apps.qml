@@ -153,7 +153,7 @@ Column {
     panel.requestConfirm(
       label + " the " + named + " app? " + view.consequence(verb),
       function() {
-        panel.runApi([verb, name], function() {
+        panel.runApi(verb, name, function() {
           panel.actionNotice = named + " " + label.toLowerCase() + " requested"
           panel.refreshAfterWrite()
         }, function() {

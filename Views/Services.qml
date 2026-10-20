@@ -118,7 +118,7 @@ Column {
     panel.requestConfirm(
       label + " the " + name + " service? " + view.consequence(verb),
       function() {
-        panel.runApi([verb, name], function() {
+        panel.runApi(verb, name, function() {
           panel.actionNotice = name + " service " + label.toLowerCase() + " requested"
           panel.refreshAfterWrite()
         }, function() {

@@ -112,7 +112,7 @@ Column {
     var panel = view.panel
     if (String(target || "") === "") return
     panel.requestConfirm(message, function() {
-      panel.runApi([verb, String(target)], function() {
+      panel.runApi(verb, String(target), function() {
         panel.actionNotice = label + " requested"
         panel.refreshAfterWrite()
       }, function() {

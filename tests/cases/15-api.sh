@@ -228,12 +228,13 @@ check "names the missing argument" 1 \
 check "usage on stderr" 1 "$(grep -c 'truenas-api <verb>' <<<"$out")"
 teardown
 
-test_case "an extra positional is a usage error with status 2"
+test_case "a target in argv is a usage error with status 2"
 setup
-out=$(api service-start cifs extra 2>&1)
+out=$("$ROOT/bin/truenas-api" service-start cifs </dev/null 2>&1)
 rc=$?
 check "exit 2" 2 "$rc"
-check "explains the extra argument" 1 "$(grep -c 'takes one argument' <<<"$out")"
+check "explains the target belongs on stdin" 1 \
+  "$(grep -c 'takes no arguments after the verb' <<<"$out")"
 check "usage on stderr" 1 "$(grep -c 'truenas-api <verb>' <<<"$out")"
 teardown
 

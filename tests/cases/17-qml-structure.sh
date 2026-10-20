@@ -262,6 +262,16 @@ check "the tab strip no longer clips in a Row" "" \
 check "only jumpTo writes contentY" "1" \
   "$(grep -c 'root.flickable.contentY =' "$ROOT/Ui/ScrollIndicator.qml")"
 
+# ---------------------------------------------------------------- API targets
+# The name or uuid a view acts on has to leave the view as its own argument, so
+# the panel can write it to the helper's stdin. A target left inside the argv
+# array is back in /proc/<pid>/cmdline, and no other suite can see it because
+# none of them run QML.
+check "no view puts a target in runApi's argv" "" \
+  "$(grep -nE 'runApi\(\[[^]]*,' "$ROOT"/Views/*.qml)"
+check "the panel writes the API target on stdin" "1" \
+  "$(grep -c 'apiProc.write(apiProc.stdinText' "$ROOT/Panel.qml")"
+
 # -------------------------------------------------------------- helper callers
 # The two helpers Task C keeps each need a live caller, or the only match in the
 # repo is the library definition.

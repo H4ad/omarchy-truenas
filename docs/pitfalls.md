@@ -135,6 +135,14 @@ keep the shell helper, because a builtin's arguments are not a child's argv.
 the NAS's words and both went to jq as `--arg`. They now arrive on stdin,
 NUL-separated, which is safe because a bash variable cannot contain NUL.
 
+The write target had it too, one layer up: the panel passed the selected app,
+service or pool name (or the alert uuid) to `truenas-api` as a second argv word,
+and the call that built the request body passed it to jq as `--arg`. An app name
+is the NAS's own data, and it sat in `/proc/<pid>/cmdline` for the length of the
+request. Now the verb is the only argv word. The name or uuid is read from stdin,
+and jq reads the same line from stdin to build the body; the panel writes it to
+the one Process its write queue serialises through.
+
 A toast's words are constants, counts and whitelisted state words (RUNNING,
 DEGRADED, a temperature), picked through `brief_error`, `pool_state`,
 `service_state` and `job_state` rather than echoed, so a field the NAS puts text
@@ -148,8 +156,9 @@ the notification sender's argv, fires every notification kind with marker string
 in the fixtures, and greps all three logs for the markers. A marker found in any
 of them fails the case. A third case points `truenasctl status` and `shares` at a
 state whose `connection.message` is a marker and checks the `jq` log after both,
-and a fourth points `truenas-api` at a 400 whose `.error.code` and message are
-markers.
+a fourth points `truenas-api` at a 400 whose `.error.code` and message are
+markers, and a fifth sends an app name on stdin and checks it reaches the body
+without appearing on jq's command line.
 
 ### Test cases share one shell
 

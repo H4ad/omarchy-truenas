@@ -204,7 +204,8 @@ because an argv word is readable by other local users through `/proc`. The same
 rule holds for the poll's `jq` calls (every document the NAS shaped travels on
 stdin), for `truenasctl status` and `shares` (the sentence that explains an
 unknown section is computed inside the same jq pass, never handed back as an
-argument), for `truenas-api` (an error code and message reach jq on stdin,
+argument), for `truenas-api` (the selected app, service or pool name and the
+alert uuid reach it on stdin, and an error code and message reach jq on stdin,
 NUL-separated), and for `curl` (the request URL rides the stdin config document
 next to the key). `xdg-open` receives only origin-gated URLs. The one command-execution
 path is `apiKeyCommand` in `config.json`, a command you write yourself; it runs

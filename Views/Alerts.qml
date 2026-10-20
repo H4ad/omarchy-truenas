@@ -105,7 +105,7 @@ Column {
 
   function act(alert, verb) {
     if (!alert || !alert.uuid) return
-    view.panel.runApi([verb, String(alert.uuid)], function() {
+    view.panel.runApi(verb, String(alert.uuid), function() {
       view.panel.actionNotice = verb === "dismiss" ? "alert dismissed" : "alert restored"
       view.panel.refreshAfterWrite()
     })

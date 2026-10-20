@@ -5,8 +5,9 @@
 # through /proc/<pid>/cmdline on an ordinary procfs. So the documents that carry
 # NAS text (the payload, the seen history, the meta cache, the warnings list and
 # the connection error) reach jq through --slurpfile, --rawfile or stdin; the
-# request URL and the key reach curl in its --config - document; and a toast
-# carries only constants, counts and whitelisted state words.
+# request URL and the key reach curl in its --config - document; the name or
+# uuid a write acts on reaches truenas-api on stdin; and a toast carries only
+# constants, counts and whitelisted state words.
 #
 # The first case drives one poll that fires every kind of notification at once,
 # with fixtures the markers below come from, and then greps every command line
@@ -182,8 +183,22 @@ argv_probe
 # the body's message, so both fields can be the NAS's words. `fail` used to hand
 # them to jq as --arg; the answer still has to carry them, but only on stdout.
 out=$(PATH="$WORK:$PATH" "$ROOT/bin/truenas-api" dismiss \
-  11111111-2222-3333-4444-555555555555)
+  <<<'11111111-2222-3333-4444-555555555555')
 check "the error code is carried" "/mnt/private/code" "$(jq -r '.error' <<<"$out")"
 check "the message is carried" "refused: /mnt/private" "$(jq -r '.message' <<<"$out")"
 check "no NAS value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+teardown
+
+test_case "truenas-api keeps the app name off a jq command line"
+setup; single_instance_config
+respond "/api/v2.0/app/start" 0 200 /dev/null
+argv_probe
+
+# The panel sends the selected app name on stdin. It must reach the request
+# body, and it must not become an `--arg` word on the jq call that builds it:
+# `/proc/<pid>/cmdline` is readable by every local user.
+out=$(PATH="$WORK:$PATH" "$ROOT/bin/truenas-api" app-start <<<'appc')
+check "the write landed" true "$(jq -r '.ok' <<<"$out")"
+check "the app name reached the body" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
+check "no app name is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
 teardown
