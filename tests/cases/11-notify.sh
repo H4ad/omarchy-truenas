@@ -800,8 +800,8 @@ poll
 check "the baseline is quiet" 0 "$(notifications)"
 before=$(seen '.replication')
 respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
-respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
-respond_add "/api/v2.0/pool/scrub" 0 200 "$ROOT/tests/fixtures/scrubs.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$(quiet_snapshot_tasks)"
+respond_add "/api/v2.0/pool/scrub" 0 200 "$(quiet_scrubs)"
 respond_add "/api/v2.0/pool" 0 200 "$ROOT/tests/fixtures/pools-healthy.json"
 respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
 respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
@@ -864,8 +864,8 @@ poll
 check "the baseline is quiet" 0 "$(notifications)"
 before=$(seen '.cloudSync')
 respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
-respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
-respond_add "/api/v2.0/pool/scrub" 0 200 "$ROOT/tests/fixtures/scrubs.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 200 "$(quiet_snapshot_tasks)"
+respond_add "/api/v2.0/pool/scrub" 0 200 "$(quiet_scrubs)"
 respond_add "/api/v2.0/pool" 0 200 "$ROOT/tests/fixtures/pools-healthy.json"
 respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
 respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
@@ -877,4 +877,156 @@ respond_add "/api/v2.0/cloudsync" 0 500 "$ROOT/tests/fixtures/err-500.json"
 poll
 check "no toast from a failed cloud sync answer" 0 "$(notifications)"
 check "the serialized seen.cloudSync is unchanged" "$before" "$(seen '.cloudSync')"
+teardown
+
+# --- Overdue protection tasks ------------------------------------------------
+
+test_case "a snapshot task that stops running toasts once and recovers"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json"
+poll
+check "the quiet baseline is zero" 0 "$(notifications)"
+snap_run_ago 172800 "$WORK/snap-old.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json" "$WORK/snap-old.json"
+poll
+check "one overdue toast" 1 "$(notifications)"
+check "the headline names the kind, not the dataset" 1 \
+  "$(grep -c 'Snapshot is overdue' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries no timestamp" 1 \
+  "$(grep -c 'no run within its schedule' "$STUB_NOTIFY_LOG" || true)"
+check "and no dataset reaches argv" 0 \
+  "$(grep -c -e 'storage' -e 'Backup' "$STUB_NOTIFY_LOG" || true)"
+check "seen records the overdue entry" true \
+  "$(seen '.overdue["snapshotTasks:1"].overdue')"
+poll
+check "an identical poll does not replay" 1 "$(notifications)"
+snap_run_ago 60 "$WORK/snap-new.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json" "$WORK/snap-new.json"
+poll
+check "a recovery toast" 2 "$(notifications)"
+check "saying it ran again" 1 \
+  "$(grep -c 'Snapshot ran again' "$STUB_NOTIFY_LOG" || true)"
+check "seen clears the entry" false \
+  "$(seen '.overdue["snapshotTasks:1"].overdue')"
+teardown
+
+test_case "a scrub task whose pool scan stops running is overdue"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json"
+poll
+check "the quiet baseline is zero" 0 "$(notifications)"
+# The fixture's scrub threshold is 35 days, so a 30-day-old scan is still
+# inside the task's own minimum age and must not alarm.
+pool_scrub_ago 2592000 "$WORK/pools-scrub-recent.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$WORK/pools-scrub-recent.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json" \
+  "$(quiet_snapshot_tasks)" "$ROOT/tests/fixtures/scrubs.json"
+poll
+check "a scrub inside its threshold is quiet" 0 "$(notifications)"
+pool_scrub_ago 3456000 "$WORK/pools-scrub-old.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$WORK/pools-scrub-old.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json" \
+  "$(quiet_snapshot_tasks)" "$ROOT/tests/fixtures/scrubs.json"
+poll
+check "one scrub overdue toast" 1 "$(notifications)"
+check "the headline names the kind" 1 \
+  "$(grep -c 'Scrub is overdue' "$STUB_NOTIFY_LOG" || true)"
+check "seen records the scrub entry" true \
+  "$(seen '.overdue["scrubs:1"].overdue')"
+teardown
+
+test_case "a failed snapshot poll leaves seen.overdue untouched"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+snap_run_ago 172800 "$WORK/snap-old.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json" "$WORK/snap-old.json"
+poll
+check "the overdue baseline toasts" 1 "$(notifications)"
+before=$(seen '.overdue | with_entries(select(.key | startswith("snapshotTasks:")))' | jq -S .)
+respond     "/api/v2.0/alert/list" 0 200 "$ROOT/tests/fixtures/alerts-empty.json"
+respond_add "/api/v2.0/pool/snapshottask" 0 500 "$ROOT/tests/fixtures/err-500.json"
+respond_add "/api/v2.0/pool/scrub"        0 200 "$(quiet_scrubs)"
+respond_add "/api/v2.0/pool"              0 200 "$ROOT/tests/fixtures/pools-healthy.json"
+respond_add "/api/v2.0/system/info"       0 200 "$ROOT/tests/fixtures/system-info.json"
+respond_add "/api/v2.0/disk/details"      0 200 "$ROOT/tests/fixtures/disks.json"
+respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
+respond_add "/api/v2.0/service"           0 200 "$ROOT/tests/fixtures/services.json"
+respond_add "/api/v2.0/app"               0 200 "$ROOT/tests/fixtures/apps.json"
+respond_add "/api/v2.0/replication"       0 200 "$ROOT/tests/fixtures/replication.json"
+respond_add "/api/v2.0/cloudsync"         0 200 "$ROOT/tests/fixtures/cloudsync.json"
+respond_add "/api/v2.0/sharing/smb"       0 200 "$ROOT/tests/fixtures/shares-smb.json"
+respond_add "/api/v2.0/sharing/nfs"       0 200 "$ROOT/tests/fixtures/shares-nfs.json"
+respond_add "/api/v2.0/iscsi/target"      0 200 "$ROOT/tests/fixtures/iscsi-target.json"
+respond_add "/api/v2.0/interface"         0 200 "$ROOT/tests/fixtures/interfaces.json"
+poll
+check "no toast from a failed snapshot answer" 1 "$(notifications)"
+check "the snapshot entries in seen.overdue are unchanged" "$before" \
+  "$(seen '.overdue | with_entries(select(.key | startswith("snapshotTasks:")))' | jq -S .)"
+teardown
+
+test_case "two overdue tasks of one kind make one toast"
+setup; single_instance_config '{"metaMaxAgeSeconds":0}'
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json"
+poll
+check "the quiet baseline is zero" 0 "$(notifications)"
+stamp=$(date -u -d "@$(( $(date +%s) - 172800 ))" +%Y-%m-%dT%H:%M:%SZ)
+jq -c --arg s "$stamp" \
+  'map(if .id == 1 or .id == 6 then .state.datetime = $s else . end)' \
+  "$ROOT/tests/fixtures/snapshot-tasks.json" >"$WORK/snap-two-old.json"
+notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+  "$ROOT/tests/fixtures/pools-healthy.json" \
+  "$ROOT/tests/fixtures/disk-temperatures.json" \
+  "$ROOT/tests/fixtures/services.json" \
+  "$ROOT/tests/fixtures/apps.json" \
+  "$ROOT/tests/fixtures/replication.json" \
+  "$ROOT/tests/fixtures/cloudsync.json" "$WORK/snap-two-old.json"
+poll
+check "one toast for the kind, not two" 1 "$(notifications)"
+check "the body carries the count" 1 \
+  "$(grep -c '2 tasks, see the panel' "$STUB_NOTIFY_LOG" || true)"
 teardown

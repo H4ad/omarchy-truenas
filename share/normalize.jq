@@ -267,6 +267,16 @@ def replication_norm:
     lifetimeValue:   ((.lifetime_value? // null) | num),
     lifetimeUnit:    (.lifetime_unit // null),
     schedule:        ((.schedule? // null) | schedule_norm),
+    # TrueNAS lets a replication task run on the schedule of the periodic
+    # snapshot tasks it names, with its own schedule null. The poll keeps only
+    # those schedules, so one row is enough to know when the task should fire.
+    periodicSnapshotSchedules: (
+      (.periodic_snapshot_tasks? // [])
+      | if type == "array" then
+          map(select(.enabled != false)
+              | if (.schedule | type) == "object" then (.schedule | schedule_norm) else null end)
+          | map(select(. != null))
+        else [] end),
     retries:         ((.retries? // null) | num),
     state:           ((.state? // null) | rep_state_norm),
     job:             ((.job? // null) | job_norm)

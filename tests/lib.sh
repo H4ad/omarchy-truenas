@@ -110,11 +110,13 @@ notify_endpoints() {
   local apps=${5:-"$ROOT/tests/fixtures/apps.json"}
   local replication=${6:-"$ROOT/tests/fixtures/replication.json"}
   local cloudsync=${7:-"$ROOT/tests/fixtures/cloudsync.json"}
+  local snapshots=${8:-$(quiet_snapshot_tasks)}
+  local scrubs=${9:-$(quiet_scrubs)}
   respond     "/api/v2.0/alert/list"  0 200 "$alerts"
   # The specific pool sub-routes come before /api/v2.0/pool, because the stub
   # matches a URL by substring.
-  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$ROOT/tests/fixtures/snapshot-tasks.json"
-  respond_add "/api/v2.0/pool/scrub"        0 200 "$ROOT/tests/fixtures/scrubs.json"
+  respond_add "/api/v2.0/pool/snapshottask" 0 200 "$snapshots"
+  respond_add "/api/v2.0/pool/scrub"        0 200 "$scrubs"
   respond_add "/api/v2.0/pool"        0 200 "$pool"
   respond_add "/api/v2.0/system/info" 0 200 "$ROOT/tests/fixtures/system-info.json"
   respond_add "/api/v2.0/disk/details" 0 200 "$ROOT/tests/fixtures/disks.json"
@@ -129,6 +131,21 @@ notify_endpoints() {
   respond_add "/api/v2.0/interface"   0 200 "$ROOT/tests/fixtures/interfaces.json"
 }
 
+# Snapshot and scrub fixtures with every task disabled. A notification case
+# that is not about protection starts from zero toasts: an enabled task with no
+# recent run would otherwise be overdue on the first poll.
+quiet_snapshot_tasks() {
+  jq -c 'map(.enabled = false)' \
+    "$ROOT/tests/fixtures/snapshot-tasks.json" >"$WORK/quiet-snapshot-tasks.json"
+  printf '%s' "$WORK/quiet-snapshot-tasks.json"
+}
+
+quiet_scrubs() {
+  jq -c 'map(.enabled = false)' \
+    "$ROOT/tests/fixtures/scrubs.json" >"$WORK/quiet-scrubs.json"
+  printf '%s' "$WORK/quiet-scrubs.json"
+}
+
 # The protection half of the map on its own: quiet alerts and pools, the real
 # disks and services, and the replication and cloud sync bodies a case varies.
 notify_protection() {
@@ -139,6 +156,29 @@ notify_protection() {
     "$ROOT/tests/fixtures/services.json" \
     "$ROOT/tests/fixtures/apps.json" \
     "$replication" "$cloudsync"
+}
+
+# A copy of the snapshot fixture with task id 1's last run moved back by
+# `agoSeconds`, so an overdue case is relative to the poll's own clock.
+snap_run_ago() {
+  local ago=$1 out=$2 stamp
+  stamp=$(date -u -d "@$(( $(date +%s) - ago ))" +%Y-%m-%dT%H:%M:%SZ)
+  jq -c --arg s "$stamp" \
+    'map(if .id == 1 then .state.datetime = $s else . end)' \
+    "$ROOT/tests/fixtures/snapshot-tasks.json" >"$out"
+}
+
+# The pool fixture with storage's scrub finish moved back by `agoSeconds`, so a
+# scrub overdue case does not depend on the fixture's calendar date.
+pool_scrub_ago() {
+  local ago=$1 out=$2 stamp
+  stamp=$(date -u -d "@$(( $(date +%s) - ago ))" +%Y-%m-%dT%H:%M:%SZ)
+  jq -c --arg s "$stamp" \
+    'map(if .name == "storage" then
+           .scan.function = "SCRUB" | .scan.state = "FINISHED"
+           | .scan.end_time = $s
+         else . end)' \
+    "$ROOT/tests/fixtures/pools-healthy.json" >"$out"
 }
 
 # A copy of the replication fixture with task id 1's job state and error set.

@@ -67,7 +67,10 @@ BarWidget {
       ? "" : (Math.round(Number(capacityPct)) + "%")
 
   readonly property int alertCount: Number(counts.total || 0)
-  readonly property bool quiet: mode === "quiet"
+  // "Quiet" is the bar's nothing-to-say state, not just the NAS's mode: an
+  // overdue protection task keeps the item visible under hideWhenHealthy and
+  // stops it dimming like a healthy one.
+  readonly property bool quiet: mode === "quiet" && root.barView.protectionCount === 0
   // The two modes where the plugin cannot vouch for a value. They override every
   // variant with a glyph and dim the item, so "nothing wrong" and "I cannot
   // tell" never look alike.
@@ -116,7 +119,7 @@ BarWidget {
     tempText: Model.hotTempLabel(root.disks),
     tempLevel: Model.tempLevel(root.disks),
     downTotal: Model.downTotal(root.state),
-    protectionCount: Model.protectionFailures(root.state),
+    protectionCount: Model.protectionProblems(root.state),
     uptimeText: root.uptimeText,
     capacityFill: Model.capacityBarFill(root.capacityPct, BarVariants.CAPACITY_CELLS),
     poolDots: root.poolDots,

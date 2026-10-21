@@ -39,8 +39,9 @@ and network are read-only.
 
 **Notifications.** A toast when an alert starts or clears, when a pool leaves or
 returns to `ONLINE`, when a disk crosses a temperature band and cools back, when
-a service or app goes down or returns, and when a replication or cloud sync task
-fails or recovers. Toasts are deduped, so a network blip does not replay them.
+a service or app goes down or returns, when a replication or cloud sync task
+fails or recovers, and when any scheduled protection task becomes overdue or
+runs again. Toasts are deduped, so a network blip does not replay them.
 A toast names the kind of event ("A pool is DEGRADED", "A disk is hot"), never
 the pool, disk, service, app or alert text; clicking it opens the plugin's menu,
 and the panel has the details. See the Security section for why.

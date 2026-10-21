@@ -7,6 +7,7 @@
 # other endpoints are canned here rather than repeated in each case.
 all_healthy() {
   local iscsi=${1:-"$ROOT/tests/fixtures/iscsi-target.json"}
+  local replication=${2:-"$ROOT/tests/fixtures/replication.json"}
   respond     "/api/v2.0/alert/list"  0 200 "$ROOT/tests/fixtures/alerts-empty.json"
   # The specific pool sub-routes come before /api/v2.0/pool: the stub matches on
   # a substring, so a scrub request would otherwise be served the pool list.
@@ -18,7 +19,7 @@ all_healthy() {
   respond_add "/api/v2.0/disk/temperatures" 0 200 "$ROOT/tests/fixtures/disk-temperatures.json"
   respond_add "/api/v2.0/service"     0 200 "$ROOT/tests/fixtures/services.json"
   respond_add "/api/v2.0/app"         0 200 "$ROOT/tests/fixtures/apps.json"
-  respond_add "/api/v2.0/replication" 0 200 "$ROOT/tests/fixtures/replication.json"
+  respond_add "/api/v2.0/replication" 0 200 "$replication"
   respond_add "/api/v2.0/cloudsync"   0 200 "$ROOT/tests/fixtures/cloudsync.json"
   respond_add "/api/v2.0/sharing/smb" 0 200 "$ROOT/tests/fixtures/shares-smb.json"
   respond_add "/api/v2.0/sharing/nfs" 0 200 "$ROOT/tests/fixtures/shares-nfs.json"
@@ -209,6 +210,142 @@ check "no broadcast survives" false \
 check "no MAC reaches an interface row" 0 \
   "$(state '[.network[] | select(has("link_address") or has("permanent_link_address") or has("hardware_link_address"))] | length')"
 check "no warnings on a clean poll" 0 "$(state '.warnings | length')"
+teardown
+
+test_case "a scheduled task with an old run is overdue, a never-run one is not yet"
+setup; single_instance_config
+all_healthy
+poll
+check "the hourly snapshot with an old run is overdue" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .overdue')"
+check "its schedule bound is one hour" 3600 \
+  "$(state '.snapshotTasks[] | select(.id==1) | .gapSeconds')"
+check "the last run is an ISO string" string \
+  "$(state '.snapshotTasks[] | select(.id==1) | .lastRunAt | type')"
+check "the first sighting is recorded" string \
+  "$(state '.snapshotTasks[] | select(.id==1) | .firstSeenAt | type')"
+check "a never-run snapshot starts its grace, so it is not overdue" false \
+  "$(state '.snapshotTasks[] | select(.id==6) | .overdue')"
+check "a disabled task is not scheduled" false \
+  "$(state '.snapshotTasks[] | select(.id==7) | .scheduled')"
+check "a replication task with no schedule is not scheduled" false \
+  "$(state '.replication[] | select(.id==1) | .scheduled')"
+check "a manual-only replication task is not scheduled" false \
+  "$(state '.replication[] | select(.id==2) | .scheduled')"
+check "the weekly scrub with an old scan is overdue" true \
+  "$(state '.scrubs[] | select(.pool=="storage") | .overdue')"
+check "a scrub whose pool did not answer is not judged" false \
+  "$(state '.scrubs[] | select(.pool=="Backup") | .lastRunKnown')"
+check "and it is not overdue" false \
+  "$(state '.scrubs[] | select(.pool=="Backup") | .overdue')"
+
+# A never-run task becomes overdue only after its first-seen grace. Age the
+# entry the first poll wrote, then poll again: the daily schedule's bound plus
+# the grace has passed, so it must flip.
+jq '(.overdue["snapshotTasks:6"].firstSeenAt) = "2020-01-01T00:00:00Z"' \
+  "$(seen_file)" >"$WORK/seen-aged.json" && mv "$WORK/seen-aged.json" "$(seen_file)"
+poll
+check "after its grace the never-run task is overdue" true \
+  "$(state '.snapshotTasks[] | select(.id==6) | .overdue')"
+check "and seen records the transition" true \
+  "$(seen '.overdue["snapshotTasks:6"].overdue')"
+teardown
+
+test_case "a replication task driven by a snapshot schedule is still judged"
+setup; single_instance_config
+jq -c 'map(if .id == 1 then
+    .auto = true | .schedule = null
+    | .periodic_snapshot_tasks = [{ schedule: {
+        minute: "5", hour: "0", dom: "*", month: "*", dow: "*" } }]
+  else . end)' "$ROOT/tests/fixtures/replication.json" >"$WORK/rep-linked.json"
+all_healthy "" "$WORK/rep-linked.json"
+poll
+check "the trigger schedule is carried" 1 \
+  "$(state '.replication[] | select(.id==1) | .periodicSnapshotSchedules | length')"
+check "the task counts as scheduled without its own cron" true \
+  "$(state '.replication[] | select(.id==1) | .scheduled')"
+check "its bound is the trigger's daily gap" 86400 \
+  "$(state '.replication[] | select(.id==1) | .gapSeconds')"
+check "and an old run is overdue" true \
+  "$(state '.replication[] | select(.id==1) | .overdue')"
+teardown
+
+test_case "the overdue derivation follows the schedule, not a fixed age"
+setup
+now=2026-10-20T00:00:00Z
+now_epoch=$(date -u -d "$now" +%s)
+ago() { date -u -d "@$((now_epoch - $1))" +%Y-%m-%dT%H:%M:%SZ; }
+printf '{}\n' >"$WORK/seen-empty.json"
+jq -n --arg daily_late "$(ago 111600)" --arg daily_early "$(ago 104400)" \
+      --arg weekly_late "$(ago 691200)" --arg weekly_early "$(ago 604800)" \
+      --arg monthly_early "$(ago 3456000)" --arg hourly_late "$(ago 28800)" \
+      --arg minute_late "$(ago 25260)" '
+  {
+    pools: [
+      { name: "storage", scan: { function: "SCRUB", state: "FINISHED",
+                                 endTime: $weekly_late } },
+      { name: "backup", scan: { function: "RESILVER", state: "FINISHED",
+                                endTime: $weekly_late } }
+    ],
+    replication: [
+      { id: 1, enabled: true, auto: true,
+        schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "*" },
+        state: null, job: { state: "RUNNING", timeFinished: null } }
+    ],
+    cloudSync: [],
+    snapshotTasks: [
+      { id: 1, enabled: true, schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "*" },
+        state: { datetime: $daily_late } },
+      { id: 2, enabled: true, schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "*" },
+        state: { datetime: $daily_early } },
+      { id: 3, enabled: true, schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "7" },
+        state: { datetime: $weekly_early } },
+      { id: 4, enabled: true, schedule: { minute: "0", hour: "0", dom: "1", month: "*", dow: "*" },
+        state: { datetime: $monthly_early } },
+      { id: 5, enabled: true, schedule: { minute: "0", hour: "*", dom: "*", month: "*", dow: "*" },
+        state: { datetime: $hourly_late } },
+      { id: 6, enabled: true, schedule: { minute: "*", hour: "*", dom: "*", month: "*", dow: "*" },
+        state: { datetime: $minute_late } },
+      { id: 7, enabled: false, schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "*" },
+        state: { datetime: $daily_late } },
+      { id: 8, enabled: true, schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "*" },
+        state: { datetime: null } }
+    ],
+    scrubs: [
+      { id: 1, pool: "storage", enabled: true,
+        schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "7" } },
+      { id: 2, pool: "missing", enabled: true,
+        schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "7" } },
+      { id: 3, pool: "backup", enabled: true,
+        schedule: { minute: "0", hour: "0", dom: "*", month: "*", dow: "7" } }
+    ]
+  }' >"$WORK/protection-payload.json"
+printf '%s\n' '{"overdue":{"snapshotTasks:8":{"firstSeenAt":"2026-10-18T00:00:00Z"}}}' \
+  >"$WORK/seen-never.json"
+jq -n -f "$ROOT/share/protection-overdue.jq" \
+  --slurpfile payload "$WORK/protection-payload.json" \
+  --slurpfile seen "$WORK/seen-never.json" \
+  --arg now "$now" --argjson graceSeconds 21600 \
+  --argjson replicationOk 1 --argjson cloudSyncOk 1 \
+  --argjson snapshotTasksOk 1 --argjson scrubsOk 1 \
+  >"$WORK/protection-out.json"
+overdue() { jq -r --argjson id "$2" ".payload.$1[] | select(.id==\$id) | .overdue" "$WORK/protection-out.json"; }
+check "a daily task 31h late is overdue" true "$(overdue snapshotTasks 1)"
+check "a daily task 29h late is not" false "$(overdue snapshotTasks 2)"
+check "a weekly task 7d late is still inside its grace" false "$(overdue snapshotTasks 3)"
+check "a monthly task 40d late is inside the 62d bound" false "$(overdue snapshotTasks 4)"
+check "an hourly task 8h late is overdue" true "$(overdue snapshotTasks 5)"
+check "a minute task 7h late is overdue" true "$(overdue snapshotTasks 6)"
+check "a disabled task is never overdue" false "$(overdue snapshotTasks 7)"
+check "a never-run task past its first-seen grace is overdue" true "$(overdue snapshotTasks 8)"
+check "a running job is exempt from the age test" false "$(overdue replication 1)"
+check "an old scrub is overdue" true "$(overdue scrubs 1)"
+check "a scrub for a missing pool is not judged" false "$(overdue scrubs 2)"
+check "its last run is unknown, not never run" false \
+  "$(jq -r '.payload.scrubs[] | select(.id==2) | .lastRunKnown' "$WORK/protection-out.json")"
+check "a scrub hidden by a resilver is not judged overdue" false "$(overdue scrubs 3)"
+check "and its last run is unknown" false \
+  "$(jq -r '.payload.scrubs[] | select(.id==3) | .lastRunKnown' "$WORK/protection-out.json")"
 teardown
 
 test_case "disk rows are sorted by name even when the wire order is reversed"
