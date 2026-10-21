@@ -77,24 +77,25 @@ Column {
     return "no " + noun + " reported"
   }
 
-  // 0 healthy keeps the plain foreground, 1 failed is urgent, and 2 (blank or
-  // transitional) is dim: "I cannot tell" must not look like a failure.
-  function stateColor(state) {
-    switch (Model.protectionStateRank(state)) {
+  // 0 healthy keeps the plain foreground, 1 failed or overdue is urgent, and 2
+  // (blank or transitional) is dim: "I cannot tell" must not look like a
+  // failure. The badge word itself comes from Model.protectionBadge, so the
+  // failure state still wins over OVERDUE when a row is both.
+  function stateColor(row) {
+    switch (Model.protectionBadgeRank(row)) {
       case 0:  return view.panel.contentForeground
       case 1:  return view.panel.urgentColor
       default: return view.panel.dimForeground
     }
   }
 
-  function stateText(state) {
-    var text = String(state || "")
+  function stateText(row) {
+    var text = Model.protectionBadge(row)
     return text !== "" ? text : "unknown"
   }
 
-  function lastRunText(value) {
-    var text = String(value || "")
-    return text !== "" ? text : "never run"
+  function runLine(row) {
+    return Model.protectionRunLine(row, Date.now())
   }
 
   function joinDetail(parts) {
@@ -198,7 +199,7 @@ Column {
         String(modelData.direction || ""), String(modelData.transport || ""),
         String(modelData.targetDataset || "")])
       readonly property string scheduleLine: Model.scheduleText(modelData.schedule)
-      readonly property string runLine: view.lastRunText(modelData.job && modelData.job.timeFinished)
+      readonly property string runLine: view.runLine(modelData)
 
       Item {
         width: parent.width
@@ -224,8 +225,8 @@ Column {
           id: replicationState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: view.stateText(Model.protectionState(replicationCard.modelData))
-          color: view.stateColor(Model.protectionState(replicationCard.modelData))
+          text: view.stateText(replicationCard.modelData)
+          color: view.stateColor(replicationCard.modelData)
           font.family: view.panel.contentFontFamily
           font.pixelSize: Style.font.caption
           font.bold: true
@@ -258,7 +259,7 @@ Column {
         textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
-        text: "last run " + replicationCard.runLine
+        text: replicationCard.runLine
         color: view.panel.dimForeground
         font.family: view.panel.contentFontFamily
         font.pixelSize: Style.font.caption
@@ -343,7 +344,7 @@ Column {
         String(modelData.direction || ""), String(modelData.transferMode || ""),
         String(modelData.path || "")])
       readonly property string scheduleLine: Model.scheduleText(modelData.schedule)
-      readonly property string runLine: view.lastRunText(modelData.job && modelData.job.timeFinished)
+      readonly property string runLine: view.runLine(modelData)
 
       Item {
         width: parent.width
@@ -369,8 +370,8 @@ Column {
           id: cloudSyncState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: view.stateText(Model.protectionState(cloudSyncCard.modelData))
-          color: view.stateColor(Model.protectionState(cloudSyncCard.modelData))
+          text: view.stateText(cloudSyncCard.modelData)
+          color: view.stateColor(cloudSyncCard.modelData)
           font.family: view.panel.contentFontFamily
           font.pixelSize: Style.font.caption
           font.bold: true
@@ -403,7 +404,7 @@ Column {
         textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
-        text: "last run " + cloudSyncCard.runLine
+        text: cloudSyncCard.runLine
         color: view.panel.dimForeground
         font.family: view.panel.contentFontFamily
         font.pixelSize: Style.font.caption
@@ -485,6 +486,7 @@ Column {
 
       readonly property string label: Model.protectionLabel(modelData) || "unnamed task"
       readonly property string scheduleLine: Model.scheduleText(modelData.schedule)
+      readonly property string runLine: view.runLine(modelData)
       readonly property string snapshotLine: String(
         modelData.state && modelData.state.lastSnapshot || "")
 
@@ -512,8 +514,8 @@ Column {
           id: snapshotState
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: view.stateText(Model.protectionState(snapshotCard.modelData))
-          color: view.stateColor(Model.protectionState(snapshotCard.modelData))
+          text: view.stateText(snapshotCard.modelData)
+          color: view.stateColor(snapshotCard.modelData)
           font.family: view.panel.contentFontFamily
           font.pixelSize: Style.font.caption
           font.bold: true
@@ -526,6 +528,16 @@ Column {
         wrapMode: Text.WordWrap
         visible: snapshotCard.scheduleLine !== ""
         text: "schedule " + snapshotCard.scheduleLine
+        color: view.panel.dimForeground
+        font.family: view.panel.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: snapshotCard.runLine
         color: view.panel.dimForeground
         font.family: view.panel.contentFontFamily
         font.pixelSize: Style.font.caption
@@ -618,6 +630,8 @@ Column {
 
       readonly property string label: Model.protectionLabel(modelData) || "unnamed pool"
       readonly property string scheduleLine: Model.scheduleText(modelData.schedule)
+      readonly property string runLine: view.runLine(modelData)
+      readonly property string stateLine: Model.protectionBadge(modelData)
       readonly property string detailLine: {
         var parts = []
         parts.push(modelData.enabled === true ? "enabled" : "disabled")
@@ -630,13 +644,14 @@ Column {
 
       Item {
         width: parent.width
-        implicitHeight: scrubName.implicitHeight
+        implicitHeight: Math.max(scrubName.implicitHeight, scrubState.implicitHeight)
 
         Text {
           textFormat: Text.PlainText
           id: scrubName
           anchors.left: parent.left
-          anchors.right: parent.right
+          anchors.right: scrubCard.stateLine !== "" ? scrubState.left : parent.right
+          anchors.rightMargin: scrubCard.stateLine !== "" ? Style.space(8) : 0
           anchors.verticalCenter: parent.verticalCenter
           text: scrubCard.label
           color: view.panel.contentForeground
@@ -644,6 +659,19 @@ Column {
           font.pixelSize: Style.font.body
           font.bold: true
           elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          id: scrubState
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          visible: scrubCard.stateLine !== ""
+          text: scrubCard.stateLine
+          color: view.stateColor(scrubCard.modelData)
+          font.family: view.panel.contentFontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
         }
       }
 
@@ -664,6 +692,16 @@ Column {
         wrapMode: Text.WordWrap
         visible: scrubCard.scheduleLine !== ""
         text: "schedule " + scrubCard.scheduleLine
+        color: view.panel.dimForeground
+        font.family: view.panel.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: scrubCard.runLine
         color: view.panel.dimForeground
         font.family: view.panel.contentFontFamily
         font.pixelSize: Style.font.caption

@@ -502,6 +502,9 @@ function failedCloudSync(rows) {
   return out;
 }
 
+// The four lists the Protection view shows, in the order it shows them.
+var PROTECTION_SECTIONS = ["replication", "cloudSync", "snapshotTasks", "scrubs"];
+
 // How many protection rows sit in a failure state, across the four lists the
 // Protection view shows. The rule is protectionStateRank: a row is failed only
 // when protectionState names FAILED, ERROR or ABORTED. A blank or transitional
@@ -509,15 +512,75 @@ function failedCloudSync(rows) {
 // they can fail only if the wire ever grows one. A list that did not answer is
 // empty and contributes nothing, which the section warning already names.
 function protectionFailures(state) {
-  var sections = ["replication", "cloudSync", "snapshotTasks", "scrubs"];
   var count = 0;
-  for (var s = 0; s < sections.length; s++) {
-    var list = arrayLike(state && state[sections[s]]) ? state[sections[s]] : [];
+  for (var s = 0; s < PROTECTION_SECTIONS.length; s++) {
+    var list = arrayLike(state && state[PROTECTION_SECTIONS[s]])
+      ? state[PROTECTION_SECTIONS[s]] : [];
     for (var i = 0; i < list.length; i++) {
       if (protectionStateRank(protectionState(list[i])) === 1) count += 1;
     }
   }
   return count;
+}
+
+// How many rows the poll's derivation marked overdue. The flag is computed
+// once in share/protection-overdue.jq and written to state.json, so the bar and
+// the views cannot disagree about what "overdue" means.
+function protectionOverdue(state) {
+  var count = 0;
+  for (var s = 0; s < PROTECTION_SECTIONS.length; s++) {
+    var list = arrayLike(state && state[PROTECTION_SECTIONS[s]])
+      ? state[PROTECTION_SECTIONS[s]] : [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].overdue === true) count += 1;
+    }
+  }
+  return count;
+}
+
+// Failed or overdue, each row counted once. A row that failed and also missed
+// its schedule is one problem, not two.
+function protectionProblems(state) {
+  var count = 0;
+  for (var s = 0; s < PROTECTION_SECTIONS.length; s++) {
+    var list = arrayLike(state && state[PROTECTION_SECTIONS[s]])
+      ? state[PROTECTION_SECTIONS[s]] : [];
+    for (var i = 0; i < list.length; i++) {
+      if (protectionStateRank(protectionState(list[i])) === 1
+          || (list[i] && list[i].overdue === true)) count += 1;
+    }
+  }
+  return count;
+}
+
+// The one word a protection card puts on its right: the failure state when the
+// job has one, else OVERDUE, else the task's own state. A healthy scrub has no
+// state and answers "", so its card shows no badge at all.
+function protectionBadge(row) {
+  var state = protectionState(row);
+  if (protectionStateRank(state) === 1) return state;
+  if (row && row.overdue === true) return "OVERDUE";
+  return state;
+}
+
+// 0 healthy, 1 failure or overdue, 2 unknown. The view tints from this.
+function protectionBadgeRank(row) {
+  var rank = protectionStateRank(protectionState(row));
+  if (rank === 1) return 1;
+  if (row && row.overdue === true) return 1;
+  return rank;
+}
+
+// A sentence for the last finished run. `lastRunKnown` is false only when the
+// source of the timestamp did not answer, which for a scrub is the pool's scan.
+// A scrub task whose pool row is missing is unknown, not "never run".
+function protectionRunLine(row, nowMs) {
+  if (!row || typeof row !== "object") return "last run unknown";
+  if (row.lastRunKnown === false) return "last run unknown";
+  if (!row.lastRunAt) return "never run";
+  var seconds = ageSeconds(row.lastRunAt, nowMs);
+  if (seconds < 0) return "last run unknown";
+  return "last run " + ageText(seconds) + " ago";
 }
 
 // The label for a protection card: the name when it has one, else the dataset,
