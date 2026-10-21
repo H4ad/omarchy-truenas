@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - master
+      - "ci/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # The QML runtime suite creates its own components and exits; no display
+      # or GPU is needed. The software backend keeps the runner off llvmpipe.
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq qml-qt6 qml6-module-qtqml-workerscript qml6-module-qtquick
+
+      - name: Show the tools the suite will use
+        run: |
+          jq --version
+          node --version
+          command -v qml6 || test -x /usr/lib/qt6/bin/qml6 || test -x /usr/lib/qt6/bin/qml
+
+      - name: Run the suite
+        run: ./tests/run.sh
