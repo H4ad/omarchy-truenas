@@ -22,13 +22,18 @@ if command -v qml6 >/dev/null 2>&1; then
   qml_bin=$(command -v qml6)
 elif [[ -x /usr/lib/qt6/bin/qml6 ]]; then
   qml_bin=/usr/lib/qt6/bin/qml6
+elif [[ -x /usr/lib/qt6/bin/qml ]]; then
+  # Debian and Ubuntu package the Qt 6 runtime as `qml`, not `qml6`.
+  qml_bin=/usr/lib/qt6/bin/qml
+elif command -v qml >/dev/null 2>&1; then
+  qml_bin=$(command -v qml)
 fi
 
 if [[ -z "$qml_bin" ]]; then
   # Reported, not skipped, for the same reason run.sh reports a missing node: a
   # suite that quietly stops checking the thing it exists to check is worse than
   # one that fails.
-  check "qml6 is installed to run the QML runtime suite" yes no
+  check "the Qt 6 QML runtime is installed to run this suite" yes no
 else
   mkdir -p "$WORK/qml"
 
