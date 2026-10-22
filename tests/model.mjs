@@ -708,6 +708,12 @@ check("an overdue healthy task reads OVERDUE", "OVERDUE",
   Model.protectionBadge({ job: { state: "SUCCESS" }, overdue: true, noData: true }));
 check("a no-data task reads NO DATA", "NO DATA",
   Model.protectionBadge({ job: { state: "SUCCESS" }, noData: true }));
+check("an unchecked output without no-data is not NO DATA", "SUCCESS",
+  Model.protectionBadge({ job: { state: "SUCCESS" }, output: { state: "unknown" } }));
+check("and it is not a problem", 0,
+  Model.protectionProblems({
+    snapshotTasks: [{ state: { state: "SUCCESS" }, output: { state: "unknown" } }]
+  }));
 check("a healthy task keeps its own state", "SUCCESS",
   Model.protectionBadge({ job: { state: "SUCCESS" } }));
 check("a scrub with no state has no badge", "",

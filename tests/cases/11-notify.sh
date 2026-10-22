@@ -1168,6 +1168,50 @@ check "the section warning is present" snapshotTasks \
   "$(state '.warnings[] | select(.section=="snapshotTasks") | .section')"
 teardown
 
+test_case "a cap-skipped task keeps its badge"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+
+# A new run for task 1 and a new task 2 whose run name sorts first. The cap
+# lets one through, and the untried task must win the slot.
+output_check_on '["snapshotTasks:1","snapshotTasks:2"]'
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s
+  | .state.last_snapshot = "storage@auto-hourly-2026-09-14_02-00" else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps-a.json"
+jq '. + [ .[0] | .id = 2 | .dataset = "d2"
+           | .state.last_snapshot = "d2@auto-a" ]' "$WORK/snaps-a.json" >"$WORK/snaps-b.json"
+cat >"$WORK/rows-b.json" <<'JSON'
+[ { "dataset": "storage", "name": "storage@auto-hourly-2026-09-14_02-00",
+    "snapshot_name": "auto-hourly-2026-09-14_02-00",
+    "properties": { "written": { "value": "0" } } },
+  { "dataset": "d2", "name": "d2@auto-a", "snapshot_name": "auto-a",
+    "properties": { "written": { "value": "1K" } } } ]
+JSON
+output_probe_map "$WORK/snaps-b.json" "$WORK/rows-b.json" \
+  "$ROOT/tests/fixtures/replication.json" "$scrubs"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "one query serves the untried task" 1 "$(snapshot_queries)"
+check "the untried task got the slot" 1 \
+  "$(grep -c 'snapshot_name=auto-a' "$STUB_CURL_LOG")"
+check "the skipped task keeps NO DATA" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+check "and says the output was not checked" unknown \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "the probed task is ok" ok \
+  "$(state '.snapshotTasks[] | select(.id==2) | .output.state')"
+teardown
+
 test_case "an overdue task suppresses no-data and makes no toast"
 setup; single_instance_config
 output_check_on '["snapshotTasks:1"]'
