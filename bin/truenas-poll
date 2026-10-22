@@ -409,23 +409,27 @@ snapshot_probe() {
   n=0
   while IFS= read -r q; do
     [[ -n $q ]] || continue
+    printf '%s\n' "$q" >"$WORK/probe-query.json"
     filter=$(jq -r '.filter' <<<"$q")
     value=$(jq -r '.queryValue' <<<"$q")
     # The value is NAS text (a dataset or snapshot name), so it is percent
-    # encoded from stdin and never appears on a child's argv.
+    # encoded from stdin and never appears on a child's argv. The query itself
+    # reaches jq as a file for the same reason.
     encoded=$(printf '%s' "$value" | jq -sRr @uri)
     fetch snapshotRows "/api/v2.0/pool/snapshot?${filter}=${encoded}" \
       "$WORK/snapshot-rows.json" GET "" "$OUTPUT_PROBE_TIMEOUT"
     n=$((n + 1))
     if [[ -n $S_ERR ]]; then
-      jq -c --arg now "$now" --arg f "$filter" --arg v "$value" '
-        [ .candidates[] | select(.filter == $f and .queryValue == $v)
+      jq -c --arg now "$now" --slurpfile query "$WORK/probe-query.json" '
+        [ .candidates[]
+          | select(.filter == $query[0].filter
+                   and .queryValue == $query[0].queryValue)
           | { (.taskKey): { lastRunAt, attemptedAt: $now, ok: false,
                             found: false, written: null, snapshot: null } } ]
         | add // {}' "$WORK/probe-candidates.json" >"$WORK/probe-part.$n.json" \
         || return 1
     else
-      jq -c --arg now "$now" --arg f "$filter" --arg v "$value" \
+      jq -c --arg now "$now" --slurpfile query "$WORK/probe-query.json" \
          --slurpfile rows "$WORK/snapshot-rows.json" '
         def zfs_units: {"K":1024,"M":1048576,"G":1073741824,
                         "T":1099511627776,"P":1125899906842624,
@@ -438,7 +442,9 @@ snapshot_probe() {
               then ((($s[0:-1] | tonumber) * zfs_units[$s[-1:]]) | round)
               else null end
           end;
-        [ .candidates[] | select(.filter == $f and .queryValue == $v)
+        [ .candidates[]
+          | select(.filter == $query[0].filter
+                   and .queryValue == $query[0].queryValue)
           | . as $t
           | (if $t.filter == "name" then
                [ $rows[0][]? | select((.name // "") == $t.snapshot) ]

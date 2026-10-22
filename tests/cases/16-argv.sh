@@ -29,6 +29,7 @@ MARKERS=(
   '25.04.2'                          # NAS version
   '/mnt/private'                     # a path, used as a state field in case 2
   'nas.example'                      # the configured base URL
+  'auto-hourly-2026-09-14_01-00'     # a snapshot name, used by the output check
 )
 
 # Every marker found in one log, one per line, so a failure names the value that
@@ -201,4 +202,30 @@ out=$(PATH="$WORK:$PATH" "$ROOT/bin/truenas-api" app-start <<<'appc')
 check "the write landed" true "$(jq -r '.ok' <<<"$out")"
 check "the app name reached the body" appc "$(jq -r '.app_name' "$STUB_PAYLOAD_LOG")"
 check "no app name is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+teardown
+
+test_case "no snapshot value reaches the output toast argv"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+argv_probe
+
+# The cold poll fills the meta cache and never probes. The warm poll runs the
+# one output query and turns the zero-written run into a no-data toast.
+PATH="$WORK:$PATH" poll
+check "the baseline is quiet" 0 "$(notifications)"
+: >"$STUB_JQ_ARGV_LOG"
+: >"$STUB_CURL_ARGV_LOG"
+: >"$STUB_NOTIFY_LOG"
+PATH="$WORK:$PATH" poll
+check "the output toast fired" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the snapshot is live in the state file" yes \
+  "$(grep -qF 'storage@auto-hourly-2026-09-14_01-00' "$STATE" && printf yes || printf no)"
+check "no NAS value is on a jq command line" "" "$(marker_hits "$STUB_JQ_ARGV_LOG")"
+check "no configured address is on a curl command line" "" "$(marker_hits "$STUB_CURL_ARGV_LOG")"
+check "no NAS value is on a notification command line" "" "$(marker_hits "$STUB_NOTIFY_LOG")"
 teardown
