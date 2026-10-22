@@ -1097,3 +1097,42 @@ check "a failed probe advances lastProbeAt" true \
 check "but not lastRunAt" "$run_before" \
   "$(seen '.output["snapshotTasks:1"].lastRunAt')"
 teardown
+
+test_case "an unparseable written value is presence-only ok"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+cat >"$WORK/rows.json" <<'JSON'
+[ { "dataset": "storage", "name": "storage@auto-hourly-2026-09-14_01-00",
+    "snapshot_name": "auto-hourly-2026-09-14_01-00",
+    "properties": { "written": { "value": "lots" } } } ]
+JSON
+output_probe_map "$snaps" "$WORK/rows.json"
+poll
+: >"$STUB_CURL_LOG"
+poll
+check "the snapshot is present" ok \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "with no written number" null \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.written // null')"
+check "and no no-data badge" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+teardown
+
+test_case "a successful run with no lastSnapshot is missing without a query"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+jq 'map(if .id == 1 then .state.last_snapshot = null else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+output_probe_map "$WORK/snaps2.json" "$rows"
+poll
+: >"$STUB_CURL_LOG"
+poll
+check "no snapshot query is made" 0 "$(snapshot_queries)"
+check "the row is missing" missing \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "and is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+teardown
