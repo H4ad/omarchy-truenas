@@ -916,3 +916,184 @@ poll
 check "no history file was created" false \
   "$(test -e "$HISTORY" && echo true || echo false)"
 teardown
+
+# The map for an output-check poll lives in tests/lib.sh with the other
+# fixtures, so 11-notify.sh can use it too.
+test_case "a cold poll annotates a due task unknown and a warm poll probes it once"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+output_probe_map "$snaps" "$rows"
+
+poll
+check "the cold poll spent fifteen" 15 "$(requests)"
+check "and probed nothing" 0 "$(snapshot_queries)"
+check "the due row is unknown" unknown \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "and does not invent no-data" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+
+: >"$STUB_CURL_LOG"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+check "a forced meta poll still spends fifteen" 15 "$(requests)"
+check "and never probes" 0 "$(snapshot_queries)"
+
+: >"$STUB_CURL_LOG"
+poll
+check "a warm poll is two plus one probe" 3 "$(requests)"
+check "with one snapshot query" 1 "$(snapshot_queries)"
+check "the empty run is empty" empty \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "and is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+check "with the zero it read" 0 \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.written')"
+
+: >"$STUB_CURL_LOG"
+poll
+check "the same run is not probed again" 2 "$(requests)"
+check "and no snapshot query is made" 0 "$(snapshot_queries)"
+teardown
+
+test_case "a recursive probe sums the children, so a zero parent is not empty"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 3.26G "$WORK/rows.json")
+output_probe_map "$snaps" "$rows"
+poll
+: >"$STUB_CURL_LOG"
+poll
+check "one name-wide query" 1 "$(grep -c 'snapshot_name=auto-hourly-2026-09-14_01-00' "$STUB_CURL_LOG")"
+check "the parent zero plus the child is a number" 3500398346 \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.written')"
+check "the run is ok" ok \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "and is not no-data" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+teardown
+
+test_case "a non-recursive task asks for the exact snapshot name"
+setup; single_instance_config
+output_check_on '["snapshotTasks:7"]'
+snaps=$(snap_due 7 false true "$WORK/snaps.json")
+cat >"$WORK/rows.json" <<'JSON'
+[ { "dataset": "boot-pool", "name": "boot-pool@auto-hourly-2026-09-14_01-00",
+    "snapshot_name": "auto-hourly-2026-09-14_01-00",
+    "properties": { "written": { "value": "512K" }, "used": { "value": "0B" } } } ]
+JSON
+output_probe_map "$snaps" "$WORK/rows.json"
+poll
+: >"$STUB_CURL_LOG"
+poll
+check "the query is the full name, not the bare snapshot" 1 \
+  "$(grep -c 'name=boot-pool%40auto-hourly-2026-09-14_01-00' "$STUB_CURL_LOG")"
+check "no name-wide query is made" 0 \
+  "$(grep -c 'snapshot_name=' "$STUB_CURL_LOG")"
+check "the size string parses to bytes" 524288 \
+  "$(state '.snapshotTasks[] | select(.id==7) | .output.written')"
+teardown
+
+test_case "one query serves two tasks that share a run name"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1","snapshotTasks:2"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+jq '. + [ .[0] | .id = 2 | .dataset = "storage2"
+           | .state.last_snapshot = "storage2@auto-hourly-2026-09-14_01-00" ]' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+cat >"$WORK/rows.json" <<'JSON'
+[ { "dataset": "storage", "name": "storage@auto-hourly-2026-09-14_01-00",
+    "snapshot_name": "auto-hourly-2026-09-14_01-00",
+    "properties": { "written": { "value": "1K" } } },
+  { "dataset": "storage2", "name": "storage2@auto-hourly-2026-09-14_01-00",
+    "snapshot_name": "auto-hourly-2026-09-14_01-00",
+    "properties": { "written": { "value": "2K" } } } ]
+JSON
+output_probe_map "$WORK/snaps2.json" "$WORK/rows.json"
+poll
+: >"$STUB_CURL_LOG"
+poll
+check "two tasks share one query" 1 "$(snapshot_queries)"
+check "the first task reads its own dataset" 1024 \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.written')"
+check "the second task reads its own" 2048 \
+  "$(state '.snapshotTasks[] | select(.id==2) | .output.written')"
+teardown
+
+test_case "the cap rotates: three due tasks, one probe per warm poll"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1","snapshotTasks:2","snapshotTasks:3"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+jq '. + [ .[0] | .id = 2 | .dataset = "d2"
+           | .state.last_snapshot = "d2@auto-b" ]
+        + [ .[0] | .id = 3 | .dataset = "d3"
+           | .state.last_snapshot = "d3@auto-c" ]' "$WORK/snaps.json" >"$WORK/snaps3.json"
+cat >"$WORK/rows.json" <<'JSON'
+[ { "dataset": "storage", "name": "storage@auto-hourly-2026-09-14_01-00",
+    "snapshot_name": "auto-hourly-2026-09-14_01-00",
+    "properties": { "written": { "value": "1K" } } },
+  { "dataset": "d2", "name": "d2@auto-b", "snapshot_name": "auto-b",
+    "properties": { "written": { "value": "1K" } } },
+  { "dataset": "d3", "name": "d3@auto-c", "snapshot_name": "auto-c",
+    "properties": { "written": { "value": "1K" } } } ]
+JSON
+output_probe_map "$WORK/snaps3.json" "$WORK/rows.json"
+poll
+for round in 1 2 3; do
+  : >"$STUB_CURL_LOG"
+  poll
+  check "round $round spends one probe" 1 "$(snapshot_queries)"
+done
+check "all three tasks got an answer" 3 \
+  "$(state '[.snapshotTasks[] | select(.id <= 3) | .output.state] | length')"
+check "and all are ok" "ok,ok,ok" \
+  "$(state '[.snapshotTasks[] | select(.id <= 3) | .output.state] | join(",")')"
+teardown
+
+test_case "a failed snapshot query keeps the previous no-data and retries"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+output_probe_map "$snaps" "$rows"
+poll
+: >"$STUB_CURL_LOG"
+poll
+check "the first answer is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+
+# Move the run to a new name, then fail the query for it.
+stamp=$(date -u -d '30 seconds' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" \
+  'map(if .id == 1 then .state.datetime = $s
+         | .state.last_snapshot = "storage@auto-hourly-2026-09-14_01-30"
+       else . end)' "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows"
+respond_first "/api/v2.0/pool/snapshot?snapshot_name=auto-hourly-2026-09-14_01-30" \
+  0 500 "$ROOT/tests/fixtures/err-500.json"
+run_before=$(seen '.output["snapshotTasks:1"].lastRunAt')
+# The task body lives in the meta cache; a forced poll is what makes the new
+# run visible. It never probes, so the warm poll after it is the first attempt.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "the row is unknown, not healthy" unknown \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "the previous no-data survives" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+check "the section is named in warnings" snapshotRows \
+  "$(state '.warnings[] | select(.section=="snapshotRows") | .section')"
+check "the seen badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+
+# The failure advanced lastProbeAt, so the next poll retries rather than
+# treating the run as answered.
+before=$(seen '.output["snapshotTasks:1"].lastProbeAt')
+sleep 1
+poll
+after=$(seen '.output["snapshotTasks:1"].lastProbeAt')
+check "a failed probe advances lastProbeAt" true \
+  "$([[ $after > $before ]] && echo true || echo false)"
+check "but not lastRunAt" "$run_before" \
+  "$(seen '.output["snapshotTasks:1"].lastRunAt')"
+teardown

@@ -161,6 +161,112 @@ check "an unknown key is refused" 1 \
   "$(ctl config set bananas 1 >/dev/null 2>&1; echo $?)"
 teardown
 
+test_case "expect writes one task key, dedupes, and refuses junk"
+setup
+single_instance_config
+check "on succeeds" 0 "$(ctl expect snapshotTasks:4 on >/dev/null 2>&1; echo $?)"
+check "the key is stored" '["snapshotTasks:4"]' \
+  "$(jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+ctl expect replication:1 on >/dev/null
+ctl expect snapshotTasks:4 on >/dev/null
+check "a duplicate is not stored twice" \
+  '["replication:1","snapshotTasks:4"]' \
+  "$(jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+check "the rest of the config survives" 1 \
+  "$(jq -r '.instances | length' "$TRUENAS_CONFIG_FILE")"
+check "off removes only that key" '["replication:1"]' \
+  "$(ctl expect snapshotTasks:4 off >/dev/null; jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+check "an unknown section is refused" 1 \
+  "$(ctl expect cloudSync:1 on >/dev/null 2>&1; echo $?)"
+check "a zero id is refused" 1 \
+  "$(ctl expect snapshotTasks:0 on >/dev/null 2>&1; echo $?)"
+check "a negative id is refused" 1 \
+  "$(ctl expect replication:-1 on >/dev/null 2>&1; echo $?)"
+check "a non-id is refused" 1 \
+  "$(ctl expect snapshotTasks:four on >/dev/null 2>&1; echo $?)"
+check "a bad on/off word is refused" 1 \
+  "$(ctl expect snapshotTasks:4 maybe >/dev/null 2>&1; echo $?)"
+check "the refusals left the list alone" '["replication:1"]' \
+  "$(jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+check "no argument prints usage" 0 "$(ctl expect >/dev/null 2>&1; echo $?)"
+teardown
+
+test_case "config set refuses expectOutput and config list shows the raw array"
+setup
+single_instance_config
+check "config set is refused" 1 \
+  "$(ctl config set expectOutput '["snapshotTasks:4"]' >/dev/null 2>&1; echo $?)"
+check "the refusal names the writer" 1 \
+  "$(ctl config set expectOutput x 2>&1 | grep -c 'truenasctl expect')"
+jq '.expectOutput = ["snapshotTasks:4","junk"]' "$TRUENAS_CONFIG_FILE" >"$WORK/c.json"
+mv "$WORK/c.json" "$TRUENAS_CONFIG_FILE"
+check "list shows the raw array" '["snapshotTasks:4","junk"]' \
+  "$(ctl config list | jq -c '.expectOutput')"
+teardown
+
+test_case "expect prune refuses a missing state, a warned section and a stale state"
+setup
+single_instance_config
+ctl expect snapshotTasks:4 on >/dev/null
+check "no state is refused" 1 "$(ctl expect prune >/dev/null 2>&1; echo $?)"
+check "the key survives" '["snapshotTasks:4"]' \
+  "$(jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+
+mkdir -p "$(dirname "$STATE")"
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat >"$STATE" <<JSON
+{ "schema": 1, "updatedAt": "$now", "pollSeconds": 30,
+  "connection": { "ok": true },
+  "snapshotTasks": [ { "id": 5 } ],
+  "warnings": [ { "section": "snapshotTasks", "error": "timeout", "message": "x" } ] }
+JSON
+check "a warned section is refused" 1 "$(ctl expect prune >/dev/null 2>&1; echo $?)"
+check "the refusal names the section" 1 \
+  "$(ctl expect prune 2>&1 | grep -c 'snapshotTasks section did not answer')"
+check "the key survives" '["snapshotTasks:4"]' \
+  "$(jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+
+stale=$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stale" '.updatedAt = $s | .warnings = []' "$STATE" >"$WORK/s.json"
+mv "$WORK/s.json" "$STATE"
+check "a stale state is refused" 1 "$(ctl expect prune >/dev/null 2>&1; echo $?)"
+check "the refusal names the age" 1 \
+  "$(ctl expect prune 2>&1 | grep -c 'older than two polls')"
+
+jq 'del(.snapshotTasks)' "$STATE" >"$WORK/s.json"
+mv "$WORK/s.json" "$STATE"
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$now" '.updatedAt = $s' "$STATE" >"$WORK/s.json"
+mv "$WORK/s.json" "$STATE"
+check "an absent section is refused" 1 "$(ctl expect prune >/dev/null 2>&1; echo $?)"
+check "the refusal names the absent section" 1 \
+  "$(ctl expect prune 2>&1 | grep -c 'snapshotTasks section is not in the state')"
+teardown
+
+test_case "expect prune drops dead and junk keys from a fresh state"
+setup
+single_instance_config
+jq '.expectOutput = ["replication:1","snapshotTasks:4","snapshotTasks:5","junk"]' \
+  "$TRUENAS_CONFIG_FILE" >"$WORK/c.json"
+mv "$WORK/c.json" "$TRUENAS_CONFIG_FILE"
+mkdir -p "$(dirname "$STATE")"
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat >"$STATE" <<JSON
+{ "schema": 1, "updatedAt": "$now", "pollSeconds": 30,
+  "connection": { "ok": true },
+  "replication": [ { "id": 1 } ],
+  "snapshotTasks": [ { "id": 5 } ],
+  "warnings": [] }
+JSON
+out=$(ctl expect prune)
+check "prune succeeds" 0 "$(ctl expect prune >/dev/null 2>&1; echo $?)"
+check "only the live keys remain" '["replication:1","snapshotTasks:5"]' \
+  "$(jq -c '.expectOutput' "$TRUENAS_CONFIG_FILE")"
+check "the dead key is named" 1 "$(grep -c 'pruned snapshotTasks:4' <<<"$out")"
+check "the junk key is named" 1 "$(grep -c 'pruned junk' <<<"$out")"
+check "a second prune is a no-op" "nothing to prune" "$(ctl expect prune)"
+teardown
+
 test_case "config set-key replaces the credential and refuses an argument"
 setup
 printf 'fresh-key\n' | ctl config set-key >/dev/null

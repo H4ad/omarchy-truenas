@@ -673,6 +673,14 @@ check("failed and overdue rows count, a failed overdue row once", 2,
     snapshotTasks: [{ state: { state: "FINISHED" }, overdue: true }],
     scrubs: [{}]
   }));
+check("a no-data row counts", 1,
+  Model.protectionProblems({
+    snapshotTasks: [{ state: { state: "FINISHED" }, noData: true }]
+  }));
+check("failed, overdue and no-data together count once", 1,
+  Model.protectionProblems({
+    snapshotTasks: [{ state: { state: "FAILED" }, overdue: true, noData: true }]
+  }));
 check("a warning without a failed job is not a problem here", 0,
   Model.protectionProblems({
     replication: [{ job: { state: "SUCCESS" }, state: { warnings: ["x"] } }]
@@ -680,12 +688,26 @@ check("a warning without a failed job is not a problem here", 0,
 check("an empty state is zero", 0, Model.protectionProblems(null));
 check("missing lists are zero", 0, Model.protectionProblems({}));
 
+test_case("protectionNoData");
+
+check("no-data rows count across the lists", 2,
+  Model.protectionNoData({
+    replication: [{ noData: true }, { noData: false }],
+    snapshotTasks: [{ noData: true }],
+    scrubs: [{}]
+  }));
+check("a string true is not a flag", 0, Model.protectionNoData({ snapshotTasks: [{ noData: "true" }] }));
+check("an empty state is zero", 0, Model.protectionNoData(null));
+check("missing lists are zero", 0, Model.protectionNoData({}));
+
 test_case("protectionBadge");
 
 check("a failed job keeps its state word", "FAILED",
-  Model.protectionBadge({ job: { state: "FAILED" }, overdue: true }));
+  Model.protectionBadge({ job: { state: "FAILED" }, overdue: true, noData: true }));
 check("an overdue healthy task reads OVERDUE", "OVERDUE",
-  Model.protectionBadge({ job: { state: "SUCCESS" }, overdue: true }));
+  Model.protectionBadge({ job: { state: "SUCCESS" }, overdue: true, noData: true }));
+check("a no-data task reads NO DATA", "NO DATA",
+  Model.protectionBadge({ job: { state: "SUCCESS" }, noData: true }));
 check("a healthy task keeps its own state", "SUCCESS",
   Model.protectionBadge({ job: { state: "SUCCESS" } }));
 check("a scrub with no state has no badge", "",
@@ -698,10 +720,27 @@ check("a failed row is urgent", 1,
   Model.protectionBadgeRank({ job: { state: "FAILED" } }));
 check("an overdue row is urgent", 1,
   Model.protectionBadgeRank({ job: { state: "SUCCESS" }, overdue: true }));
+check("a no-data row is urgent", 1,
+  Model.protectionBadgeRank({ job: { state: "SUCCESS" }, noData: true }));
 check("a healthy row is plain", 0,
   Model.protectionBadgeRank({ job: { state: "SUCCESS" } }));
 check("a blank state is unknown", 2, Model.protectionBadgeRank({}));
 check("a missing row is unknown", 2, Model.protectionBadgeRank(null));
+
+test_case("outputLine");
+
+check("empty says what the run wrote", "last run wrote 0 B",
+  Model.outputLine({ output: { state: "empty", written: 0 } }));
+check("a positive empty count is formatted", "last run wrote 1 KiB",
+  Model.outputLine({ output: { state: "empty", written: 1024 } }));
+check("a missing snapshot says so", "last snapshot missing",
+  Model.outputLine({ output: { state: "missing" } }));
+check("an unanswered check says so", "output not checked",
+  Model.outputLine({ output: { state: "unknown" } }));
+check("a healthy run has no line", "",
+  Model.outputLine({ output: { state: "ok", written: 10 } }));
+check("an unflagged row has no line", "", Model.outputLine({}));
+check("a missing row has no line", "", Model.outputLine(null));
 
 test_case("protectionRunLine");
 

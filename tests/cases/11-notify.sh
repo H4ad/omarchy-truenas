@@ -1030,3 +1030,171 @@ check "one toast for the kind, not two" 1 "$(notifications)"
 check "the body carries the count" 1 \
   "$(grep -c '2 tasks, see the panel' "$STUB_NOTIFY_LOG" || true)"
 teardown
+
+# ------------------------------------------------------------ output checks
+test_case "an empty run toasts once, recovery toasts low"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+check "a cold poll is quiet" 0 "$(notifications)"
+poll
+check "one no-data toast" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the body names the empty run" 1 \
+  "$(grep -c 'the last run finished empty' "$STUB_NOTIFY_LOG" || true)"
+check "error urgency is normal without sticky critical" 1 \
+  "$(grep -c -- '-u normal .*Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the task name stays out of argv" 0 \
+  "$(grep -c 'storage' "$STUB_NOTIFY_LOG" || true)"
+poll
+check "the same answer does not replay" 1 "$(notifications)"
+
+# A new run with data: recovery is one low toast.
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s
+  | .state.last_snapshot = "storage@auto-hourly-2026-09-14_02-00" else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+rows2=$(probe_tree storage auto-hourly-2026-09-14_02-00 1K 0 "$WORK/rows2.json")
+output_probe_map "$WORK/snaps2.json" "$rows2" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+# Make the new run visible in the meta cache; this poll never probes.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+poll
+check "one recovery toast" 1 \
+  "$(grep -c 'Snapshot has data again' "$STUB_NOTIFY_LOG" || true)"
+check "recovery is low" 1 \
+  "$(grep -c -- '-u low .*Snapshot has data again' "$STUB_NOTIFY_LOG" || true)"
+check "no second no-data toast" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "seen clears noData" false "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
+
+test_case "two tasks with mixed reasons make one batch toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1","snapshotTasks:2"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+jq '. + [ .[0] | .id = 2 | .dataset = "storage2"
+           | .state.last_snapshot = "storage2@auto-hourly-2026-09-14_01-00" ]' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+# Only task 1's dataset is present: task 1 is empty, task 2 is missing.
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "one toast for the kind" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries the count" 1 \
+  "$(grep -c '2 tasks, see the panel' "$STUB_NOTIFY_LOG" || true)"
+check "both rows are no-data" 2 \
+  "$(state '[.snapshotTasks[] | select(.id <= 2 and .noData == true)] | length')"
+teardown
+
+test_case "a failed run keeps the badge and makes no toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.state = "FAILED"
+  | .state.datetime = $s else . end)' "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+# Make the failed run visible in the meta cache.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "a failed run is not probed" 0 "$(snapshot_queries)"
+check "it makes no output toast" 1 "$(notifications)"
+check "the row has no output annotation" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | has("output")')"
+check "the previous badge is kept" true "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
+
+test_case "a failed probe keeps the badge and makes no toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s
+  | .state.last_snapshot = "storage@auto-hourly-2026-09-14_02-00" else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+respond_first "/api/v2.0/pool/snapshot?snapshot_name=auto-hourly-2026-09-14_02-00" \
+  0 500 "$ROOT/tests/fixtures/err-500.json"
+# Make the new run visible in the meta cache, then attempt it on a warm poll.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "a failed probe is not an answer" 1 "$(notifications)"
+check "the badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+check "the card still says no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+check "the warning names the section" snapshotRows \
+  "$(state '.warnings[] | select(.section=="snapshotRows") | .section')"
+teardown
+
+test_case "a failed snapshot-task section keeps the output state"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+respond_first "/api/v2.0/pool/snapshottask" 0 500 "$ROOT/tests/fixtures/err-500.json"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+check "no output toast on a section failure" 1 "$(notifications)"
+check "the badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+check "the section warning is present" snapshotTasks \
+  "$(state '.warnings[] | select(.section=="snapshotTasks") | .section')"
+teardown
+
+test_case "an overdue task suppresses no-data and makes no toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+# Move the run two days back: the hour schedule plus six-hour grace is overdue.
+stamp=$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+# Make the old run visible in the meta cache; the warm poll then skips it.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "an overdue task is not probed" 0 "$(snapshot_queries)"
+check "it makes no output toast" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the row carries OVERDUE, not no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .overdue')"
+check "and no output annotation" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | has("output")')"
+check "the seen entry is kept for when it runs" true \
+  "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
