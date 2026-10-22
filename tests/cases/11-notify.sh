@@ -1242,3 +1242,29 @@ check "and no output annotation" false \
 check "the seen entry is kept for when it runs" true \
   "$(seen '.output["snapshotTasks:1"].noData')"
 teardown
+
+test_case "a failed normalization keeps the output state"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+before=$(notifications)
+
+# An alert row that is a string passes the fetch's array shape and breaks the
+# normalizer, which is the path that used to be indistinguishable from a NAS
+# with nothing on it.
+printf '["junk"]\n' >"$WORK/bad-alerts.json"
+respond_first "/api/v2.0/alert/list" 0 200 "$WORK/bad-alerts.json"
+poll
+check "normalization failed" normalize \
+  "$(state '.warnings[] | select(.section=="normalize") | .section')"
+check "no output toast" "$before" \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
