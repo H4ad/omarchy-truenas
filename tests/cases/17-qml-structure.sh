@@ -167,6 +167,35 @@ check "the config view lists one toggle per custom piece" "13" \
 check "the manifest declares one key per custom piece" "13" \
   "$(jq -r '[.barWidget.schema[] | select(.key | startswith("show"))] | length' "$ROOT/manifest.json")"
 
+# The output check is a config write, not a NAS write. The view must call the
+# `expect` verb, read the config back so the toggle survives a reopen, and must
+# not force a meta refresh: a forced poll spends fifteen requests on the NAS for
+# a value that did not change.
+check "the config view has a protection data checks section" "1" \
+  "$(grep -c 'text: "PROTECTION DATA CHECKS"' "$ROOT/Views/Config.qml")"
+check "the config view writes the check through expect" "1" \
+  "$(grep -c 'panel.runCtl(\["expect"' "$ROOT/Views/Config.qml")"
+check "the check callback reloads the config and never forces a poll" "1 0" \
+  "$(awk '/function setOutputCheck/ { inside = 1 }
+          inside && /loadConfig\(\)/ { load = 1 }
+          inside && /refreshAfterWrite\(\)/ { refresh = 1 }
+          inside && /^  }$/ { inside = 0 }
+          END { print load + 0, refresh + 0 }' "$ROOT/Views/Config.qml")"
+check "expectOutput is not offered as a scalar config setting" "1" \
+  "$(grep -c 'expectOutput is a list, not a scalar' "$ROOT/bin/truenasctl")"
+
+# The output check's card and menu wiring. The badge word and the count are in
+# Model.js, so the view only has to ask for them; the warning line is the one
+# place a failed probe or derivation is named.
+check "the protection view renders the output detail line" "1" \
+  "$(grep -c 'function outputLine(row)' "$ROOT/Views/Protection.qml")"
+check "the protection view warns when the check cannot run" "1" \
+  "$(grep -c 'function outputWarningLine()' "$ROOT/Views/Protection.qml")"
+check "the menu reads the no-data count" "1" \
+  "$(grep -c 'Model.protectionNoData(root.snapshot)' "$ROOT/Menu.qml")"
+check "the healthy menu line names empty runs" "1" \
+  "$(grep -c 'nothing failed, overdue or empty' "$ROOT/Menu.qml")"
+
 # Every variant the JS resolves must be selectable in the manifest, and the
 # manifest must not offer one the JS would fall back to Default for. Both lists
 # come from their source, and the check names the side each missing entry is on.

@@ -1030,3 +1030,241 @@ check "one toast for the kind, not two" 1 "$(notifications)"
 check "the body carries the count" 1 \
   "$(grep -c '2 tasks, see the panel' "$STUB_NOTIFY_LOG" || true)"
 teardown
+
+# ------------------------------------------------------------ output checks
+test_case "an empty run toasts once, recovery toasts low"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+check "a cold poll is quiet" 0 "$(notifications)"
+poll
+check "one no-data toast" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the body names the empty run" 1 \
+  "$(grep -c 'the last run finished empty' "$STUB_NOTIFY_LOG" || true)"
+check "error urgency is normal without sticky critical" 1 \
+  "$(grep -c -- '-u normal .*Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the task name stays out of argv" 0 \
+  "$(grep -c 'storage' "$STUB_NOTIFY_LOG" || true)"
+poll
+check "the same answer does not replay" 1 "$(notifications)"
+
+# A new run with data: recovery is one low toast.
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s
+  | .state.last_snapshot = "storage@auto-hourly-2026-09-14_02-00" else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+rows2=$(probe_tree storage auto-hourly-2026-09-14_02-00 1K 0 "$WORK/rows2.json")
+output_probe_map "$WORK/snaps2.json" "$rows2" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+# Make the new run visible in the meta cache; this poll never probes.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+poll
+check "one recovery toast" 1 \
+  "$(grep -c 'Snapshot has data again' "$STUB_NOTIFY_LOG" || true)"
+check "recovery is low" 1 \
+  "$(grep -c -- '-u low .*Snapshot has data again' "$STUB_NOTIFY_LOG" || true)"
+check "no second no-data toast" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "seen clears noData" false "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
+
+test_case "two tasks with mixed reasons make one batch toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1","snapshotTasks:2"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+jq '. + [ .[0] | .id = 2 | .dataset = "storage2"
+           | .state.last_snapshot = "storage2@auto-hourly-2026-09-14_01-00" ]' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+# Only task 1's dataset is present: task 1 is empty, task 2 is missing.
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "one toast for the kind" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the body carries the count" 1 \
+  "$(grep -c '2 tasks, see the panel' "$STUB_NOTIFY_LOG" || true)"
+check "both rows are no-data" 2 \
+  "$(state '[.snapshotTasks[] | select(.id <= 2 and .noData == true)] | length')"
+teardown
+
+test_case "a failed run keeps the badge and makes no toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.state = "FAILED"
+  | .state.datetime = $s else . end)' "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+# Make the failed run visible in the meta cache.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "a failed run is not probed" 0 "$(snapshot_queries)"
+check "it makes no output toast" 1 "$(notifications)"
+check "the row has no output annotation" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | has("output")')"
+check "the previous badge is kept" true "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
+
+test_case "a failed probe keeps the badge and makes no toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s
+  | .state.last_snapshot = "storage@auto-hourly-2026-09-14_02-00" else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+respond_first "/api/v2.0/pool/snapshot?snapshot_name=auto-hourly-2026-09-14_02-00" \
+  0 500 "$ROOT/tests/fixtures/err-500.json"
+# Make the new run visible in the meta cache, then attempt it on a warm poll.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "a failed probe is not an answer" 1 "$(notifications)"
+check "the badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+check "the card still says no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+check "the warning names the section" snapshotRows \
+  "$(state '.warnings[] | select(.section=="snapshotRows") | .section')"
+teardown
+
+test_case "a failed snapshot-task section keeps the output state"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+respond_first "/api/v2.0/pool/snapshottask" 0 500 "$ROOT/tests/fixtures/err-500.json"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+check "no output toast on a section failure" 1 "$(notifications)"
+check "the badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+check "the section warning is present" snapshotTasks \
+  "$(state '.warnings[] | select(.section=="snapshotTasks") | .section')"
+teardown
+
+test_case "a cap-skipped task keeps its badge"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+
+# A new run for task 1 and a new task 2 whose run name sorts first. The cap
+# lets one through, and the untried task must win the slot.
+output_check_on '["snapshotTasks:1","snapshotTasks:2"]'
+stamp=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s
+  | .state.last_snapshot = "storage@auto-hourly-2026-09-14_02-00" else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps-a.json"
+jq '. + [ .[0] | .id = 2 | .dataset = "d2"
+           | .state.last_snapshot = "d2@auto-a" ]' "$WORK/snaps-a.json" >"$WORK/snaps-b.json"
+cat >"$WORK/rows-b.json" <<'JSON'
+[ { "dataset": "storage", "name": "storage@auto-hourly-2026-09-14_02-00",
+    "snapshot_name": "auto-hourly-2026-09-14_02-00",
+    "properties": { "written": { "value": "0" } } },
+  { "dataset": "d2", "name": "d2@auto-a", "snapshot_name": "auto-a",
+    "properties": { "written": { "value": "1K" } } } ]
+JSON
+output_probe_map "$WORK/snaps-b.json" "$WORK/rows-b.json" \
+  "$ROOT/tests/fixtures/replication.json" "$scrubs"
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "one query serves the untried task" 1 "$(snapshot_queries)"
+check "the untried task got the slot" 1 \
+  "$(grep -c 'snapshot_name=auto-a' "$STUB_CURL_LOG")"
+check "the skipped task keeps NO DATA" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+check "and says the output was not checked" unknown \
+  "$(state '.snapshotTasks[] | select(.id==1) | .output.state')"
+check "the probed task is ok" ok \
+  "$(state '.snapshotTasks[] | select(.id==2) | .output.state')"
+teardown
+
+test_case "an overdue task suppresses no-data and makes no toast"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline has one no-data toast" 1 "$(notifications)"
+
+# Move the run two days back: the hour schedule plus six-hour grace is overdue.
+stamp=$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%SZ)
+jq --arg s "$stamp" 'map(if .id == 1 then .state.datetime = $s else . end)' \
+  "$WORK/snaps.json" >"$WORK/snaps2.json"
+output_probe_map "$WORK/snaps2.json" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+# Make the old run visible in the meta cache; the warm poll then skips it.
+"$ROOT/bin/truenas-poll" --quiet --force-meta
+: >"$STUB_CURL_LOG"
+poll
+check "an overdue task is not probed" 0 "$(snapshot_queries)"
+check "it makes no output toast" 1 \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the row carries OVERDUE, not no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .overdue')"
+check "and no output annotation" false \
+  "$(state '.snapshotTasks[] | select(.id==1) | has("output")')"
+check "the seen entry is kept for when it runs" true \
+  "$(seen '.output["snapshotTasks:1"].noData')"
+teardown
+
+test_case "a failed normalization keeps the output state"
+setup; single_instance_config
+output_check_on '["snapshotTasks:1"]'
+snaps=$(snap_due 1 true true "$WORK/snaps.json")
+rows=$(probe_tree storage auto-hourly-2026-09-14_01-00 0 0 "$WORK/rows.json")
+scrubs=$(quiet_scrubs)
+output_probe_map "$snaps" "$rows" "$ROOT/tests/fixtures/replication.json" "$scrubs"
+poll
+poll
+check "the baseline is no-data" true \
+  "$(state '.snapshotTasks[] | select(.id==1) | .noData')"
+before=$(notifications)
+
+# An alert row that is a string passes the fetch's array shape and breaks the
+# normalizer, which is the path that used to be indistinguishable from a NAS
+# with nothing on it.
+printf '["junk"]\n' >"$WORK/bad-alerts.json"
+respond_first "/api/v2.0/alert/list" 0 200 "$WORK/bad-alerts.json"
+poll
+check "normalization failed" normalize \
+  "$(state '.warnings[] | select(.section=="normalize") | .section')"
+check "no output toast" "$before" \
+  "$(grep -c 'Snapshot produced no data' "$STUB_NOTIFY_LOG" || true)"
+check "the badge survives" true "$(seen '.output["snapshotTasks:1"].noData')"
+teardown

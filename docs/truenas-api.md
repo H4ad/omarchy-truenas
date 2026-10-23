@@ -294,9 +294,19 @@ Findings that constrain the design:
 5. The scrub row carries no run state. A pool's scrub progress and last result
    live on `pool.scan`, which the Pools view already normalizes; there is no
    second scrub state field.
-6. `GET /pool/snapshot` is not read. The full list is 298 heavy rows with a
-   `properties` blob each, and a per-poll `?count=true` would spend a request for
-   a figure no view needs. The periodic snapshot tasks are the snapshot section.
+6. `GET /pool/snapshot` is read only by the opt-in output check, and only on a
+   warm poll. `?name=<dataset>@<snap>` is an exact, indexed lookup: one row,
+   about 6 KB, 0.8 s live. `?snapshot_name=<name>` returns every dataset in every
+   pool with that name (35 rows, 224 KB, 20 s live), which is how a recursive
+   run's children are read; `?dataset=` costs the same 20 s and is not used.
+   `?limit` does not make a scan cheaper. `properties.written.value` is a ZFS
+   size string (`"0"`, `"740K"`, `"3.26G"`), not a number; `properties.used.value`
+   is a string too and is not a health signal (the live replica target reads
+   `used: "0B"` with `written: "5.39G"`). A missing name answers `200 []`, and
+   a malformed option answers `422`. The probe is capped at
+   `OUTPUT_PROBE_CAP` (1) query per warm poll and passes a 30 s timeout, so a
+   warm poll is 2 + 1 requests and a cold or forced-meta poll never probes. The
+   periodic snapshot tasks are still the snapshot section.
 7. Dates inside `state` and `job` are Mongo `{$date: epoch_ms}` objects;
    `share/normalize.jq` `to_iso` accepts them. `state.datetime` and
    `job.time_finished` become ISO strings.
@@ -405,7 +415,7 @@ is not "not JSON", and an empty non-2xx body is `http_<code>` rather than
 `not_json`. `401` means `unauthenticated`, `403` `forbidden`, `5xx`
 `server_error`.
 
-### The rate limit and the two cadences
+### The rate limit and the three cadences
 
 TrueNAS allows roughly 20 authenticated requests per 60 s, then a 10-minute
 cooldown, and every route here is authenticated. A poll therefore never hits
@@ -416,13 +426,21 @@ every endpoint:
   `disk/details` and `disk/temperatures` (the temperatures request is built from
   the names the details call returned, so a failed details call skips it), then
   `service`, `app`, `sharing/smb`, `sharing/nfs`, `iscsi/target`, `interface`,
-  `replication`, `cloudsync`, `pool/snapshottask` and `pool/scrub`.
+  `replication`, `cloudsync`, `pool/snapshottask` and `pool/scrub`;
+- on a warm poll, at most `OUTPUT_PROBE_CAP` (1) `/pool/snapshot` query for the
+  opt-in output check, and only when an expected task has a new successful run.
+  A cold or forced-meta poll never probes, because it already spent the fifteen
+  requests below. The probe passes a 30 s timeout: a `?snapshot_name=` scan
+  takes about 20 s live, while the configured `timeoutSeconds` defaults to 8.
+  The panel serializes polls, so a slow probe delays the next tick rather than
+  overlapping it.
 
 A cold poll, with no fresh meta, spends fifteen requests: `alert/list`, `pool`,
 `system/info`, `disk/details`, `disk/temperatures`, `service`, `app`,
 `sharing/smb`, `sharing/nfs`, `iscsi/target`, `interface`, `replication`,
 `cloudsync`, `pool/snapshottask` and `pool/scrub`. A warm poll, with a fresh meta
-cache, spends two: `alert/list` and `pool`.
+cache, spends two: `alert/list` and `pool`, plus the one probe when a run is
+due.
 
 The slow set is cached in `~/.local/state/omarchy/truenas/meta.json` with a
 `fetchedAt`, and `truenas-poll --force-meta` refetches regardless (used after a

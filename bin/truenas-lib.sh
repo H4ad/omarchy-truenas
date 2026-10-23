@@ -12,6 +12,10 @@ TN_META_FILE="$TN_STATE_HOME/meta.json"
 TN_HISTORY_FILE="$TN_STATE_HOME/history.json"
 TN_PLUGIN_DIR="${TN_PLUGIN_DIR:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
 
+# The one key grammar `expectOutput` accepts. It lives here so the poll's
+# normalizer and the writer cannot drift: both pass it to jq as `--arg re`.
+TN_EXPECT_KEY_RE='^(replication|snapshotTasks):[1-9][0-9]*$'
+
 tn_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 tn_warn() { printf 'truenas: %s\n' "$*" >&2; }
 
@@ -109,7 +113,7 @@ tn_load_config() {
     printf '{"configError":"config_not_json","instances":[]}\n'
     return 0
   fi
-  jq '
+  jq --arg re "$TN_EXPECT_KEY_RE" '
     {
       schema:          (.schema // 1),
       # Clamped at both ends. The floor is the API rate limit; the ceiling keeps
@@ -119,6 +123,13 @@ tn_load_config() {
       pollSeconds:     ((.pollSeconds // 30) | if type == "number" then (if . < 15 then 15 elif . > 86400 then 86400 else . end) else 30 end),
       timeoutSeconds:  ((.timeoutSeconds // 8) | if type == "number" then (if . < 2 then 2 elif . > 86400 then 86400 else . end) else 8 end),
       insecureTLS:     (if (.insecureTLS | type) == "boolean" then .insecureTLS else false end),
+      # The per-task output checks. A key that does not match the grammar, or a
+      # value that is not an array, is dropped here rather than trusted by the
+      # poll later. `unique` sorts, so the poll and the view see one order.
+      expectOutput:    ([ (.expectOutput // [])[]?
+                         | select(type == "string")
+                         | select(test($re)) ]
+                       | unique),
       # Display-only redaction level for recording and screenshots. A value
       # outside the enum is "off", so a hand-edited config cannot switch on a
       # level the display code does not know. It changes nothing on disk.

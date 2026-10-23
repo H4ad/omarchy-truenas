@@ -538,8 +538,8 @@ function protectionOverdue(state) {
   return count;
 }
 
-// Failed or overdue, each row counted once. A row that failed and also missed
-// its schedule is one problem, not two.
+// Failed, overdue or no-data, each row counted once. A row that failed and
+// also missed its schedule, or ran empty, is one problem, not two.
 function protectionProblems(state) {
   var count = 0;
   for (var s = 0; s < PROTECTION_SECTIONS.length; s++) {
@@ -547,28 +547,62 @@ function protectionProblems(state) {
       ? state[PROTECTION_SECTIONS[s]] : [];
     for (var i = 0; i < list.length; i++) {
       if (protectionStateRank(protectionState(list[i])) === 1
-          || (list[i] && list[i].overdue === true)) count += 1;
+          || (list[i] && list[i].overdue === true)
+          || (list[i] && list[i].noData === true)) count += 1;
+    }
+  }
+  return count;
+}
+
+// How many rows the poll's output check marked no-data. `noData` is derived
+// once in share/protection-output.jq, so the bar and the views cannot disagree.
+function protectionNoData(state) {
+  var count = 0;
+  for (var s = 0; s < PROTECTION_SECTIONS.length; s++) {
+    var list = arrayLike(state && state[PROTECTION_SECTIONS[s]])
+      ? state[PROTECTION_SECTIONS[s]] : [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].noData === true) count += 1;
     }
   }
   return count;
 }
 
 // The one word a protection card puts on its right: the failure state when the
-// job has one, else OVERDUE, else the task's own state. A healthy scrub has no
-// state and answers "", so its card shows no badge at all.
+// job has one, else OVERDUE, else NO DATA, else the task's own state. A healthy
+// scrub has no state and answers "", so its card shows no badge at all.
 function protectionBadge(row) {
   var state = protectionState(row);
   if (protectionStateRank(state) === 1) return state;
   if (row && row.overdue === true) return "OVERDUE";
+  if (row && row.noData === true) return "NO DATA";
   return state;
 }
 
-// 0 healthy, 1 failure or overdue, 2 unknown. The view tints from this.
+// 0 healthy, 1 failure, overdue or no-data, 2 unknown. The view tints from this.
 function protectionBadgeRank(row) {
   var rank = protectionStateRank(protectionState(row));
   if (rank === 1) return 1;
   if (row && row.overdue === true) return 1;
+  if (row && row.noData === true) return 1;
   return rank;
+}
+
+// The card's output detail. Empty says what the run wrote, missing says the
+// named snapshot is gone, and unknown says the check has no answer. A healthy
+// or unflagged row has no line.
+function outputLine(row) {
+  if (!row || typeof row !== "object" || !row.output
+      || typeof row.output !== "object") return "";
+  var state = String(row.output.state || "");
+  if (state === "empty") {
+    var written = row.output.written;
+    return "last run wrote " + (written === null || written === undefined
+      ? "0 B" : formatBytes(written));
+  }
+  if (state === "missing") return "last snapshot missing";
+  if (state === "unknown") return "output not checked";
+  return "";
 }
 
 // A sentence for the last finished run. `lastRunKnown` is false only when the

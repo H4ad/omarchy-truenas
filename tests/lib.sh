@@ -42,6 +42,12 @@ JSON
 
 respond() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >"$STUB_MAP"; }
 respond_add() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$STUB_MAP"; }
+# A route that has to win against a broader pattern already in the map (the
+# stub returns the first line whose pattern is a substring of the URL).
+respond_first() {
+  { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; cat "$STUB_MAP"; } >"$STUB_MAP.new"
+  mv "$STUB_MAP.new" "$STUB_MAP"
+}
 
 poll() { "$ROOT/bin/truenas-poll" --quiet; }
 state() { jq -r "$1" "$STATE"; }
@@ -225,3 +231,81 @@ down_app() {
     'map(if .name == $n then .state = $s else . end)' \
     "$ROOT/tests/fixtures/apps.json" >"$out"
 }
+
+# ------------------------------------------------------------ output checks
+# Turn on the output check for a JSON array of keys.
+output_check_on() {
+  jq --argjson keys "$1" '.expectOutput = $keys' "$TRUENAS_CONFIG_FILE" >"$WORK/c.json"
+  mv "$WORK/c.json" "$TRUENAS_CONFIG_FILE"
+}
+
+# A copy of the snapshot fixture with task $1 due now: enabled, a recent
+# FINISHED run, and a last snapshot named for its dataset. $2 is recursive,
+# $3 allow_empty. Prints the path.
+snap_due() {
+  local id=$1 recursive=$2 allow=$3 out=$4 stamp
+  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  jq -c --argjson id "$id" --argjson rec "$recursive" --argjson allow "$allow" \
+    --arg s "$stamp" '
+    map(if .id == $id then
+      .enabled = true | .recursive = $rec | .allow_empty = $allow
+      | .state = { state: "FINISHED", datetime: $s,
+                   last_snapshot: (.dataset + "@auto-hourly-2026-09-14_01-00") }
+    else . end)' "$ROOT/tests/fixtures/snapshot-tasks.json" >"$out"
+  printf '%s' "$out"
+}
+
+# A copy of the replication fixture with task 1 due now and a local target.
+rep_due() {
+  local out=$1 stamp
+  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  jq -c --arg s "$stamp" '
+    map(if .id == 1 then
+      .enabled = true | .auto = true
+      | .state = { state: "FINISHED", datetime: $s, warnings: [],
+                   last_snapshot: "storage/vm-root@auto-daily-2026-09-14_00-05" }
+      | .job = { state: "SUCCESS", time_finished: $s, error: null }
+    else . end)' "$ROOT/tests/fixtures/replication.json" >"$out"
+  printf '%s' "$out"
+}
+
+# One snapshot row. $1 dataset, $2 snapshot_name, $3 written value.
+probe_row() {
+  printf '{"dataset":"%s","name":"%s@%s","snapshot_name":"%s","properties":{"written":{"value":"%s"},"used":{"value":"0B"}}}\n' \
+    "$1" "$1" "$2" "$2" "$3"
+}
+
+# A snapshot-row body with a parent and a child, both under $1 and named $2.
+probe_tree() {
+  local dataset=$1 name=$2 parent_written=$3 child_written=$4 out=$5
+  {
+    printf '['
+    probe_row "$dataset" "$name" "$parent_written"
+    printf ','
+    probe_row "$dataset/child" "$name" "$child_written"
+    printf ']\n'
+  } >"$out"
+  printf '%s' "$out"
+}
+
+# The map for an output-check poll. `$1` is the snapshot-tasks body, `$2` the
+# snapshot-rows body, `$3` an optional replication body, `$4` an optional scrub
+# body (quiet scrubs keep a notification case's baseline at zero toasts). The
+# `?` keeps the snapshot pattern from stealing /pool/snapshottask, which shares
+# the /pool/snapshot prefix.
+output_probe_map() {
+  local snaps=$1 rows=$2 replication=${3:-"$ROOT/tests/fixtures/replication.json"}
+  local scrubs=${4:-"$ROOT/tests/fixtures/scrubs.json"}
+  notify_endpoints "$ROOT/tests/fixtures/alerts-empty.json" \
+    "$ROOT/tests/fixtures/pools-healthy.json" \
+    "$ROOT/tests/fixtures/disk-temperatures.json" \
+    "$ROOT/tests/fixtures/services.json" \
+    "$ROOT/tests/fixtures/apps.json" \
+    "$replication" "$ROOT/tests/fixtures/cloudsync.json" "$snaps" "$scrubs"
+  # Both `/pool/snapshot?` and `/pool/snapshottask` are substrings of the
+  # broader `/pool` route, and the stub returns the first match. The probe route
+  # must therefore come first, and its `?` keeps it off /pool/snapshottask.
+  respond_first "/api/v2.0/pool/snapshot?" 0 200 "$rows"
+}
+
+snapshot_queries() { grep -c '/api/v2.0/pool/snapshot?' "$STUB_CURL_LOG" || true; }
