@@ -98,6 +98,25 @@ Column {
     return Model.protectionRunLine(row, Date.now())
   }
 
+  function outputLine(row) {
+    return Model.outputLine(row)
+  }
+
+  // The output check's own failures. A failed snapshot query, a failed
+  // derivation or a failed normalization all mean "no answer", and the line
+  // names that rather than letting a missing badge read as healthy.
+  function outputWarningLine() {
+    var names = ["snapshotRows", "output", "normalize"]
+    for (var i = 0; i < names.length; i++) {
+      var warning = view.sectionWarning(names[i])
+      if (warning) {
+        var reason = String(warning.message || warning.error || "")
+        return "the output check could not run" + (reason !== "" ? ": " + reason : "")
+      }
+    }
+    return ""
+  }
+
   function joinDetail(parts) {
     var out = []
     for (var i = 0; i < parts.length; i++) {
@@ -139,6 +158,17 @@ Column {
       cursorShape: Qt.PointingHandCursor
       onClicked: view.panel.openUrl(view.protectionUrl)
     }
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.outputWarningLine() !== ""
+    text: view.outputWarningLine()
+    color: view.panel.urgentColor
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
   }
 
   // ------------------------------------------------------------- replication
@@ -200,6 +230,7 @@ Column {
         String(modelData.targetDataset || "")])
       readonly property string scheduleLine: Model.scheduleText(modelData.schedule)
       readonly property string runLine: view.runLine(modelData)
+      readonly property string outputLine: view.outputLine(modelData)
 
       Item {
         width: parent.width
@@ -260,6 +291,17 @@ Column {
         width: parent.width
         wrapMode: Text.WordWrap
         text: replicationCard.runLine
+        color: view.panel.dimForeground
+        font.family: view.panel.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.WordWrap
+        visible: replicationCard.outputLine !== ""
+        text: replicationCard.outputLine
         color: view.panel.dimForeground
         font.family: view.panel.contentFontFamily
         font.pixelSize: Style.font.caption
@@ -487,6 +529,7 @@ Column {
       readonly property string label: Model.protectionLabel(modelData) || "unnamed task"
       readonly property string scheduleLine: Model.scheduleText(modelData.schedule)
       readonly property string runLine: view.runLine(modelData)
+      readonly property string outputLine: view.outputLine(modelData)
       readonly property string snapshotLine: String(
         modelData.state && modelData.state.lastSnapshot || "")
 
@@ -538,6 +581,17 @@ Column {
         width: parent.width
         wrapMode: Text.WordWrap
         text: snapshotCard.runLine
+        color: view.panel.dimForeground
+        font.family: view.panel.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.WordWrap
+        visible: snapshotCard.outputLine !== ""
+        text: snapshotCard.outputLine
         color: view.panel.dimForeground
         font.family: view.panel.contentFontFamily
         font.pixelSize: Style.font.caption

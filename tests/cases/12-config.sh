@@ -221,6 +221,30 @@ JSON
 check "a non-string level falls back to off" off "$(tn_load_config | jq -r '.redact')"
 teardown
 
+test_case "tn_load_config normalizes expectOutput"
+setup
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "expectOutput": [ "snapshotTasks:4", "bad", "snapshotTasks:4", "replication:12",
+                    "cloudSync:1", "snapshotTasks:0", "scrubs:2", 7,
+                    "snapshotTasks:04", "replication:-1" ],
+  "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "only the grammar, sorted and unique" \
+  "replication:12 snapshotTasks:4" \
+  "$(tn_load_config | jq -r '.expectOutput | join(" ")')"
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "expectOutput": "snapshotTasks:4",
+  "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "a non-array reads as empty" "[]" \
+  "$(tn_load_config | jq -c '.expectOutput')"
+cat >"$TRUENAS_CONFIG_FILE" <<'JSON'
+{ "instances": [ { "id": "nas", "baseUrl": "https://nas.example" } ] }
+JSON
+check "a missing value reads as empty" "[]" \
+  "$(tn_load_config | jq -c '.expectOutput')"
+teardown
+
 test_case "tn_sanitize strips the escape byte and leaves the rest"
 setup
 check "the ESC byte is removed" "ab" "$(printf 'a\x1bb' | tn_sanitize)"

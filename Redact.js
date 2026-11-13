@@ -130,6 +130,7 @@ function kindFor(key) {
     case "targetDataset":
     case "sourceDatasets": return "path";
     case "lastSnapshot":   return "snapshot";
+    case "snapshot":       return "snapshot";
     case "name":
     case "pool":
     case "alias":

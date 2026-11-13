@@ -40,7 +40,8 @@ and network are read-only.
 **Notifications.** A toast when an alert starts or clears, when a pool leaves or
 returns to `ONLINE`, when a disk crosses a temperature band and cools back, when
 a service or app goes down or returns, when a replication or cloud sync task
-fails or recovers, and when any scheduled protection task becomes overdue or
+fails or recovers, when an opt-in output check enters or leaves `NO DATA`, and
+when any scheduled protection task becomes overdue or
 runs again. Toasts are deduped, so a network blip does not replay them.
 A toast names the kind of event ("A pool is DEGRADED", "A disk is hot"), never
 the pool, disk, service, app or alert text; clicking it opens the plugin's menu,
@@ -132,8 +133,13 @@ truenasctl login|logout|test [-v]|status|poll
 truenasctl alerts|pools|disks|services|apps
 truenasctl replication|cloudsync|snapshots|scrubs|shares|network
 truenasctl config list|set|set-key
+truenasctl expect <section>:<id> on|off|prune
 truenasctl open|purge
 ```
+
+`expect` turns the per-task output check on or off (`replication` or
+`snapshotTasks`), and `expect prune` drops keys whose task the last poll no
+longer reports. The check is off by default.
 
 `test -v` steps through the connection and names the failure (TLS, no key, key
 rejected, forbidden, not JSON, timed out) rather than reporting a generic error.
@@ -144,7 +150,8 @@ rejected, forbidden, not JSON, timed out) rather than reporting a generic error.
 Settings live in `~/.config/omarchy/truenas/config.json`. The panel shows them;
 the bar variant, the API key and the redaction level are editable there.
 `baseUrl` is written by `login`, `insecureTLS`, `pollSeconds`, `timeoutSeconds`
-and `redact` by `truenasctl config set`, and the `notify` block by hand.
+and `redact` by `truenasctl config set`, `expectOutput` by `truenasctl expect`,
+and the `notify` block by hand.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -153,6 +160,7 @@ and `redact` by `truenasctl config set`, and the `notify` block by hand.
 | `timeoutSeconds` | 8 | Per-request timeout |
 | `insecureTLS` | false | Skip certificate verification (explicit opt-in) |
 | `redact` | off | Display-only: hide identifying values for recording |
+| `expectOutput` | `[]` | Per-task output checks, written by `truenasctl expect` |
 | `notify.levels` | critical, error, warning | Alert levels that toast |
 
 The bar item's own settings (variant, `hideWhenHealthy`, `panelWidth`) are

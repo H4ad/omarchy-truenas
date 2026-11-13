@@ -445,17 +445,28 @@ thing to migrate, and the whole point of the shim is that the migration is a
 change to one function rather than a rewrite. See
 [websocket-migration.md](websocket-migration.md).
 
-### The rate limit forces two cadences
+### The rate limit forces three cadences
 
 TrueNAS allows roughly 20 authenticated requests per 60 s, then a 10-minute
 cooldown, and every route here is authenticated. One poll must not hit every
 endpoint. The split: `alert/list` and `pool` every `pollSeconds` (floor 15,
 default 30); `system/info`, the disks, services, apps, protection, shares and
 interfaces on a ~300 s meta cadence cached in `meta.json`, refreshed by
-`--force-meta` after a write.
+`--force-meta` after a write; and at most one opt-in `/pool/snapshot` probe per
+warm poll.
 
 Do: a new slow endpoint belongs on the meta list, never on the fast poll, or the
 plugin rate-limits itself into a cooldown that no retry shortens.
+
+The output probe is the one exception to "slow endpoints belong on the meta
+list", and it is safe for four reasons: it runs only on a warm poll (a cold or
+`--force-meta` poll already spends fifteen requests and never probes), only when
+an expected task has a new successful run, at most `OUTPUT_PROBE_CAP` (1) query
+per poll, and it reads a route the plugin otherwise never touches. A recursive
+task's `?snapshot_name=` scan takes about 20 s on the live box, so the probe
+passes a 30 s timeout rather than `timeoutSeconds`; the panel serializes polls,
+so the next tick waits instead of overlapping. Do not move it to the fast path
+or raise the cap without re-checking the 20-per-60 s budget.
 
 ### The notification `--exec` argv form
 

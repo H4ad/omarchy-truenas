@@ -73,7 +73,8 @@ function sample() {
     replication: [ { id: 1, name: "storage-to-backup",
                      targetDataset: "Backup/media", sourceDatasets: ["storage/media"] } ],
     cloudSync: [ { id: 2, name: "offsite", path: "/mnt/storage/media" } ],
-    snapshotTasks: [ { id: 3, dataset: "storage", state: { lastSnapshot: "storage@auto-1" } } ],
+    snapshotTasks: [ { id: 3, dataset: "storage", state: { lastSnapshot: "storage@auto-1" },
+                       output: { state: "empty", written: 0, snapshot: "storage@auto-1" } } ],
     scrubs: [ { id: 4, pool: "storage", description: "monthly scrub of storage" } ],
     shares: {
       smb: [ { id: "s1", name: "media", path: "/mnt/storage/media" } ],
@@ -145,6 +146,8 @@ test_case("names hides names, keeps the version");
   check("a dataset's pool component matches the pool token", out.pools[0].name,
     out.replication[0].sourceDatasets[0].split("/")[0]);
   check("a snapshot keeps its @", true, out.snapshotTasks[0].state.lastSnapshot.indexOf("@") !== -1);
+  check("the output snapshot gets the same token", out.snapshotTasks[0].state.lastSnapshot,
+    out.snapshotTasks[0].output.snapshot);
   check("a scrub description keeps readable prose", true,
     out.scrubs[0].description.indexOf("monthly") !== -1);
   check("free text loses a pool name", false,

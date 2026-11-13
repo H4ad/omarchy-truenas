@@ -38,6 +38,9 @@ truenasctl <command>
   config list                configuration as JSON, never the key value
   config set <key> <value>   write one scalar setting
   config set-key             read a new key on stdin and replace the stored one
+  expect <section>:<id> on   enable the output check for one task
+  expect <section>:<id> off  disable it
+  expect prune               drop keys for tasks the state no longer reports
   open [health|pools|alerts] open the NAS UI in the browser
   purge                      delete config, credentials and state
 
@@ -53,6 +56,18 @@ truenasctl config <command>
   list              configuration as JSON, without the key
   set <key> <value> insecureTLS, pollSeconds, timeoutSeconds or notify.<field>
   set-key           read the key on stdin, store it at mode 600
+
+expectOutput is written by truenasctl expect, not by config set.
+TXT
+}
+
+expect_usage() {
+  cat <<'TXT'
+truenasctl expect <section>:<id> on|off
+truenasctl expect prune
+
+<section> is replication or snapshotTasks. The check reports NO DATA when a
+successful run produces no new snapshot. It is off by default.
 TXT
 }
 
@@ -748,6 +763,9 @@ cmd_config_list() {
                    then $r else "off" end),
         pollSeconds: (.pollSeconds // 30),
         timeoutSeconds: (.timeoutSeconds // 8),
+        # The raw array, not the filtered copy the poll reads: a hand-edited
+        # junk key is visible here so the operator can see why it does nothing.
+        expectOutput: (if (.expectOutput | type) == "array" then .expectOutput else [] end),
         notify: (.notify // {}),
         keySet: $keySet
       }
@@ -759,6 +777,9 @@ cmd_config_set() {
   local key=$1 value=$2 text jv name
   text=$(config_read) || return 1
   case $key in
+    expectOutput)
+      tn_warn "expectOutput is a list, not a scalar: use truenasctl expect <section>:<id> on|off"
+      return 1 ;;
     insecureTLS)
       case $value in
         true|false) ;;
@@ -811,6 +832,116 @@ cmd_config_set_key() {
   printf 'key set\n'
 }
 
+# The one writer of `expectOutput`. A key is an id, not NAS text, so it may ride
+# argv. The list is deduped and sorted so a hand-edited config and this writer
+# produce the same order the poll reads.
+cmd_expect_set() {
+  local key=$1 value=$2 text
+  [[ $key =~ $TN_EXPECT_KEY_RE ]] || {
+    tn_warn "not an output check key: $key (want replication:<id> or snapshotTasks:<id>)"
+    return 1
+  }
+  case $value in
+    on|off) ;;
+    *) tn_warn "expect takes on or off, not $value"; return 1 ;;
+  esac
+  text=$(config_read) || return 1
+  if [[ $value == on ]]; then
+    text=$(jq --arg k "$key" '
+      def keys: ((.expectOutput // [])
+                 | if type == "array" then [ .[] | select(type == "string") ] else [] end);
+      .expectOutput = ((keys + [$k]) | unique)' <<<"$text") || return 1
+  else
+    text=$(jq --arg k "$key" '
+      def keys: ((.expectOutput // [])
+                 | if type == "array" then [ .[] | select(type == "string") ] else [] end);
+      .expectOutput = (keys | map(select(. != $k)))' <<<"$text") || return 1
+  fi
+  printf '%s' "$text" | write_config || return 1
+  printf '%s is %s\n' "$key" "$value"
+}
+
+# Drops keys whose task the last poll no longer reports. Every refusal exists
+# because an unread or stale state would look exactly like every task having
+# been deleted, and pruning on that would silently drop a live check.
+cmd_expect_prune() {
+  local state text keys existing kept new removed updated poll now then kind
+  [[ -s $TN_STATE_FILE ]] || {
+    tn_warn "no state at $TN_STATE_FILE: run truenasctl poll before pruning"
+    return 1
+  }
+  state=$(jq -ce 'if type == "object" then . else empty end' "$TN_STATE_FILE" 2>/dev/null) || {
+    tn_warn "$TN_STATE_FILE is not a JSON object; not pruning"
+    return 1
+  }
+  updated=$(jq -r '.updatedAt // ""' <<<"$state")
+  poll=$(jq -r '.pollSeconds // 30' <<<"$state")
+  [[ $poll =~ ^[0-9]+$ ]] || poll=30
+  [[ -n $updated ]] || { tn_warn "the state has no updatedAt; not pruning"; return 1; }
+  then=$(date -u -d "$updated" +%s 2>/dev/null) || {
+    tn_warn "the state's updatedAt does not parse; not pruning"
+    return 1
+  }
+  now=$(date -u +%s)
+  (( now - then > 2 * poll )) && {
+    tn_warn "the state is older than two polls; run truenasctl poll before pruning"
+    return 1
+  }
+
+  text=$(config_read) || return 1
+  keys=$(jq -c '[ (.expectOutput // [])[]? | select(type == "string") ] | unique' <<<"$text")
+
+  for kind in $(jq -r '[.[] | split(":")[0]] | unique | .[]' <<<"$keys"); do
+    [[ $kind == replication || $kind == snapshotTasks ]] || continue
+    jq -e --arg k "$kind" 'has($k) and (.[$k] | type == "array")' <<<"$state" >/dev/null || {
+      tn_warn "the $kind section is not in the state; not pruning"
+      return 1
+    }
+    if jq -e --arg k "$kind" \
+         '[ .warnings[]? | select(.section == $k) ] | length > 0' <<<"$state" >/dev/null; then
+      tn_warn "the $kind section did not answer; not pruning"
+      return 1
+    fi
+  done
+
+  existing=$(jq -c '{replication:    [ (.replication // [])[]?    | .id | tostring ],
+                     snapshotTasks: [ (.snapshotTasks // [])[]? | .id | tostring ]}' <<<"$state")
+  kept=$(jq -c --arg re "$TN_EXPECT_KEY_RE" --argjson existing "$existing" '
+    [ .[]
+      | select(test($re))
+      | split(":") as $p
+      | select((($existing[$p[0]] // []) | index($p[1])) != null) ]' <<<"$keys")
+
+  removed=$(jq -r --argjson kept "$kept" '
+    ((.expectOutput // []) | if type == "array" then . else [] end)
+    - $kept | .[]' <<<"$text")
+  new=$(jq -c --argjson kept "$kept" '
+    .expectOutput = ($kept | unique)' <<<"$text") || return 1
+
+  if [[ -z $removed ]]; then
+    printf 'nothing to prune\n'
+    return 0
+  fi
+  printf '%s' "$new" | write_config || return 1
+  while IFS= read -r kind; do
+    [[ -n $kind ]] && printf 'pruned %s\n' "$kind"
+  done <<<"$removed"
+}
+
+cmd_expect() {
+  local sub=${1:-}
+  shift || true
+  case $sub in
+    prune)
+      (($# == 0)) || { expect_usage; return 1; }
+      cmd_expect_prune ;;
+    ""|-h|--help|help) expect_usage ;;
+    *)
+      (($# == 1)) || { expect_usage; return 1; }
+      cmd_expect_set "$sub" "$1" ;;
+  esac
+}
+
 cmd_config() {
   local sub=${1:-}
   shift || true
@@ -842,6 +973,7 @@ case ${1:-} in
   network)     cmd_network ;;
   poll)    shift; cmd_poll "$@" ;;
   config)  shift; cmd_config "$@" ;;
+  expect)  shift; cmd_expect "$@" ;;
   open)    shift; cmd_open "$@" ;;
   purge)   cmd_purge ;;
   ""|-h|--help|help) usage ;;

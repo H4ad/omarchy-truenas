@@ -23,7 +23,7 @@ its own variant.
 | `Full` | alerts plus capacity |
 | `Severity` | the worst two alert buckets, each tinted by its own level |
 | `Down` | how many services and apps are not running |
-| `Protection` | how many protection tasks have failed or are overdue |
+| `Protection` | how many protection tasks have failed, are overdue or ran empty |
 | `Uptime` | the time since the NAS booted |
 
 A zero is the absence of a number, not a `0` on the bar. An unknown temperature
@@ -100,6 +100,25 @@ run starts its grace at the first poll that saw it, so a newly created task is
 not overdue before its first run. A failed section says why and never renders as
 a NAS with no protection tasks.
 
+**Output checks.** An opt-in, per-task check that a successful run produced new
+data. A checked task whose last successful run named a snapshot that is gone, or
+whose snapshot wrote zero bytes, is badged `NO DATA` in the urgent colour, and
+the card says `last run wrote 0 B`, `last snapshot missing` or `output not
+checked`. The check is off by default because an incremental backup can
+legitimately write nothing; mark only a task that should always produce data.
+It covers periodic snapshot tasks and local replication targets. Cloud sync,
+remote replication, scrub tasks, and a dataset that another task or a manual
+snapshot also snapshots have no per-task delta and are not covered. `written` is
+the space written since the previous snapshot on that dataset, so a shared
+dataset is documented, not detected. A recursive task sums its children; the
+name-wide query costs about 20 s and is capped at one per warm poll, while a
+non-recursive task is one exact, cheap lookup. A missing snapshot on an
+`allow_empty: false` task reads as empty, because zettarepl deletes the empty
+snapshot after the run. A probe that failed, was skipped by the cap, or ran on a
+cold poll is `unknown`: it keeps the previous badge and never reads as healthy.
+A task that is failed or overdue is not checked; its badge keeps the stronger
+signal.
+
 **Shares.** A Shares block with SMB, NFS and iSCSI sub-lists, and a Network block
 with one card per interface: the link state, negotiated media and every
 `address/netmask`. Read-only.
@@ -111,7 +130,8 @@ where the alert allows it. Dismiss is confirmed.
 is written back to `shell.json`; the API key is entered through a masked field,
 written on stdin, and never shown back. `pollSeconds`, `timeoutSeconds`,
 `insecureTLS` and `redact` are displayed and changed through `truenasctl config
-set` or the controls here.
+set` or the controls here. The per-task output checks are toggled here and
+written by `truenasctl expect`.
 
 **Recording.** A `redact` level hides identifying values while you record or
 screenshot: `network` (addresses, hostnames, the base URL), `names` (adds pools,
@@ -131,7 +151,8 @@ failed fetch prints why; it never renders as an empty list.
 A toast when an alert starts firing or clears, when a pool leaves or returns to
 `ONLINE`, when a disk crosses into the warning or critical band and cools back,
 when a service or app goes down or returns, when a replication or cloud sync
-task fails or recovers, and when any scheduled protection task becomes overdue
+task fails or recovers, when an output check enters or leaves `NO DATA`, and
+when any scheduled protection task becomes overdue
 or runs again. Severity maps to urgency. Toasts are deduped in
 `seen.json` by a stable key, so a network blip does not replay them as new. A
 failed poll leaves `seen.json` untouched. A critical toast does not stick on

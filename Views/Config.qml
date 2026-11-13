@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../Ui" as Local
+import "../Model.js" as Model
 import "../Redact.js" as Redact
 
 // Configuration for this bar item. Two different things live here and the view
@@ -21,6 +22,7 @@ Column {
 
   property string keyError: ""
   property string keyNotice: ""
+  property string outputError: ""
 
   // The panel owns config loading: it calls loadConfig() from showView("config")
   // (and from the refresh and key-save paths), so this view must not issue a
@@ -60,6 +62,68 @@ Column {
       view.keyError = result && result.message
         ? String(result.message)
         : "could not change the redaction level"
+    })
+  }
+
+  // The output-check list. `expectOutput` is the source of the toggle, and the
+  // state is the source of which tasks exist and which are covered. Snapshot
+  // tasks are covered; replication is covered only when its target is local.
+  // The lookup is a loop, not a Set or an Array method, so it works on whatever
+  // array wrapper the panel's JSON produced.
+  function outputChecked(key) {
+    var list = (view.config && Model.arrayLike(view.config.expectOutput))
+      ? view.config.expectOutput : []
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i]) === key) return true
+    }
+    return false
+  }
+
+  function buildOutputTasks() {
+    var out = []
+    var state = view.panel.state
+    if (!state) return out
+    var rep = Model.arrayLike(state.replication) ? state.replication : []
+    for (var r = 0; r < rep.length; r++) {
+      var row = rep[r]
+      if (!row || row.id === null || row.id === undefined) continue
+      var direction = String(row.direction || "").toUpperCase()
+      var transport = String(row.transport || "").toUpperCase()
+      if (direction !== "PULL" && transport !== "LOCAL") continue
+      var repKey = "replication:" + String(row.id)
+      out.push({
+        key: repKey,
+        label: Model.protectionLabel(row) || "unnamed task",
+        on: view.outputChecked(repKey)
+      })
+    }
+    var tasks = Model.arrayLike(state.snapshotTasks) ? state.snapshotTasks : []
+    for (var s = 0; s < tasks.length; s++) {
+      var task = tasks[s]
+      if (!task || task.id === null || task.id === undefined) continue
+      var snapKey = "snapshotTasks:" + String(task.id)
+      out.push({
+        key: snapKey,
+        label: Model.protectionLabel(task) || "unnamed task",
+        on: view.outputChecked(snapKey)
+      })
+    }
+    return out
+  }
+
+  readonly property var outputTasks: view.buildOutputTasks()
+
+  function setOutputCheck(key, on) {
+    view.outputError = ""
+    view.panel.runCtl(["expect", key, on ? "on" : "off"], function() {
+      // The config is the toggle's only source, so a reopen must read it back.
+      // No refreshAfterWrite: a config toggle changes nothing the NAS returns,
+      // and a forced meta poll would spend fifteen requests for nothing.
+      view.panel.loadConfig()
+    }, function(result) {
+      view.outputError = result && result.message
+        ? String(result.message)
+        : "could not change the output check"
     })
   }
 
@@ -168,7 +232,7 @@ Column {
       { key: "showSeverity", label: "alert buckets" },
       { key: "showAlerts", label: "alert count" },
       { key: "showDown", label: "services and apps down" },
-      { key: "showProtection", label: "protection failures" },
+      { key: "showProtection", label: "protection problems" },
       { key: "showCapacity", label: "capacity percent" },
       { key: "showCapacityBar", label: "capacity bar" },
       { key: "showPool", label: "pool status word" },
@@ -261,6 +325,88 @@ Column {
       view.keyError = message
     }
     onCanceled: {}
+  }
+
+  PanelSeparator { width: parent.width }
+
+  PanelSectionHeader {
+    text: "PROTECTION DATA CHECKS"
+    foreground: view.panel.contentForeground
+    fontFamily: view.panel.contentFontFamily
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    text: "Off by default. A checked task reports NO DATA when its last successful run "
+      + "produced no new snapshot, or when the snapshot it named is gone. Mark only a "
+      + "task that always writes data; an incremental backup may legitimately write "
+      + "nothing."
+    color: view.panel.dimForeground
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.panel.state === null
+    text: "The list fills after the first poll."
+    color: view.panel.dimForeground
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.panel.state !== null && view.outputTasks.length === 0
+    text: "No covered tasks reported. Remote replication, cloud sync and scrub tasks "
+      + "have no local snapshot output to check."
+    color: view.panel.dimForeground
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Repeater {
+    model: view.outputTasks
+
+    Toggle {
+      required property var modelData
+      width: view.width
+      label: String(modelData.label) + "  " + String(modelData.key)
+      checked: modelData.on === true
+      foreground: view.panel.contentForeground
+      accent: Color.accent
+      fontFamily: view.panel.contentFontFamily
+      onClicked: view.setOutputCheck(String(modelData.key), modelData.on !== true)
+    }
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    visible: view.outputError !== ""
+    text: view.outputError
+    color: view.panel.urgentColor
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    textFormat: Text.PlainText
+    width: parent.width
+    wrapMode: Text.WordWrap
+    text: "A check compares the run's named snapshot against the snapshots that exist. "
+      + "A dataset that another task also snapshots has no per-task delta: mark only a "
+      + "task that owns its dataset."
+    color: view.panel.dimForeground
+    font.family: view.panel.contentFontFamily
+    font.pixelSize: Style.font.caption
   }
 
   PanelSeparator { width: parent.width }
