@@ -180,8 +180,8 @@ function downSegments(view) {
   return [segment(String(count), "warning")];
 }
 
-// Failed replication, cloud sync, snapshot and scrub jobs, as one count. Zero is
-// nothing to say, never "0".
+// Failed or overdue replication, cloud sync, snapshot and scrub tasks, as one
+// count. Zero is nothing to say, never "0".
 function protectionSegments(view) {
   var count = countOf(view && view.protectionCount);
   if (count <= 0) return [];

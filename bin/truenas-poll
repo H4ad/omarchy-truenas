@@ -207,6 +207,51 @@ protection_notify() {
   set_seen "$seen_next"
 }
 
+# A protection task that has stopped running without failing. The derivation
+# in share/protection-overdue.jq owns the rule and the first-seen bookkeeping;
+# this only turns a transition into a toast and advances that half of seen.json.
+# The section's flag is already gated by the poll, so a failed section keeps its
+# previous entries instead of reading as every task recovering.
+overdue_notify() {
+  local noun count body
+  while IFS=$'\t' read -r noun count; do
+    [[ -n $noun ]] || continue
+    if ((count > 1)); then
+      body="$count tasks, see the panel"
+    else
+      body="no run within its schedule"
+    fi
+    notify "$(urgency_for warning)" "$GLYPH_ALERT" "$noun is overdue" "$body"
+  done < <(jq -r '
+    def noun: if . == "replication" then "Replication"
+              elif . == "cloudSync" then "Cloud sync"
+              elif . == "snapshotTasks" then "Snapshot"
+              else "Scrub" end;
+    [ .decisions.overdue[].kind ] | group_by(.)[]
+    | [ (.[0] | noun), length ] | @tsv' "$WORK/protection.json")
+
+  while IFS=$'\t' read -r noun count; do
+    [[ -n $noun ]] || continue
+    if ((count > 1)); then
+      body="$count tasks"
+    else
+      body=""
+    fi
+    notify low "$GLYPH_OK" "$noun ran again" "$body"
+  done < <(jq -r '
+    def noun: if . == "replication" then "Replication"
+              elif . == "cloudSync" then "Cloud sync"
+              elif . == "snapshotTasks" then "Snapshot"
+              else "Scrub" end;
+    [ .decisions.recovered[].kind ] | group_by(.)[]
+    | [ (.[0] | noun), length ] | @tsv' "$WORK/protection.json")
+
+  local seen_next
+  seen_next=$(jq -c --slurpfile seen "$WORK/seen.json" \
+    '. as $d | ($seen[0]) + { overdue: $d.protection }' "$WORK/protection.json")
+  set_seen "$seen_next"
+}
+
 # Appends one capacity sample to the sparkline history: the fullest pool's used
 # percent, or null when no pool reports one. A null is a gap in the chart, not a
 # fabricated 0 percent. The list is capped at HISTORY_MAX, oldest dropped first,
@@ -369,6 +414,7 @@ code=0
 latency=0
 attempted=0
 normalize_ok=1
+protection_ready=0
 system_fetched=0
 system_ok=0
 disks_fetched=0
@@ -606,6 +652,30 @@ else
   cloudsync_warned=$(jq -r '[.[] | select(.section == "cloudSync")] | length' <<<"$warnings")
   replication_notify_ok=$((normalize_ok == 1 && replication_warned == 0))
   cloudsync_notify_ok=$((normalize_ok == 1 && cloudsync_warned == 0))
+  snapshot_warned=$(jq -r '[.[] | select(.section == "snapshotTasks")] | length' <<<"$warnings")
+  scrub_warned=$(jq -r '[.[] | select(.section == "scrubs")] | length' <<<"$warnings")
+  snapshots_notify_ok=$((normalize_ok == 1 && snapshot_warned == 0))
+  # A scrub's last run lives on the pool's scan, so a failed pool section leaves
+  # the scrub age unknown. The task's own answer alone is not enough.
+  scrubs_notify_ok=$((normalize_ok == 1 && scrub_warned == 0 && pool_warned == 0))
+
+  # The overdue flag is derived once here so the bar, the views and the toast
+  # read the same value. The grace is six hours: a daily task alarms about 30
+  # hours after its last finish, not the moment its cron slot passes.
+  protection_ready=0
+  if jq -n -f "$TN_PLUGIN_DIR/share/protection-overdue.jq" \
+         --slurpfile payload "$WORK/payload.json" \
+         --slurpfile seen "$WORK/seen.json" \
+         --arg now "$now" --argjson graceSeconds 21600 \
+         --argjson replicationOk "$replication_notify_ok" \
+         --argjson cloudSyncOk "$cloudsync_notify_ok" \
+         --argjson snapshotTasksOk "$snapshots_notify_ok" \
+         --argjson scrubsOk "$scrubs_notify_ok" \
+         >"$WORK/protection.json" 2>/dev/null; then
+    protection_ready=1
+    jq -c '.payload' "$WORK/protection.json" >"$WORK/payload-overdue.json" \
+      && mv "$WORK/payload-overdue.json" "$WORK/payload.json"
+  fi
 
   levels=$(jq -c '.levels // ["critical","error","warning"]' <<<"$notify_json")
   renotify=$(jq -r '.renotifyMinutes // 0' <<<"$notify_json")
@@ -965,6 +1035,10 @@ else
   if ((cloudsync_notify_ok)); then
     protection_notify cloudSync 0 "Cloud sync"
   fi
+
+  if ((protection_ready)); then
+    overdue_notify
+  fi
 fi
 
 # Only a successful poll writes seen.json: a failed one must not advance (or
@@ -1000,6 +1074,11 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
     --slurpfile nfs "$WORK/nfs.json" \
     --slurpfile iscsi "$WORK/iscsi.json" \
     --slurpfile network "$WORK/network.json" '
+    def cron: {
+      minute: (.minute // null), hour: (.hour // null), dom: (.dom // null),
+      month: (.month // null), dow: (.dow // null),
+      begin: (.begin // null), end: (.end // null)
+    };
     ($meta[0]) as $meta
     | ($payload[0].system) as $s
     | if $s == null then $meta
@@ -1070,15 +1149,18 @@ if ((system_fetched && system_ok && disks_fetched && disks_ok \
                     lifetime_value:  (.lifetime_value // null),
                     lifetime_unit:   (.lifetime_unit // null),
                     retries:         (.retries // null),
-                    schedule: (if (.schedule? | type) == "object" then
-                                 { minute: (.schedule.minute // null),
-                                   hour:   (.schedule.hour // null),
-                                   dom:    (.schedule.dom // null),
-                                   month:  (.schedule.month // null),
-                                   dow:    (.schedule.dow // null),
-                                   begin:  (.schedule.begin // null),
-                                   end:    (.schedule.end // null) }
-                               else null end),
+                    schedule: (if (.schedule? | type) == "object"
+                               then (.schedule | cron) else null end),
+                    # A replication task can run off the schedule of the
+                    # periodic snapshot tasks it names instead of its own
+                    # schedule, which is null in that case. Only the schedules
+                    # are kept; the embedded snapshot state is dropped.
+                    periodic_snapshot_tasks: [
+                      (.periodic_snapshot_tasks? // [])[]?
+                      | { enabled: (.enabled == true),
+                          schedule: (if (.schedule | type) == "object"
+                                     then (.schedule | cron) else null end) }
+                    ],
                     state: (if (.state? | type) == "object" then
                               { state:        (.state.state // null),
                                 datetime:     (.state.datetime // null),

@@ -23,7 +23,7 @@ its own variant.
 | `Full` | alerts plus capacity |
 | `Severity` | the worst two alert buckets, each tinted by its own level |
 | `Down` | how many services and apps are not running |
-| `Protection` | how many protection jobs have failed |
+| `Protection` | how many protection tasks have failed or are overdue |
 | `Uptime` | the time since the NAS booted |
 
 A zero is the absence of a number, not a `0` on the bar. An unknown temperature
@@ -88,8 +88,17 @@ through the origin-gated link builder.
 **Protection.** Replication, cloud sync, periodic snapshot and scrub tasks, with
 the schedule and last job state for each, and run-now behind a confirmation.
 Every row's state is tinted so a blank or running job is dim "unknown" and never
-a failure. A failed section says why and never renders as a NAS with no
-protection tasks.
+a failure. A task that is enabled and scheduled but has not finished a run
+within its schedule plus a six hour grace is badged `OVERDUE` in the urgent
+colour, and its card shows how long ago it last ran. The schedule bound is
+conservative (hourly, daily, weekly, monthly), so a DST change or a 31-day month
+cannot make a healthy task look late. A replication task that runs off its
+periodic snapshot schedules instead of its own cron is judged on those
+schedules. A scrub task also respects its threshold: a weekly schedule with a
+35-day threshold is expected to stay quiet between scrubs. A task that has never
+run starts its grace at the first poll that saw it, so a newly created task is
+not overdue before its first run. A failed section says why and never renders as
+a NAS with no protection tasks.
 
 **Shares.** A Shares block with SMB, NFS and iSCSI sub-lists, and a Network block
 with one card per interface: the link state, negotiated media and every
@@ -121,8 +130,9 @@ failed fetch prints why; it never renders as an empty list.
 
 A toast when an alert starts firing or clears, when a pool leaves or returns to
 `ONLINE`, when a disk crosses into the warning or critical band and cools back,
-when a service or app goes down or returns, and when a replication or cloud sync
-task fails or recovers. Severity maps to urgency. Toasts are deduped in
+when a service or app goes down or returns, when a replication or cloud sync
+task fails or recovers, and when any scheduled protection task becomes overdue
+or runs again. Severity maps to urgency. Toasts are deduped in
 `seen.json` by a stable key, so a network blip does not replay them as new. A
 failed poll leaves `seen.json` untouched. A critical toast does not stick on
 screen by default; that is opt-in through `notify.stickyCritical`.

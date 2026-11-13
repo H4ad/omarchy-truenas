@@ -648,6 +648,77 @@ check("warnings alone do not count here, only the job state", 0,
 check("an empty state is zero", 0, Model.protectionFailures(null));
 check("missing lists are zero", 0, Model.protectionFailures({}));
 
+test_case("protectionOverdue");
+
+check("overdue rows count across all four lists", 3,
+  Model.protectionOverdue({
+    replication: [{ overdue: true }, { overdue: false }],
+    cloudSync: [{ overdue: true }],
+    snapshotTasks: [{ overdue: true }],
+    scrubs: [{ overdue: false }]
+  }));
+check("a missing or non-boolean flag is not overdue", 0,
+  Model.protectionOverdue({
+    replication: [{ overdue: "true" }, {}],
+    scrubs: [{ overdue: null }]
+  }));
+check("an empty state is zero", 0, Model.protectionOverdue(null));
+check("missing lists are zero", 0, Model.protectionOverdue({}));
+
+test_case("protectionProblems");
+
+check("failed and overdue rows count, a failed overdue row once", 2,
+  Model.protectionProblems({
+    replication: [{ job: { state: "FAILED" }, overdue: true }],
+    snapshotTasks: [{ state: { state: "FINISHED" }, overdue: true }],
+    scrubs: [{}]
+  }));
+check("a warning without a failed job is not a problem here", 0,
+  Model.protectionProblems({
+    replication: [{ job: { state: "SUCCESS" }, state: { warnings: ["x"] } }]
+  }));
+check("an empty state is zero", 0, Model.protectionProblems(null));
+check("missing lists are zero", 0, Model.protectionProblems({}));
+
+test_case("protectionBadge");
+
+check("a failed job keeps its state word", "FAILED",
+  Model.protectionBadge({ job: { state: "FAILED" }, overdue: true }));
+check("an overdue healthy task reads OVERDUE", "OVERDUE",
+  Model.protectionBadge({ job: { state: "SUCCESS" }, overdue: true }));
+check("a healthy task keeps its own state", "SUCCESS",
+  Model.protectionBadge({ job: { state: "SUCCESS" } }));
+check("a scrub with no state has no badge", "",
+  Model.protectionBadge({ id: 1, overdue: false }));
+check("a missing row has no badge", "", Model.protectionBadge(null));
+
+test_case("protectionBadgeRank");
+
+check("a failed row is urgent", 1,
+  Model.protectionBadgeRank({ job: { state: "FAILED" } }));
+check("an overdue row is urgent", 1,
+  Model.protectionBadgeRank({ job: { state: "SUCCESS" }, overdue: true }));
+check("a healthy row is plain", 0,
+  Model.protectionBadgeRank({ job: { state: "SUCCESS" } }));
+check("a blank state is unknown", 2, Model.protectionBadgeRank({}));
+check("a missing row is unknown", 2, Model.protectionBadgeRank(null));
+
+test_case("protectionRunLine");
+
+const runNow = Date.parse("2026-10-20T00:00:00Z");
+check("a recent run reads as an age", "last run 2d ago",
+  Model.protectionRunLine({ lastRunAt: "2026-10-18T00:00:00Z" }, runNow));
+check("an hour is an hour", "last run 1h ago",
+  Model.protectionRunLine({ lastRunAt: "2026-10-19T23:00:00Z" }, runNow));
+check("never run has no age", "never run",
+  Model.protectionRunLine({ lastRunAt: null }, runNow));
+check("an unknown source is not called never run", "last run unknown",
+  Model.protectionRunLine({ lastRunKnown: false, lastRunAt: null }, runNow));
+check("an unparsable timestamp is unknown", "last run unknown",
+  Model.protectionRunLine({ lastRunAt: "not a date" }, runNow));
+check("a missing row is unknown", "last run unknown",
+  Model.protectionRunLine(null, runNow));
+
 test_case("poolDotSeverity");
 
 check("ONLINE is untinted", "", Model.poolDotSeverity("ONLINE"));

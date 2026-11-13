@@ -327,11 +327,16 @@ Ui.Panel {
       return "the protection tasks could not be read"
     var failed = Model.failedReplications(root.replication).length
       + Model.failedCloudSync(root.cloudSync).length
+    var overdue = Model.protectionOverdue(root.snapshot)
+    if (failed > 0 && overdue > 0)
+      return failed + (failed === 1 ? " task failed" : " tasks failed") + ", "
+        + overdue + (overdue === 1 ? " task overdue" : " tasks overdue")
     if (failed > 0) return failed + (failed === 1 ? " task failed" : " tasks failed")
+    if (overdue > 0) return overdue + (overdue === 1 ? " task overdue" : " tasks overdue")
     var total = root.replication.length + root.cloudSync.length
       + root.snapshotTasks.length + root.scrubs.length
     if (total === 0) return "no protection tasks reported"
-    return total + (total === 1 ? " task" : " tasks") + ", all healthy"
+    return total + (total === 1 ? " task" : " tasks") + ", nothing overdue"
   }
 
   // "Nothing firing" is only true of a connected NAS whose alert request
