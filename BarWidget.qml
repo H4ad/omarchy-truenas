@@ -188,14 +188,19 @@ BarWidget {
   readonly property string composedOverflowTooltip:
     root.composedOverflow > 0 ? " · +" + root.composedOverflow + " more" : ""
 
-  // One glyph paints one colour, so per-severity segments go through the icon
-  // slot as a Row of separately tinted Text items. A vertical bar has no
+  // One glyph paints one colour, so per-severity segments are a Row of
+  // separately tinted Text items inside the button. A vertical bar has no
   // horizontal room for that Row, so there the segments fall back to one string.
   readonly property bool tintedSegments: !root.vertical && BarVariants.isMultiColour(root.segments)
 
   readonly property string segmentFontFamily: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property real segmentFontSize: Style.font.caption
   readonly property real segmentSpacing: Style.spaceReal(3)
+  // Where WidgetButton puts its own label's figures, as an offset from the
+  // line box's centre. See segmentMetrics.
+  readonly property real segmentFigureOffset: root.vertical ? 0
+    : (segmentMetrics.descent - segmentMetrics.ascent
+        + segmentMetrics.tightBoundingRect("0").height) / 2
 
   readonly property color severityColor: {
     if ((counts.critical || 0) > 0 || (counts.error || 0) > 0)
@@ -391,8 +396,8 @@ BarWidget {
     function help(): void { root.route("openHelp") }
   }
 
-  // The visible row is loaded inside BarIconButton's icon slot, where no width
-  // binding can reach it, so an invisible twin sizes the bar item. Both read the
+  // The visible row is a child of the button, so the button's width cannot be
+  // read off it. An invisible twin sizes the bar item instead. Both read the
   // same segments, font and spacing, and only the colour differs.
   Row {
     id: segmentSizer
@@ -412,28 +417,14 @@ BarWidget {
     }
   }
 
-  Component {
-    id: segmentRow
-
-    Item {
-      Row {
-        anchors.centerIn: parent
-        spacing: root.segmentSpacing
-
-        Repeater {
-          model: root.segments
-
-          Text {
-            textFormat: Text.PlainText
-            text: (modelData || {}).text || ""
-            color: root.colorForSeverity((modelData || {}).severity)
-            font.family: root.segmentFontFamily
-            font.pixelSize: root.segmentFontSize
-            renderType: Text.NativeRendering
-          }
-        }
-      }
-    }
+  // The same vertical-figure centring WidgetButton gives its own label: the line
+  // box keeps room for descenders, so centring it puts the figures above the
+  // bar's middle. Centring the figure height lines the segments up with the
+  // labels beside them.
+  FontMetrics {
+    id: segmentMetrics
+    font.family: root.segmentFontFamily
+    font.pixelSize: root.segmentFontSize
   }
 
   // The chart path's sizing twin: an invisible Loader instantiates the exact
@@ -468,9 +459,8 @@ BarWidget {
   Component {
     id: composedRow
 
-    // Root is an Item with a centred Row, like segmentRow: the host loads this
-    // into a square optical canvas, so a Row at the item's top-left would be
-    // drawn above the bar.
+    // Root is an Item sized by its Row, so the button can centre it and the
+    // sizing twin can read its width.
     Item {
       implicitWidth: composedInner.implicitWidth
       implicitHeight: root.composedLineHeight
@@ -495,6 +485,7 @@ BarWidget {
               id: labelItem
               visible: !token.isChart
               anchors.verticalCenter: parent.verticalCenter
+              anchors.verticalCenterOffset: root.segmentFigureOffset
               text: token.isChart ? "" : String((token.modelData || {}).text || "")
               color: root.colorForSeverity((token.modelData || {}).severity)
               font.family: root.segmentFontFamily
@@ -527,17 +518,31 @@ BarWidget {
     sourceComponent: composedRow
   }
 
-  BarIconButton {
+  // What the button's own label draws: the one tinted string. Charts, the
+  // composed row and the multi-colour segments are children of the button below,
+  // so `text` stays empty for them. A label that went through the icon renderer
+  // would be scaled to the icon box, which is why none of them use it.
+  readonly property string buttonText:
+    (root.composed || root.showChart || root.tintedSegments)
+      ? "" : BarVariants.textFor(root.segments)
+
+  // A vertical bar is one bar-width across, and a chart or the composed row is
+  // wider than that, so it shrinks to fit there. A horizontal bar never scales.
+  readonly property real contentFit: {
+    if (!root.vertical) return 1
+    var width = root.composed ? composedSizer.implicitWidth
+      : (root.showChart ? chartSizer.implicitWidth : 0)
+    var room = Math.max(1, button.barSize - button.scaledHorizontalMargin * 2)
+    return width > room ? room / width : 1
+  }
+
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: (root.composed || root.showChart || root.tintedSegments)
-      ? "" : BarVariants.textFor(root.segments)
-    iconComponent: root.composed
-      ? composedRow
-      : (root.showChart
-          ? root.chartComponent
-          : (root.tintedSegments ? segmentRow : null))
+    text: root.buttonText
+    hasVisualContent: root.buttonText !== ""
+      || root.composed || root.showChart || root.tintedSegments
     foreground: root.degraded
       ? (root.bar ? root.bar.foreground : Color.foreground)
       : (root.soleSeverity !== ""
@@ -545,24 +550,17 @@ BarWidget {
           : root.severityColor)
     dimmed: root.quiet || root.degraded
     fontSize: Style.font.caption
-    // BarIconButton confines iconComponent to `opticalCanvas`, a fixed square, so
-    // a chart or a composed row wider than that square overflows onto the
-    // neighbours. Widen the canvas to the measured content; the sizing twins give
-    // the same number fixedWidth uses.
-    opticalSize: {
-      if (root.composed) return Math.max(Style.bar.iconCanvas, composedSizer.implicitWidth)
-      if (root.showChart) return Math.max(Style.bar.iconCanvas, chartSizer.implicitWidth)
-      if (root.tintedSegments) return Math.max(Style.bar.iconCanvas, segmentSizer.implicitWidth)
-      return Style.bar.iconCanvas
-    }
-    fixedWidth: root.composed
-      ? Math.max(12, composedSizer.implicitWidth + button.scaledHorizontalMargin * 2)
-      : (root.showChart
-          ? Math.max(12, chartSizer.implicitWidth + button.scaledHorizontalMargin * 2)
-          : (root.tintedSegments
-              ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
-              : -1))
-    slotSize: Style.bar.statusSlot
+    // The children below are not text the button measures, so the width comes
+    // from the sizing twins. A vertical bar takes its own width.
+    fixedWidth: root.vertical ? -1
+      : (root.composed
+          ? Math.max(12, composedSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+          : (root.showChart
+              ? Math.max(12, chartSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+              : (root.tintedSegments
+                  ? Math.max(12, segmentSizer.implicitWidth + button.scaledHorizontalMargin * 2)
+                  : -1)))
+    fixedHeight: root.vertical ? Style.bar.statusSlot : -1
     tooltipText: Model.tooltipFor(root.state, root.mode)
       + root.chartOverflowTooltip + root.composedOverflowTooltip + (root.nowTick, "")
 
@@ -570,6 +568,46 @@ BarWidget {
       if (buttonCode === Qt.MiddleButton) root.refresh()
       else if (buttonCode === Qt.RightButton) root.openDashboard()
       else root.toggle()
+    }
+
+    // The multi-colour segments: one Text per segment, each tinted by its own
+    // severity. They are drawn at their own size, never through the icon
+    // renderer, and take the press scale a label would.
+    Row {
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: root.segmentFigureOffset
+      visible: root.tintedSegments
+      spacing: root.segmentSpacing
+      scale: button.pressScale
+
+      Repeater {
+        model: root.segments
+
+        Text {
+          textFormat: Text.PlainText
+          text: (modelData || {}).text || ""
+          color: root.colorForSeverity((modelData || {}).severity)
+          font.family: root.segmentFontFamily
+          font.pixelSize: root.segmentFontSize
+          renderType: Text.NativeRendering
+        }
+      }
+    }
+
+    // One chart, or the composed row. Both are the same components the sizing
+    // twins instantiate, so the width fixedWidth reads is the width drawn here.
+    Loader {
+      anchors.centerIn: parent
+      active: root.showChart
+      sourceComponent: root.chartComponent
+      scale: button.pressScale * root.contentFit
+    }
+
+    Loader {
+      anchors.centerIn: parent
+      active: root.composed
+      sourceComponent: composedRow
+      scale: button.pressScale * root.contentFit
     }
   }
 }
