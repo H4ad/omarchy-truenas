@@ -71,8 +71,7 @@ Item {
   // one centred line rather than top-aligning.
   Row {
     id: barRow
-    // Centred, not top-left: the host loads this into a square optical canvas,
-    // so a child at y 0 would sit above the bar.
+    // Centred, not top-left: a child at y 0 would sit above the bar's middle.
     anchors.centerIn: parent
     visible: root.kind === "bar"
     spacing: root.gap

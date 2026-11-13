@@ -45,17 +45,35 @@ check "BarWidget tints the single tint with that severity" "1" \
   "$(grep -c 'root.colorForSeverity(root.soleSeverity)' "$ROOT/BarWidget.qml")"
 
 # --------------------------------------------------------------- bar chart path
-# The chart variants draw with Rectangles in the icon slot. The node suites load
-# BarVariants.js alone and cannot see this wiring, so the renderer is pinned here:
-# the widget must ask the JS for the kind, build the spec, and hand a component to
-# the slot. If the renderer goes missing the chart variants silently fall back to
+# The chart variants draw with Rectangles inside the bar button. The node suites
+# load BarVariants.js alone and cannot see this wiring, so the renderer is pinned
+# here: the widget must ask the JS for the kind, build the spec, and hand a
+# component to the button. If the renderer goes missing the chart variants silently fall back to
 # the text path and draw nothing while every model test still passes.
 check "BarWidget asks for the chart kind" "1" \
   "$(grep -c 'BarVariants.chartKind(root.variantChoice)' "$ROOT/BarWidget.qml")"
 check "BarWidget builds the chart spec" "1" \
   "$(grep -c 'BarVariants.chartFor(root.variantChoice, root.barView)' "$ROOT/BarWidget.qml")"
-check "BarWidget gives the icon slot the chart or composed component" "1" \
-  "$(grep -c 'iconComponent: root.composed' "$ROOT/BarWidget.qml")"
+# Omarchy 4.5 fits whatever BarIconButton draws to the 12px icon box, so a label
+# or a row of segments there renders a few pixels tall. The bar item is a
+# WidgetButton, which keeps a multi-character label at its font size, and the
+# chart, the composed row and the tinted segments are children of it.
+check "BarWidget does not use BarIconButton" "0" \
+  "$(grep -c 'BarIconButton' "$ROOT/BarWidget.qml")"
+check "BarWidget does not route content through iconComponent" "0" \
+  "$(grep -c 'iconComponent' "$ROOT/BarWidget.qml")"
+check "BarWidget draws the bar item with one WidgetButton" "1" \
+  "$(grep -c '^  WidgetButton {' "$ROOT/BarWidget.qml")"
+check "BarWidget keeps the button visible for the content it draws as children" "1" \
+  "$(grep -c 'root.composed || root.showChart || root.tintedSegments$' "$ROOT/BarWidget.qml")"
+check "BarWidget draws the tinted segments as a child of the button" "1" \
+  "$(grep -c 'visible: root.tintedSegments$' "$ROOT/BarWidget.qml")"
+check "BarWidget draws the chart and the composed row as children of the button" "2" \
+  "$(grep -c 'scale: button.pressScale \* root.contentFit' "$ROOT/BarWidget.qml")"
+check "BarWidget centres the segments on the figure height" "2" \
+  "$(grep -c 'root.segmentFigureOffset' "$ROOT/BarWidget.qml")"
+check "no QML file in the plugin uses BarIconButton" "" \
+  "$(printf '%s\n' "$qml_files" | xargs grep -ln 'BarIconButton' 2>/dev/null || true)"
 check "BarWidget sizes the chart from the sizing twin" "2" \
   "$(grep -c 'chartSizer.implicitWidth' "$ROOT/BarWidget.qml")"
 check "one chart piece component is declared" "1" \

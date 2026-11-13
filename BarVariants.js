@@ -240,7 +240,7 @@ function bodySegments(variant, view) {
     case "Uptime":
       return uptimeSegments(view);
     // A chart variant prints no body text. The widget draws the shape in the
-    // icon slot and the glyph is the only segment left for any other caller.
+    // bar item and the glyph is the only segment left for any other caller.
     case "CapacityBar":
     case "Pools":
     case "DiskHeat":
@@ -439,7 +439,7 @@ function textFor(segments) {
 }
 
 // One tinted string cannot hold two colours, so this is what decides whether
-// the widget draws through `text` or through a Row in `iconComponent`. More than
+// the widget draws through `text` or through a Row of tinted Text items. More than
 // one distinct non-empty severity is the point where a single tint cannot say
 // it; the glyph and the separator are untinted and do not count.
 function isMultiColour(segments) {

@@ -90,11 +90,18 @@ Per-widget settings are inline on the layout entry, no sub-object:
 
 ## Building blocks
 
-From `/usr/share/omarchy/shell/Ui/`: `BarIconButton`, `BarIndicator`,
+From `/usr/share/omarchy/shell/Ui/`: `WidgetButton`, `BarIconButton`, `BarIndicator`,
 `KeyboardPanel`, `PanelKeyCatcher`, `PanelSectionHeader`, `PanelSeparator`,
 `PanelActionButton`, `PanelToolTip`, `Button`, `ButtonGroup`, `TextField`,
 `NumberField`, `Toggle`, `ToggleSwitch`, `Dropdown`, `SearchableDropdown`,
 `ConfirmDialog`, `PopupCard`. From `Commons/`: `Style`, `Color`, `Util`.
+
+The bar item is a `WidgetButton`, not a `BarIconButton`. From Omarchy 4.5 a
+`BarIconButton` scales its `text` and its `iconComponent` to fit the icon box, so
+a multi-character label, a row of tinted segments or a chart would be drawn a few
+pixels tall. `WidgetButton` keeps a multi-character label at its `fontSize` and
+only routes a single icon glyph through the icon renderer. Anything else the item
+draws is a child of the button, centred and scaled by the button's `pressScale`.
 
 Contracts to honor (from the docs and from `plugins/panels/weather/BarWidget.qml`):
 
